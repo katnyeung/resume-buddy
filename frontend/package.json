@@ -9,7 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@lexical/code": "^0.36.1",
     "@lexical/history": "^0.36.1",
+    "@lexical/link": "^0.36.1",
+    "@lexical/list": "^0.36.1",
+    "@lexical/markdown": "^0.36.1",
     "@lexical/react": "^0.36.1",
     "@lexical/rich-text": "^0.36.1",
     "axios": "^1.12.2",

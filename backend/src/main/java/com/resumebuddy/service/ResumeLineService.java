@@ -149,29 +149,27 @@ public class ResumeLineService {
         Resume resume = resumeRepository.findById(resumeId)
             .orElseThrow(() -> new RuntimeException("Resume not found with ID: " + resumeId));
 
+        // Delete all existing lines
+        resumeLineRepository.deleteByResumeId(resumeId);
+        log.debug("Deleted all existing lines for resume ID: {}", resumeId);
+
+        // Create new lines with sequential numbering
         List<ResumeLine> updatedLines = new ArrayList<>();
+        int lineNumber = 1;
 
         for (ResumeLineUpdateDto update : updates) {
-            Optional<ResumeLine> resumeLineOpt = resumeLineRepository.findByResumeIdAndLineNumber(resumeId, update.getLineNumber());
-
-            if (resumeLineOpt.isPresent()) {
-                // Update existing line
-                ResumeLine resumeLine = resumeLineOpt.get();
-                resumeLine.setContent(update.getContent());
-                updatedLines.add(resumeLineRepository.save(resumeLine));
-                log.debug("Updated line {} for resume ID: {}", update.getLineNumber(), resumeId);
-            } else {
-                // Append new line if it doesn't exist
-                ResumeLine newLine = new ResumeLine();
-                newLine.setResume(resume);
-                newLine.setLineNumber(update.getLineNumber());
-                newLine.setContent(update.getContent());
-                updatedLines.add(resumeLineRepository.save(newLine));
-                log.debug("Appended new line {} for resume ID: {}", update.getLineNumber(), resumeId);
-            }
+            ResumeLine newLine = new ResumeLine();
+            newLine.setResume(resume);
+            newLine.setLineNumber(lineNumber);
+            newLine.setContent(update.getContent());
+            updatedLines.add(newLine);
+            lineNumber++;
         }
 
-        log.info("Successfully updated/appended {} lines for resume ID: {}", updatedLines.size(), resumeId);
-        return updatedLines;
+        // Batch save all lines
+        List<ResumeLine> savedLines = resumeLineRepository.saveAll(updatedLines);
+        log.info("Successfully replaced with {} lines for resume ID: {}", savedLines.size(), resumeId);
+
+        return savedLines;
     }
 }

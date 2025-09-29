@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.ToString;
+import lombok.EqualsAndHashCode;
 import org.hibernate.annotations.GenericGenerator;
 
 import java.math.BigDecimal;
@@ -29,6 +31,8 @@ public class Suggestion {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "resume_id", nullable = false)
     @JsonBackReference
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private Resume resume;
 
     // Removed block reference as we're not using ResumeBlock anymore

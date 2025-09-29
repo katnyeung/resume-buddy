@@ -81,3 +81,31 @@ export const getLineCount = async (id: string): Promise<number> => {
   const response = await apiClient.get<{ lineCount: number }>(`/resumes/${id}/lines/count`);
   return response.data.lineCount;
 };
+
+// Editor State Management
+export const saveEditorState = async (id: string, editorState: string): Promise<Resume> => {
+  const response = await apiClient.put<Resume>(
+    `/resumes/${id}/editor-state`,
+    editorState,
+    {
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    }
+  );
+  return response.data;
+};
+
+export const getEditorState = async (id: string): Promise<string | null> => {
+  const response = await apiClient.get<string>(`/resumes/${id}/editor-state`, {
+    transformResponse: [(data) => data], // Prevent Axios from parsing JSON
+  });
+
+  // response.data is now the raw string from backend
+  if (response.data === 'null' || !response.data) {
+    return null;
+  }
+
+  // If it's already a JSON string, return it as-is
+  return response.data;
+};

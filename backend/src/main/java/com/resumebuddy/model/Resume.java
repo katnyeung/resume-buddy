@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.ToString;
+import lombok.EqualsAndHashCode;
 import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -39,6 +41,9 @@ public class Resume {
     @Column(name = "parsed_content", columnDefinition = "JSON")
     private String parsedContent;
 
+    @Column(name = "editor_state", columnDefinition = "LONGTEXT")
+    private String editorState; // Lexical editor state as JSON
+
     @Column(name = "status", length = 20)
     private String status; // UPLOADED, PARSING, PARSED, FAILED
 
@@ -52,10 +57,14 @@ public class Resume {
 
     @OneToMany(mappedBy = "resume", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private List<ResumeLine> lines;
 
     @OneToMany(mappedBy = "resume", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private List<Suggestion> suggestions;
 
     // @PrePersist and @PreUpdate are no longer needed since we use @CreationTimestamp and @UpdateTimestamp

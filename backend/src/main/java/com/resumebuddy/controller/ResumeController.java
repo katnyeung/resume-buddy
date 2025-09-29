@@ -263,4 +263,48 @@ public class ResumeController {
             return ResponseEntity.notFound().build();
         }
     }
+
+    @PutMapping("/{id}/editor-state")
+    @Operation(summary = "Save editor state", description = "Save Lexical editor state as JSON")
+    public ResponseEntity<Resume> saveEditorState(
+            @PathVariable String id,
+            @RequestBody String editorState) {
+        log.info("Saving editor state for resume ID: {}", id);
+
+        Optional<Resume> resumeOpt = resumeRepository.findById(id);
+        if (resumeOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        try {
+            Resume resume = resumeOpt.get();
+            resume.setEditorState(editorState);
+            Resume savedResume = resumeRepository.save(resume);
+
+            log.info("Successfully saved editor state for resume ID: {}", id);
+            return ResponseEntity.ok(savedResume);
+        } catch (Exception e) {
+            log.error("Error saving editor state for resume ID: {}", id, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/{id}/editor-state")
+    @Operation(summary = "Get editor state", description = "Get Lexical editor state JSON")
+    public ResponseEntity<String> getEditorState(@PathVariable String id) {
+        log.info("Getting editor state for resume ID: {}", id);
+
+        Optional<Resume> resumeOpt = resumeRepository.findById(id);
+        if (resumeOpt.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        Resume resume = resumeOpt.get();
+        if (resume.getEditorState() != null) {
+            return ResponseEntity.ok(resume.getEditorState());
+        } else {
+            // Return empty editor state if not yet saved
+            return ResponseEntity.ok("null");
+        }
+    }
 }

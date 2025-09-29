@@ -1,40 +1,41 @@
-import { $getRoot, $createParagraphNode, $createTextNode, EditorState } from 'lexical';
+import { $getRoot, EditorState, createEditor } from 'lexical';
+import { $convertFromMarkdownString, TRANSFORMERS } from '@lexical/markdown';
+import { HeadingNode, QuoteNode } from '@lexical/rich-text';
+import { ListNode, ListItemNode } from '@lexical/list';
+import { CodeNode } from '@lexical/code';
+import { LinkNode, AutoLinkNode } from '@lexical/link';
 import { ResumeLine, ResumeLineUpdateDto } from './types';
 
 /**
  * Convert resume lines from backend to Lexical EditorState JSON
+ * Parses markdown syntax (##, **, etc.) into proper Lexical nodes
  */
 export function resumeLinesToEditorState(lines: ResumeLine[]): string {
-  const editorStateJSON = {
-    root: {
-      children: lines.map(line => ({
-        children: line.content
-          ? [{
-              detail: 0,
-              format: 0,
-              mode: 'normal',
-              style: '',
-              text: line.content,
-              type: 'text',
-              version: 1,
-            }]
-          : [],
-        direction: 'ltr',
-        format: '',
-        indent: 0,
-        type: 'paragraph',
-        version: 1,
-        textFormat: 0,
-      })),
-      direction: 'ltr',
-      format: '',
-      indent: 0,
-      type: 'root',
-      version: 1,
-    },
-  };
+  // Join all lines with newlines, preserving empty lines
+  // Empty lines need a space or special marker to prevent markdown from collapsing them
+  const markdownText = lines.map(line => {
+    const content = line.content || '';
+    // If line is empty or only whitespace, use a non-breaking space to preserve it
+    return content.trim() === '' ? '\u00A0' : content;
+  }).join('\n');
 
-  return JSON.stringify(editorStateJSON);
+  // Create a temporary headless editor to parse the markdown
+  const tempEditor = createEditor({
+    nodes: [HeadingNode, QuoteNode, ListNode, ListItemNode, CodeNode, LinkNode, AutoLinkNode],
+    onError: (error) => console.error('Temp editor error:', error),
+  });
+
+  let editorStateJSON: string = '';
+
+  // Use the editor to convert markdown to EditorState
+  tempEditor.update(() => {
+    $convertFromMarkdownString(markdownText, TRANSFORMERS);
+  }, { discrete: true });
+
+  // Get the resulting editor state as JSON
+  editorStateJSON = JSON.stringify(tempEditor.getEditorState().toJSON());
+
+  return editorStateJSON;
 }
 
 /**
@@ -50,9 +51,8 @@ export function editorStateToResumeLines(editorState: EditorState): ResumeLineUp
     children.forEach((child, index) => {
       let content = '';
 
-      if (child.getType() === 'paragraph') {
-        content = child.getTextContent();
-      }
+      // Extract text content from all node types (paragraph, heading, list, etc.)
+      content = child.getTextContent();
 
       lines.push({
         lineNumber: index + 1,

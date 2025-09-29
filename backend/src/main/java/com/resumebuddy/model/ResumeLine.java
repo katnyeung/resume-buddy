@@ -5,6 +5,8 @@ import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
+import lombok.ToString;
+import lombok.EqualsAndHashCode;
 import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
@@ -26,6 +28,8 @@ public class ResumeLine {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "resume_id", nullable = false)
     @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private Resume resume;
 
     @Column(name = "line_number", nullable = false)

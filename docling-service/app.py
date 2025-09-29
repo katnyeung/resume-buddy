@@ -17,6 +17,7 @@ import json
 import requests
 import logging
 from typing import Dict, Any
+import html
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -68,17 +69,25 @@ async def parse_document(file: UploadFile = File(...)):
         result = converter.convert(temp_file_path)
         doc = result.document
 
+        # Extract text and decode HTML entities
+        raw_text = doc.export_to_text()
+        raw_markdown = doc.export_to_markdown()
+
+        # Decode HTML entities (&amp; -> &, &lt; -> <, etc.)
+        decoded_text = html.unescape(raw_text) if raw_text else ""
+        decoded_markdown = html.unescape(raw_markdown) if raw_markdown else ""
+
         # Extract structured content
         parsed_data = {
             "success": True,
             "filename": file.filename,
             "content_type": file.content_type,
-            "text": doc.export_to_text(),
-            "markdown": doc.export_to_markdown(),
+            "text": decoded_text,
+            "markdown": decoded_markdown,
             "metadata": {
                 "title": getattr(doc, 'title', ''),
                 "pages": len(doc.pages) if hasattr(doc, 'pages') else 1,
-                "word_count": len(doc.export_to_text().split()) if doc.export_to_text() else 0
+                "word_count": len(decoded_text.split()) if decoded_text else 0
             },
             "structure": []
         }
@@ -86,9 +95,10 @@ async def parse_document(file: UploadFile = File(...)):
         # Extract structural elements
         if hasattr(doc, 'texts'):
             for element in doc.texts:
+                element_text = element.text if hasattr(element, 'text') else str(element)
                 parsed_data["structure"].append({
                     "type": element.label if hasattr(element, 'label') else 'text',
-                    "text": element.text if hasattr(element, 'text') else str(element),
+                    "text": html.unescape(element_text),
                     "confidence": getattr(element, 'confidence', 1.0)
                 })
 
@@ -129,10 +139,14 @@ async def parse_text_only(file: UploadFile = File(...)):
         result = converter.convert(temp_file_path)
         doc = result.document
 
+        # Decode HTML entities
+        raw_text = doc.export_to_text()
+        decoded_text = html.unescape(raw_text) if raw_text else ""
+
         return {
             "success": True,
-            "text": doc.export_to_text(),
-            "word_count": len(doc.export_to_text().split())
+            "text": decoded_text,
+            "word_count": len(decoded_text.split())
         }
 
     except Exception as e:
@@ -198,17 +212,25 @@ async def parse_document_from_url(request: FileUrlRequest):
         doc = result.document
         logger.info("Docling conversion completed successfully")
 
+        # Extract text and decode HTML entities
+        raw_text = doc.export_to_text()
+        raw_markdown = doc.export_to_markdown()
+
+        # Decode HTML entities (&amp; -> &, &lt; -> <, etc.)
+        decoded_text = html.unescape(raw_text) if raw_text else ""
+        decoded_markdown = html.unescape(raw_markdown) if raw_markdown else ""
+
         # Extract structured content (same as original parse endpoint)
         parsed_data = {
             "success": True,
             "file_url": file_url,
             "content_type": content_type,
-            "text": doc.export_to_text(),
-            "markdown": doc.export_to_markdown(),
+            "text": decoded_text,
+            "markdown": decoded_markdown,
             "metadata": {
                 "title": getattr(doc, 'title', ''),
                 "pages": len(doc.pages) if hasattr(doc, 'pages') else 1,
-                "word_count": len(doc.export_to_text().split()) if doc.export_to_text() else 0
+                "word_count": len(decoded_text.split()) if decoded_text else 0
             },
             "structure": []
         }
@@ -216,9 +238,10 @@ async def parse_document_from_url(request: FileUrlRequest):
         # Extract structural elements
         if hasattr(doc, 'texts'):
             for element in doc.texts:
+                element_text = element.text if hasattr(element, 'text') else str(element)
                 parsed_data["structure"].append({
                     "type": element.label if hasattr(element, 'label') else 'text',
-                    "text": element.text if hasattr(element, 'text') else str(element),
+                    "text": html.unescape(element_text),
                     "confidence": getattr(element, 'confidence', 1.0)
                 })
 
