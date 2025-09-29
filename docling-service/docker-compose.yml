@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  docling-parser:
+    build: .
+    container_name: resume-buddy-docling
+    ports:
+      - "8081:8081"
+    environment:
+      - PORT=8081
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - resume-buddy-network
+
+networks:
+  resume-buddy-network:
+    driver: bridge

@@ -1,0 +1,69 @@
+spring:
+  application:
+    name: resume-buddy-api
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/resumebuddy?useSSL=false&serverTimezone=UTC&createDatabaseIfNotExist=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update  # Automatically update schema when entities change
+      naming:
+        physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
+    database-platform: org.hibernate.dialect.MySQL8Dialect
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        # Enhanced schema management
+        hbm2ddl:
+          auto: create-drop
+        jdbc:
+          batch_size: 20
+        order_inserts: true
+        order_updates: true
+        use_sql_comments: true
+
+  # File upload configuration
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+
+server:
+  port: 8080
+
+# OpenAPI Documentation
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+# Custom Application Properties
+app:
+  openai:
+    api-key: ${OPENAI_API_KEY:your-openai-api-key}
+    model: ${OPENAI_MODEL:gpt-4}
+    base-url: https://api.openai.com/v1
+
+
+  file:
+    upload-dir: ${UPLOAD_DIR:./uploads}
+    max-size: ${MAX_FILE_SIZE:10485760}
+
+  docling:
+    service-url: ${DOCLING_SERVICE_URL:http://localhost:8081}
+
+logging:
+  level:
+    com.resumebuddy: DEBUG
+    org.springframework.web: DEBUG
+    # Show detailed JPA/Hibernate operations
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+    org.hibernate.tool.hbm2ddl: DEBUG
+    org.hibernate.engine.jdbc.spi.SqlStatementLogger: DEBUG
