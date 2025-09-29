@@ -1,0 +1,13 @@
+# Core FastAPI dependencies
+fastapi
+uvicorn
+python-multipart
+
+# Docling for document processing
+docling
+
+# Basic utilities
+requests
+pandas
+numpy
+pillow
