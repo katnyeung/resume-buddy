@@ -109,3 +109,14 @@ export const getEditorState = async (id: string): Promise<string | null> => {
   // If it's already a JSON string, return it as-is
   return response.data;
 };
+
+// AI Analysis
+export const analyzeResume = async (id: string): Promise<any> => {
+  const response = await apiClient.post(`/resumes/${id}/analyze`);
+  return response.data;
+};
+
+export const getAnalysisStatus = async (id: string): Promise<{ resumeId: string; isAnalyzed: boolean }> => {
+  const response = await apiClient.get(`/resumes/${id}/analysis-status`);
+  return response.data;
+};

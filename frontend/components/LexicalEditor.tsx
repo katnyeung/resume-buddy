@@ -18,7 +18,7 @@ import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
 import AutoFocusPlugin from './plugins/AutoFocusPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import { getResumeLines, saveEditorState, getEditorState } from '@/lib/api';
+import { getResumeLines, saveEditorState, getEditorState, analyzeResume } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
 import { ResumeLine } from '@/lib/types';
 
@@ -33,6 +33,8 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string>('');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisStatus, setAnalysisStatus] = useState<string>('');
 
   // Load editor state or resume lines on mount
   useEffect(() => {
@@ -116,6 +118,32 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
     }
   };
 
+  // Analyze handler - triggers AI analysis
+  const handleAnalyze = async () => {
+    try {
+      setAnalyzing(true);
+      setAnalysisStatus('Analyzing with AI...');
+
+      // Call analysis endpoint
+      const result = await analyzeResume(resumeId);
+
+      setAnalysisStatus(`Analysis complete! Analyzed ${result.analyzedLines} lines`);
+
+      // Reload lines to get updated analysis data
+      const updatedLines = await getResumeLines(resumeId);
+      console.log('Analysis result:', result);
+      console.log('Updated lines with analysis:', updatedLines);
+
+      setTimeout(() => setAnalysisStatus(''), 5000);
+    } catch (error) {
+      console.error('Analysis error:', error);
+      setAnalysisStatus('Error during analysis');
+      setTimeout(() => setAnalysisStatus(''), 3000);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   // Editor config - memoized to prevent recreation on every render
   const initialConfig = useMemo(() => ({
     namespace: 'ResumeEditor',
@@ -170,12 +198,44 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       {/* Toolbar */}
       <div className="bg-white border border-gray-300 rounded-t-lg p-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-gray-800">Resume Editor</h2>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {/* Status messages */}
           {saveStatus && (
             <span className={`text-sm ${saveStatus.includes('Error') || saveStatus.includes('failed') ? 'text-red-600' : 'text-green-600'}`}>
               {saveStatus}
             </span>
           )}
+          {analysisStatus && (
+            <span className={`text-sm ${analysisStatus.includes('Error') ? 'text-red-600' : 'text-blue-600'}`}>
+              {analysisStatus}
+            </span>
+          )}
+
+          {/* Action buttons */}
+          <button
+            onClick={handleAnalyze}
+            disabled={analyzing}
+            className="px-5 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            title="Analyze resume with AI"
+          >
+            {analyzing ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Analyzing...
+              </>
+            ) : (
+              <>
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                Analyze
+              </>
+            )}
+          </button>
+
           <button
             onClick={handleSave}
             disabled={saving}
