@@ -48,8 +48,22 @@ resume-buddy/
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   └── docker-start.sh
-├── frontend/                             # Next.js Application (Planned)
-│   └── src/
+├── frontend/                             # Next.js Application
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── page.tsx                  # Resume list page
+│   │   │   ├── edit/[id]/                # Resume editing
+│   │   │   └── upload/                   # Resume upload
+│   │   ├── components/
+│   │   │   ├── ResumeItem.tsx            # Resume card component
+│   │   │   └── RichResumeEditor.tsx      # TipTap editor
+│   │   ├── lib/
+│   │   │   ├── api.ts                    # API integration
+│   │   │   └── utils.ts                  # Utility functions
+│   │   └── types/
+│   │       └── resume.ts                 # TypeScript definitions
+│   ├── package.json
+│   └── tailwind.config.js
 ├── start-with-docker.sh                  # Docker-based startup script
 ├── stop-with-docker.sh                   # Docker-based shutdown script
 ├── start-all.sh                          # Complete startup script
@@ -72,11 +86,12 @@ resume-buddy/
 - **Containerization**: Docker with docker-compose
 - **Features**: Table detection, layout analysis, structure recognition
 
-### Frontend (Planned)
+### Frontend
 - **Framework**: Next.js 14+ with TypeScript
-- **Editor**: TipTap rich text editor
-- **UI Library**: Tailwind CSS with shadcn/ui components
-- **State Management**: React hooks and context
+- **Editor**: TipTap rich text editor for line-by-line editing
+- **UI Library**: Tailwind CSS with modern components
+- **State Management**: React hooks and context API
+- **File Upload**: react-dropzone for drag & drop uploads
 
 ## 🚀 Quick Start
 
@@ -85,6 +100,7 @@ resume-buddy/
 - Maven 3.6+
 - MySQL 8.0+
 - Docker & Docker Compose
+- Node.js 16+ and npm/yarn
 - Python 3.11+ (for Docling service)
 
 ### 1. Start Docling Service
@@ -99,14 +115,17 @@ cd backend
 mvn spring-boot:run
 ```
 
-### 3. Start Complete System
+### 3. Start Frontend
 ```bash
-./start-with-docker.sh
+cd frontend
+npm install
+npm run dev
 ```
 
-### 4. Access API
+### 4. Access Application
+- **Frontend**: http://localhost:3000
+- **Backend API**: http://localhost:8080/api
 - **Swagger UI**: http://localhost:8080/swagger-ui.html
-- **Health Check**: http://localhost:8080/api/resumes/health
 - **Docling Service**: http://localhost:8081/health
 
 ## 🔧 Development
@@ -119,6 +138,21 @@ mvn spring-boot:run
 
 # Run tests
 mvn test
+```
+
+### Frontend Commands
+```bash
+# Install dependencies
+npm install
+
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+
+# Type check
+npm run type-check
 ```
 
 ### Docling Service Commands
@@ -154,9 +188,13 @@ docker-compose down
 - **Line-based Editing**: Support for line-by-line resume editing
 - **Basic Resume Processing**: Resume upload, parsing, and retrieval
 - **Stateful Workflow**: Upload → Parse → Edit workflow with status tracking
+- **Frontend Implementation**: Next.js with TipTap editor integration
+- **Resume Management UI**: List, view, edit, and delete resumes
+- **Resume Editing Interface**: Line-by-line editing with TipTap
 
 ### 🔄 In Progress
-- **Frontend Development**: Next.js with TipTap editor integration
+- **Auto-save functionality**: Automatically save changes during editing
+- **UI Refinements**: Improved user experience and visual polish
 
 ### 📋 Planned
 - **AI Integration**: OpenAI API for suggestions and improvements
@@ -194,9 +232,10 @@ The current implementation follows an MVP (Minimum Viable Product) approach:
 1. ✅ **Core Infrastructure**: Backend API, database setup, Docling service
 2. ✅ **Document Processing**: Upload, parse, and store resumes
 3. ✅ **Line-based Editing**: Edit resume content line by line
-4. 🔄 **Frontend Integration**: In progress, not yet implemented
-5. 📋 **AI-powered Suggestions**: Planned for future implementation
-6. 📋 **Job Matching**: Planned for future implementation
+4. ✅ **Frontend Integration**: Next.js with TipTap editor implementation
+5. 🔄 **UI Refinements**: Improving user interface and experience
+6. 📋 **AI-powered Suggestions**: Planned for future implementation
+7. 📋 **Job Matching**: Planned for future implementation
 
 ## 🤝 Contributing
 

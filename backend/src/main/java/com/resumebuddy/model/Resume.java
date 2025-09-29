@@ -1,7 +1,6 @@
 package com.resumebuddy.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -52,11 +51,11 @@ public class Resume {
     private LocalDateTime updatedAt;
 
     @OneToMany(mappedBy = "resume", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @JsonManagedReference
+    @JsonIgnore
     private List<ResumeLine> lines;
 
     @OneToMany(mappedBy = "resume", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @JsonManagedReference
+    @JsonIgnore
     private List<Suggestion> suggestions;
 
     // @PrePersist and @PreUpdate are no longer needed since we use @CreationTimestamp and @UpdateTimestamp

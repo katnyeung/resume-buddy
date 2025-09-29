@@ -1,6 +1,6 @@
 package com.resumebuddy.model;
 
-import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -25,7 +25,7 @@ public class ResumeLine {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "resume_id", nullable = false)
-    @JsonBackReference
+    @JsonIgnore
     private Resume resume;
 
     @Column(name = "line_number", nullable = false)

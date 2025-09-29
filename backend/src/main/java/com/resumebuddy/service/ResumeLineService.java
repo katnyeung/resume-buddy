@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.resumebuddy.model.Resume;
 import com.resumebuddy.model.ResumeLine;
 import com.resumebuddy.model.dto.ParsedResume;
+import com.resumebuddy.model.dto.ResumeLineUpdateDto;
 import com.resumebuddy.repository.ResumeLineRepository;
 import com.resumebuddy.repository.ResumeRepository;
 import lombok.RequiredArgsConstructor;
@@ -138,5 +139,39 @@ public class ResumeLineService {
 
     public long getLineCount(String resumeId) {
         return resumeLineRepository.countByResumeId(resumeId);
+    }
+
+    @Transactional
+    public List<ResumeLine> updateMultipleLines(String resumeId, List<ResumeLineUpdateDto> updates) {
+        log.info("Updating {} lines for resume ID: {}", updates.size(), resumeId);
+
+        // Get the resume entity
+        Resume resume = resumeRepository.findById(resumeId)
+            .orElseThrow(() -> new RuntimeException("Resume not found with ID: " + resumeId));
+
+        List<ResumeLine> updatedLines = new ArrayList<>();
+
+        for (ResumeLineUpdateDto update : updates) {
+            Optional<ResumeLine> resumeLineOpt = resumeLineRepository.findByResumeIdAndLineNumber(resumeId, update.getLineNumber());
+
+            if (resumeLineOpt.isPresent()) {
+                // Update existing line
+                ResumeLine resumeLine = resumeLineOpt.get();
+                resumeLine.setContent(update.getContent());
+                updatedLines.add(resumeLineRepository.save(resumeLine));
+                log.debug("Updated line {} for resume ID: {}", update.getLineNumber(), resumeId);
+            } else {
+                // Append new line if it doesn't exist
+                ResumeLine newLine = new ResumeLine();
+                newLine.setResume(resume);
+                newLine.setLineNumber(update.getLineNumber());
+                newLine.setContent(update.getContent());
+                updatedLines.add(resumeLineRepository.save(newLine));
+                log.debug("Appended new line {} for resume ID: {}", update.getLineNumber(), resumeId);
+            }
+        }
+
+        log.info("Successfully updated/appended {} lines for resume ID: {}", updatedLines.size(), resumeId);
+        return updatedLines;
     }
 }

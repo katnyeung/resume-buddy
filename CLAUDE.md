@@ -12,12 +12,13 @@ Resume Buddy is an MVP application that enables users to upload resumes and leve
 - **API Documentation**: Swagger/OpenAPI 3 with springdoc
 - **Dependencies**: Spring Web, Spring Data JPA, Spring Validation
 
-### Frontend (Planned)
+### Frontend
 - **Framework**: Next.js 14+ with TypeScript
 - **Editor**: TipTap rich text editor for real-time resume editing
-- **UI Library**: Tailwind CSS with shadcn/ui components
-- **State Management**: React hooks and context
+- **UI Library**: Tailwind CSS with modern components
+- **State Management**: React hooks and context API
 - **HTTP Client**: Axios for API communication
+- **File Upload**: react-dropzone for drag & drop functionality
 
 ### Development Tools
 - **Build Tool**: Maven (backend), npm/yarn (frontend)
@@ -60,8 +61,22 @@ resume-buddy/
 │   ├── Dockerfile
 │   ├── docker-compose.yml
 │   └── docker-start.sh
-├── frontend/                              # Next.js Application (Planned)
-│   └── src/                               # Will contain frontend code
+├── frontend/                              # Next.js Application
+│   ├── src/
+│   │   ├── app/
+│   │   │   ├── page.tsx                   # Resume list page
+│   │   │   ├── edit/[id]/                 # Resume editing
+│   │   │   └── upload/                    # Resume upload
+│   │   ├── components/
+│   │   │   ├── ResumeItem.tsx             # Resume card component
+│   │   │   └── RichResumeEditor.tsx       # TipTap editor
+│   │   ├── lib/
+│   │   │   ├── api.ts                     # API integration
+│   │   │   └── utils.ts                   # Utility functions
+│   │   └── types/
+│   │       └── resume.ts                  # TypeScript definitions
+│   ├── package.json
+│   └── tailwind.config.js
 ├── start-with-docker.sh                   # Docker-based startup script
 ├── stop-with-docker.sh                    # Docker-based shutdown script
 ├── start-all.sh                           # Complete startup script
@@ -77,20 +92,30 @@ resume-buddy/
 - **Advanced Parsing**: Docling HTTP microservice with Docker
 - **Storage**: MySQL database with Spring Data JPA
 - **Workflow**: Upload → Parse → Edit workflow with status tracking
+- **UI**: Drag-and-drop file upload interface with status feedback
 
 ### 2. Line-based Resume Editing
 - **Content Organization**: Resume content split into line-by-line format
 - **CRUD Operations**: Create, read, update, and delete operations for resume lines
 - **Content Processing**: Automatic line processing from parsed content
 - **Consistent Storage**: Proper relationship management between Resume and ResumeLine entities
+- **Editor Interface**: TipTap-based rich text editing for individual lines
 
-### 3. API Structure
+### 3. Frontend Implementation
+- **Resume List**: Homepage showing all uploaded resumes with status
+- **Upload Interface**: Drag-and-drop file uploader with validation
+- **Edit Interface**: Split-pane editor with line selection and editing
+- **Navigation**: Easy navigation between upload, edit, and listing views
+- **Responsive Design**: Mobile-friendly layout with Tailwind CSS
+
+### 4. API Structure
 - **RESTful Design**: Well-structured REST API with Spring Web
 - **Swagger Documentation**: Interactive API documentation with springdoc
 - **Error Handling**: Proper exception handling and response status codes
 - **Health Endpoints**: Health checks for monitoring
+- **Frontend Integration**: Complete API client with Axios for frontend-backend communication
 
-### 4. Database Schema
+### 5. Database Schema
 
 Current schema includes:
 
@@ -173,6 +198,21 @@ mvn clean package
 mvn clean compile
 ```
 
+### Frontend Commands
+```bash
+# Install dependencies
+cd frontend && npm install
+
+# Run development server
+npm run dev
+
+# Build for production
+npm run build
+
+# Type check
+npm run type-check
+```
+
 ### Docling Service Commands
 ```bash
 # Start Docling microservice with Docker
@@ -190,7 +230,7 @@ docker-compose down
 
 ### Full Stack Commands
 ```bash
-# Start complete system (Docling + Backend)
+# Start complete system
 ./start-with-docker.sh
 
 # Stop all services
@@ -238,6 +278,17 @@ app:
     service-url: ${DOCLING_SERVICE_URL:http://localhost:8081}
 ```
 
+### Frontend (.env.local)
+```bash
+# API Configuration
+NEXT_PUBLIC_API_URL=http://localhost:8080/api
+NEXT_PUBLIC_UPLOAD_MAX_SIZE=10485760
+
+# Feature Flags
+NEXT_PUBLIC_ENABLE_AI_SUGGESTIONS=false
+NEXT_PUBLIC_ENABLE_JOB_MATCHING=false
+```
+
 ## MVP Implementation Status
 
 ### Phase 1: Core Infrastructure
@@ -253,10 +304,12 @@ app:
 4. ✅ Implement line editing operations
 
 ### Phase 3: Frontend Integration
-1. 🔄 Create Next.js frontend (In Progress)
-2. 🔄 Integrate TipTap editor (In Progress)
-3. 🔄 Implement auto-save functionality (In Progress)
-4. 🔄 Add line-based editing UI (In Progress)
+1. ✅ Create Next.js frontend
+2. ✅ Integrate TipTap editor
+3. ✅ Implement resume management UI
+4. ✅ Add line-based editing UI
+5. 🔄 Implement auto-save functionality (In Progress)
+6. 🔄 Add UI refinements and polish (In Progress)
 
 ### Phase 4: AI Integration
 1. 📋 Integrate OpenAI API for text analysis (Planned)
@@ -278,7 +331,7 @@ app:
 - Database testing with TestContainers MySQL
 - AI service mocking for reliable tests
 
-### Frontend Testing (Planned)
+### Frontend Testing
 - Component testing with React Testing Library
 - Integration testing for editor functionality
 - API mocking with MSW
@@ -289,6 +342,7 @@ app:
 ### Development
 - Docling Service: `cd docling-service && docker-compose up -d`
 - Backend: `mvn spring-boot:run`
+- Frontend: `cd frontend && npm run dev`
 - Database: Local MySQL server
 
 ### Production (Planned)
@@ -301,4 +355,5 @@ app:
 - Resume upload and parsing accuracy > 95%
 - API response time < 500ms
 - Document processing time < 30 seconds
+- Editor response time < 100ms
 - System reliability > 99.9% uptime

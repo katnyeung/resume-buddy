@@ -1,9 +1,11 @@
 package com.resumebuddy.controller;
 
 import com.resumebuddy.model.ResumeLine;
+import com.resumebuddy.model.dto.ResumeLineUpdateDto;
 import com.resumebuddy.service.ResumeLineService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -127,6 +129,43 @@ public class ResumeLineController {
         } catch (Exception e) {
             log.error("Error getting line count for resume ID: {}", id, e);
             return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @PutMapping("/{id}/lines/batch")
+    @Operation(summary = "Batch update resume lines", description = "Update multiple lines in a single request")
+    public ResponseEntity<Map<String, Object>> updateMultipleLines(
+            @PathVariable String id,
+            @Valid @RequestBody List<ResumeLineUpdateDto> updates) {
+        log.info("Batch updating {} lines for resume ID: {}", updates.size(), id);
+
+        if (updates == null || updates.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "success", false,
+                "message", "Updates list cannot be empty"
+            ));
+        }
+
+        try {
+            List<ResumeLine> updatedLines = resumeLineService.updateMultipleLines(id, updates);
+
+            Map<String, Object> response = Map.of(
+                "success", true,
+                "message", "Lines updated successfully",
+                "updatedCount", updatedLines.size(),
+                "updatedLines", updatedLines
+            );
+
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            log.error("Error batch updating lines for resume ID: {}", id, e);
+
+            Map<String, Object> response = Map.of(
+                "success", false,
+                "message", "Error updating lines: " + e.getMessage()
+            );
+
+            return ResponseEntity.internalServerError().body(response);
         }
     }
 }
