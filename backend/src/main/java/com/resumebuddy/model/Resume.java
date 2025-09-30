@@ -67,5 +67,11 @@ public class Resume {
     @EqualsAndHashCode.Exclude
     private List<Suggestion> suggestions;
 
+    @OneToOne(mappedBy = "resume", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
+    @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private ResumeAnalysis analysis;
+
     // @PrePersist and @PreUpdate are no longer needed since we use @CreationTimestamp and @UpdateTimestamp
 }

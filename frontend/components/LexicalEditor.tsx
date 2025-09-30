@@ -18,9 +18,10 @@ import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
 import AutoFocusPlugin from './plugins/AutoFocusPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import { getResumeLines, saveEditorState, getEditorState, analyzeResume } from '@/lib/api';
+import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
 import { ResumeLine } from '@/lib/types';
+import AnalysisOverlay from './AnalysisOverlay';
 
 interface LexicalEditorProps {
   resumeId: string;
@@ -35,6 +36,7 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
   const [saveStatus, setSaveStatus] = useState<string>('');
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<string>('');
+  const [analyzedLines, setAnalyzedLines] = useState<ResumeLine[]>([]);
 
   // Load editor state or resume lines on mount
   useEffect(() => {
@@ -42,6 +44,15 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       try {
         setLoading(true);
         setIsLoaded(false);
+
+        // Check resume status first
+        const resume = await getResume(resumeId);
+
+        // If resume is already analyzed, load the analyzed lines for display
+        if (resume.status === 'ANALYZED') {
+          const lines = await getResumeLines(resumeId);
+          setAnalyzedLines(lines);
+        }
 
         // First try to load the saved editor state
         const savedEditorState = await getEditorState(resumeId);
@@ -134,6 +145,9 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       console.log('Analysis result:', result);
       console.log('Updated lines with analysis:', updatedLines);
 
+      // Store analyzed lines for overlay display
+      setAnalyzedLines(updatedLines);
+
       setTimeout(() => setAnalysisStatus(''), 5000);
     } catch (error) {
       console.error('Analysis error:', error);
@@ -142,6 +156,18 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
     } finally {
       setAnalyzing(false);
     }
+  };
+
+  // Handler for future "Analyze Group" feature
+  const handleAnalyzeGroup = (groupId: number, groupType: string) => {
+    console.log(`Future feature: Analyze ${groupType} group ${groupId}`);
+    // TODO: Implement in Phase 5
+  };
+
+  // Handler for future "Find Similar Jobs" feature
+  const handleFindJobs = (groupId: number) => {
+    console.log(`Future feature: Find jobs for group ${groupId}`);
+    // TODO: Implement in Phase 6
   };
 
   // Editor config - memoized to prevent recreation on every render
@@ -246,9 +272,20 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
         </div>
       </div>
 
+      {/* Analysis Overlay - displayed above editor when analysis is available */}
+      {analyzedLines.length > 0 && (
+        <div className="bg-white border-x border-gray-300 p-4">
+          <AnalysisOverlay
+            lines={analyzedLines}
+            onAnalyzeGroup={handleAnalyzeGroup}
+            onFindJobs={handleFindJobs}
+          />
+        </div>
+      )}
+
       {/* Lexical Editor - key prop forces remount when editorState changes */}
       <LexicalComposer key={resumeId} initialConfig={initialConfig}>
-        <div className="relative bg-white border-x border-b border-gray-300 rounded-b-lg">
+        <div className={`relative bg-white border-x ${analyzedLines.length > 0 ? '' : 'border-t'} border-b border-gray-300 ${analyzedLines.length > 0 ? '' : 'rounded-b-lg'}`}>
           <ToolbarPlugin />
           <RichTextPlugin
             contentEditable={

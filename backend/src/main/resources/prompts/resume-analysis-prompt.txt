@@ -1,0 +1,146 @@
+Analyze the following resume line by line. For each line, you must identify:
+
+1. **sectionType**: The category this line belongs to (CONTACT, SUMMARY, EXPERIENCE, EDUCATION, SKILLS, CERTIFICATIONS, PROJECTS, AWARDS, PUBLICATIONS, LANGUAGES, VOLUNTEER, INTERESTS, or OTHER)
+
+2. **groupId**: An integer that groups related lines together
+   - Lines about the same job/position should share a groupId
+   - Lines about the same certification should share a groupId
+   - Lines about the same project should share a groupId
+   - Section headers and standalone lines can have their own unique groupId
+   - Start groupId from 1 and increment for each new group
+
+3. **groupType**: The type of group (JOB, EDUCATION_ITEM, CERTIFICATION_ITEM, PROJECT_ITEM, SKILL_CATEGORY, AWARD_ITEM, PUBLICATION_ITEM, VOLUNTEER_ITEM, or null)
+
+4. **analysisNotes**: A brief, helpful note about the line's content and purpose
+
+IMPORTANT GUIDELINES:
+- "About Me", "Professional Summary", "Career Objective", "Personal Statement" → sectionType: SUMMARY
+- "Certifications", "Certificates", "Credentials", "Licenses" → sectionType: CERTIFICATIONS
+- **SKIP EMPTY LINES ENTIRELY**: If a line is empty or contains only whitespace, DO NOT include it in your response array. Simply skip it.
+- Section headers should be assigned to their respective sections but may have null groupId/groupType
+- Be consistent with groupId assignment within each section
+- Group multi-line entries together (job descriptions, education details, project descriptions)
+- **Each certification should have its own unique groupId and groupType="CERTIFICATION_ITEM"**
+- **ALL SUMMARY paragraphs under the same SUMMARY section should share ONE groupId** (don't separate paragraphs)
+- **ALL SKILLS under the same section should use the same groupId and groupType="SKILL_CATEGORY"** (unless they're different categories like "Backend" vs "Frontend")
+
+Resume lines:
+{resumeLines}
+
+EXAMPLES:
+
+Example 1 - Contact Section (with empty lines skipped):
+Input lines:
+Line 1: John Doe
+Line 2: (empty)
+Line 3: john@example.com
+Line 4: +1-555-1234
+
+Output (empty line 2 is NOT included):
+[
+  {"lineNumber": 1, "sectionType": "CONTACT", "groupId": 1, "groupType": null, "analysisNotes": "Full name"},
+  {"lineNumber": 3, "sectionType": "CONTACT", "groupId": 1, "groupType": null, "analysisNotes": "Email address"},
+  {"lineNumber": 4, "sectionType": "CONTACT", "groupId": 1, "groupType": null, "analysisNotes": "Phone number"}
+]
+
+Example 2 - Summary Section:
+[
+  {"lineNumber": 5, "sectionType": "SUMMARY", "groupId": 2, "groupType": null, "analysisNotes": "Section header: About Me"},
+  {"lineNumber": 6, "sectionType": "SUMMARY", "groupId": 2, "groupType": null, "analysisNotes": "Professional summary describing experience and skills"}
+]
+
+Example 3 - Experience Section:
+[
+  {"lineNumber": 10, "sectionType": "EXPERIENCE", "groupId": 3, "groupType": "JOB", "analysisNotes": "Job title and company name"},
+  {"lineNumber": 11, "sectionType": "EXPERIENCE", "groupId": 3, "groupType": "JOB", "analysisNotes": "Employment dates"},
+  {"lineNumber": 12, "sectionType": "EXPERIENCE", "groupId": 3, "groupType": "JOB", "analysisNotes": "Key responsibility or achievement"},
+  {"lineNumber": 13, "sectionType": "EXPERIENCE", "groupId": 4, "groupType": "JOB", "analysisNotes": "Different job - title and company"},
+  {"lineNumber": 14, "sectionType": "EXPERIENCE", "groupId": 4, "groupType": "JOB", "analysisNotes": "Employment dates for second job"}
+]
+
+Example 4 - Certifications Section:
+[
+  {"lineNumber": 20, "sectionType": "CERTIFICATIONS", "groupId": null, "groupType": null, "analysisNotes": "Section header: Certifications"},
+  {"lineNumber": 22, "sectionType": "CERTIFICATIONS", "groupId": 5, "groupType": "CERTIFICATION_ITEM", "analysisNotes": "CKAD certification with year"},
+  {"lineNumber": 24, "sectionType": "CERTIFICATIONS", "groupId": 6, "groupType": "CERTIFICATION_ITEM", "analysisNotes": "Thought Machine certification with year"}
+]
+
+Example 5 - Skills Section:
+[
+  {"lineNumber": 25, "sectionType": "SKILLS", "groupId": 7, "groupType": "SKILL_CATEGORY", "analysisNotes": "Programming languages category"},
+  {"lineNumber": 26, "sectionType": "SKILLS", "groupId": 7, "groupType": "SKILL_CATEGORY", "analysisNotes": "List of programming languages"}
+]
+
+Example 6 - Summary Section (About Me) - ALL paragraphs share ONE groupId:
+[
+  {"lineNumber": 30, "sectionType": "SUMMARY", "groupId": null, "groupType": null, "analysisNotes": "Section header: About Me"},
+  {"lineNumber": 32, "sectionType": "SUMMARY", "groupId": 8, "groupType": null, "analysisNotes": "First summary paragraph - passion for technology"},
+  {"lineNumber": 34, "sectionType": "SUMMARY", "groupId": 8, "groupType": null, "analysisNotes": "Second summary paragraph - Java experience and certifications"},
+  {"lineNumber": 36, "sectionType": "SUMMARY", "groupId": 8, "groupType": null, "analysisNotes": "Third summary paragraph - career span and leadership"}
+]
+
+IMPORTANT: Respond with a JSON object containing TWO parts:
+
+1. **lineAnalysis**: Array of line-by-line analysis (same format as examples above)
+2. **structuredData**: Extracted structured resume information
+
+Response format:
+{
+  "lineAnalysis": [
+    {"lineNumber": 1, "sectionType": "CONTACT", "groupId": 1, "groupType": null, "analysisNotes": "Full name"},
+    ...
+  ],
+  "structuredData": {
+    "contact": {
+      "name": "Full name extracted from contact section",
+      "email": "email@example.com",
+      "phone": "+1-555-1234",
+      "linkedinUrl": "https://linkedin.com/in/username or null",
+      "githubUrl": "https://github.com/username or null",
+      "websiteUrl": "https://website.com or null"
+    },
+    "summary": "Complete professional summary text combined from all summary paragraphs",
+    "experiences": [
+      {
+        "jobTitle": "Job title",
+        "companyName": "Company name",
+        "startDate": "Start date as written",
+        "endDate": "End date as written or 'Present'",
+        "description": "Combined description from all bullet points/lines for this job"
+      }
+    ],
+    "skills": [
+      {"skillName": "Individual skill name", "category": "Category if identified or null"}
+    ],
+    "educations": [
+      {
+        "degree": "Degree name",
+        "institution": "School/University name",
+        "graduationDate": "Graduation date",
+        "description": "Additional details if any"
+      }
+    ],
+    "certifications": [
+      {
+        "certificationName": "Certification name",
+        "issuingOrganization": "Issuing organization if mentioned",
+        "issueDate": "Issue date/year if mentioned",
+        "credentialId": "Credential ID if mentioned"
+      }
+    ],
+    "projects": [
+      {
+        "projectName": "Project name",
+        "description": "Project description",
+        "technologiesUsed": "Technologies/tools used",
+        "projectUrl": "Project URL if mentioned"
+      }
+    ]
+  }
+}
+
+IMPORTANT:
+- Respond ONLY with valid JSON object (not an array). No markdown code blocks, no additional text.
+- Extract actual values from the resume content - don't use placeholders
+- Use null for missing fields
+- For skills, split comma-separated lists into individual skill objects
