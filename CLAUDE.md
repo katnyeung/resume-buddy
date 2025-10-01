@@ -19,6 +19,13 @@ Resume Buddy is an MVP application that enables users to upload resumes and leve
 - **State Management**: React hooks and context API
 - **HTTP Client**: Axios for API communication
 - **File Upload**: react-dropzone for drag & drop functionality
+- **Components**:
+  - LexicalEditor - Main editor with toolbar and plugins
+  - AnalysisSummary - ATS-style structured analysis display (top of editor)
+  - AnalysisOverlay - Line-by-line grouped analysis display (middle section)
+  - ToolbarPlugin - Rich text formatting controls
+  - OnChangePlugin - Editor state change detection
+  - AutoFocusPlugin - Editor focus management
 
 ### AI Services
 - **OpenAI Integration**: GPT-4 for resume analysis and section detection
@@ -43,7 +50,8 @@ resume-buddy/
 │   │   │   ├── DoclingHttpService.java    # HTTP client for Docling service
 │   │   │   ├── FileStorageService.java    # File storage operations
 │   │   │   ├── ResumeLineService.java     # Line processing for editing
-│   │   │   └── AIAnalysisService.java     # OpenAI integration for AI analysis
+│   │   │   ├── AIAnalysisService.java     # OpenAI integration for line-by-line AI analysis
+│   │   │   └── ResumeAnalysisService.java # Structured analysis retrieval with date sorting
 │   │   ├── model/
 │   │   │   ├── Resume.java                # Main resume entity
 │   │   │   ├── ResumeLine.java            # Line-based resume content
@@ -74,7 +82,13 @@ resume-buddy/
 │   │   │   └── upload/                    # Resume upload
 │   │   ├── components/
 │   │   │   ├── ResumeItem.tsx             # Resume card component
-│   │   │   └── RichResumeEditor.tsx       # TipTap editor
+│   │   │   ├── LexicalEditor.tsx          # Lexical editor with analysis display
+│   │   │   ├── AnalysisSummary.tsx        # ATS structured analysis display
+│   │   │   ├── AnalysisOverlay.tsx        # Line-based grouped analysis display
+│   │   │   └── plugins/
+│   │   │       ├── ToolbarPlugin.tsx      # Rich text toolbar
+│   │   │       ├── OnChangePlugin.tsx     # State change handler
+│   │   │       └── AutoFocusPlugin.tsx    # Focus management
 │   │   ├── lib/
 │   │   │   ├── api.ts                     # API integration
 │   │   │   └── utils.ts                   # Utility functions
@@ -133,7 +147,8 @@ CREATE TABLE resumes (
     file_path VARCHAR(255) NOT NULL,
     file_size BIGINT,
     parsed_content JSON,
-    status VARCHAR(20),
+    editor_state LONGTEXT,             -- Lexical editor state JSON
+    status VARCHAR(20),                -- UPLOADED, PARSED, ANALYZED
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
@@ -155,7 +170,84 @@ CREATE TABLE resume_lines (
     FOREIGN KEY (resume_id) REFERENCES resumes(id) ON DELETE CASCADE
 );
 
--- AI suggestions
+-- Structured resume analysis (ATS-style parsed data)
+CREATE TABLE resume_analysis (
+    id VARCHAR(36) PRIMARY KEY,
+    resume_id VARCHAR(36) NOT NULL UNIQUE,
+    -- Contact Information
+    name VARCHAR(255),
+    email VARCHAR(255),
+    phone VARCHAR(50),
+    linkedin_url VARCHAR(500),
+    github_url VARCHAR(500),
+    website_url VARCHAR(500),
+    -- Professional Summary
+    summary TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (resume_id) REFERENCES resumes(id) ON DELETE CASCADE
+);
+
+-- Work experience entries
+CREATE TABLE resume_analysis_experience (
+    id VARCHAR(36) PRIMARY KEY,
+    analysis_id VARCHAR(36) NOT NULL,
+    job_title VARCHAR(255),
+    company_name VARCHAR(255),
+    start_date VARCHAR(100),           -- Flexible string format
+    end_date VARCHAR(100),             -- "Present" or actual date
+    description TEXT,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (analysis_id) REFERENCES resume_analysis(id) ON DELETE CASCADE
+);
+
+-- Skills
+CREATE TABLE resume_analysis_skill (
+    id VARCHAR(36) PRIMARY KEY,
+    analysis_id VARCHAR(36) NOT NULL,
+    skill_name VARCHAR(255),
+    category VARCHAR(100),             -- Backend Development, DevOps, etc.
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (analysis_id) REFERENCES resume_analysis(id) ON DELETE CASCADE
+);
+
+-- Education
+CREATE TABLE resume_analysis_education (
+    id VARCHAR(36) PRIMARY KEY,
+    analysis_id VARCHAR(36) NOT NULL,
+    degree VARCHAR(255),
+    institution VARCHAR(255),
+    graduation_date VARCHAR(100),
+    description TEXT,
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (analysis_id) REFERENCES resume_analysis(id) ON DELETE CASCADE
+);
+
+-- Certifications
+CREATE TABLE resume_analysis_certification (
+    id VARCHAR(36) PRIMARY KEY,
+    analysis_id VARCHAR(36) NOT NULL,
+    certification_name VARCHAR(255),
+    issuing_organization VARCHAR(255),
+    issue_date VARCHAR(100),
+    credential_id VARCHAR(255),
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (analysis_id) REFERENCES resume_analysis(id) ON DELETE CASCADE
+);
+
+-- Projects
+CREATE TABLE resume_analysis_project (
+    id VARCHAR(36) PRIMARY KEY,
+    analysis_id VARCHAR(36) NOT NULL,
+    project_name VARCHAR(255),
+    description TEXT,
+    technologies_used TEXT,
+    project_url VARCHAR(500),
+    created_at TIMESTAMP NOT NULL,
+    FOREIGN KEY (analysis_id) REFERENCES resume_analysis(id) ON DELETE CASCADE
+);
+
+-- AI suggestions (future use)
 CREATE TABLE suggestions (
     id VARCHAR(36) PRIMARY KEY,
     resume_id VARCHAR(36) NOT NULL,
@@ -193,9 +285,13 @@ CREATE TABLE suggestions (
 - `PUT /api/resumes/{id}/editor-state` - Save Lexical editor state with formatting
 - `GET /api/resumes/{id}/editor-state` - Load Lexical editor state
 
-### AI Analysis
-- `POST /api/resumes/{id}/analyze` - Analyze resume with AI (section detection, grouping)
+### AI Analysis (Line-based)
+- `POST /api/resumes/{id}/analyze` - Analyze resume with AI (line-by-line section detection, grouping)
 - `GET /api/resumes/{id}/analysis-status` - Check if resume has been analyzed
+
+### AI Analysis (Structured)
+- `GET /api/resumes/{id}/structured-analysis` - Get structured analysis data (ATS-style parsed resume)
+- `GET /api/resumes/{id}/analysis-exists` - Check if structured analysis exists
 
 ### Health & Utility
 - `GET /api/resumes/health` - Backend health check
@@ -332,13 +428,40 @@ NEXT_PUBLIC_ENABLE_JOB_MATCHING=false
 6. ✅ Add editor state persistence with formatting
 7. ✅ Preserve empty lines in resume structure
 
-### Phase 4: AI Integration
-1. 🔄 Add analysis fields to ResumeLine entity (In Progress)
-2. 🔄 Create AIAnalysisService with OpenAI integration (In Progress)
-3. 🔄 Implement analysis API endpoint (In Progress)
-4. 📋 Frontend analysis UI with section highlighting (Planned)
-5. 📋 Group visualization for related lines (Planned)
-6. 📋 Add ATS scoring functionality (Planned)
+### Phase 4: AI Integration & Structured Analysis
+1. ✅ Add analysis fields to ResumeLine entity (Completed)
+2. ✅ Create AIAnalysisService with OpenAI integration (Completed)
+3. ✅ Implement line-by-line analysis API endpoint (Completed)
+4. ✅ Create structured analysis database schema (Completed)
+   - ResumeAnalysis entity with contact info and professional summary
+   - ResumeAnalysisExperience with job details (title, company, dates, description)
+   - ResumeAnalysisSkill with skill names and categories
+   - ResumeAnalysisEducation with degree, institution, graduation date
+   - ResumeAnalysisCertification with certification name, issuer, dates, credential ID
+   - ResumeAnalysisProject with project name, description, technologies
+5. ✅ Implement structured analysis service (Completed)
+   - Extract contact information (name, email, phone, LinkedIn, GitHub, website)
+   - Extract professional summary
+   - Parse and store work experiences with full details
+   - Parse and store skills with categorization
+   - Parse and store education, certifications, and projects
+6. ✅ Frontend analysis UI implementation (Completed)
+   - AnalysisSummary component displaying ATS-parsed data at top of editor
+   - Statistics cards showing counts (experiences, skills, education, certs, projects)
+   - Collapsible detailed view with full information for each section
+   - Job numbering (Job 1, Job 2, etc.) with action buttons
+   - Date-based sorting (most recent first) for work experiences
+7. ✅ Line-based analysis overlay (Completed)
+   - AnalysisOverlay component showing grouped line analysis
+   - Color-coded sections (CONTACT, EXPERIENCE, EDUCATION, SKILLS, etc.)
+   - Expandable groups with content preview and AI insights
+   - Job numbering with extracted titles from content
+8. ✅ Action buttons for future enhancements (Completed)
+   - "Analyze Job" button for each work experience (placeholder)
+   - "Find Similar Jobs" button for each work experience (placeholder)
+9. 📋 Add ATS scoring functionality (Planned)
+10. 📋 Implement job-specific analysis (Planned)
+11. 📋 Implement job search integration (Planned)
 
 ### Phase 5: Job Matching
 1. 📋 Implement job search API integration (Planned)
@@ -380,3 +503,186 @@ NEXT_PUBLIC_ENABLE_JOB_MATCHING=false
 - Document processing time < 30 seconds
 - Editor response time < 100ms
 - System reliability > 99.9% uptime
+
+## Current Implementation State (As of Latest Update)
+
+### What's Working
+The application is fully functional with the following features:
+
+1. **Complete Resume Upload & Parsing Flow**:
+   - Users can upload PDF/DOCX/TXT files
+   - Docling microservice parses documents with markdown support
+   - Parsed content stored in MySQL database
+   - Resume status tracking: UPLOADED → PARSED → ANALYZED
+
+2. **Rich Text Editor (Lexical)**:
+   - Full formatting toolbar (bold, italic, underline, headings, lists, links)
+   - Block type selector (H1-H6, Normal text)
+   - Markdown shortcuts support
+   - Editor state persistence (saves/loads with all formatting)
+   - Empty line preservation for proper resume structure
+
+3. **AI-Powered Analysis (Two-Part System)**:
+
+   **Part A: Line-by-Line Analysis**
+   - Analyzes each resume line with OpenAI GPT-4
+   - Detects section types (CONTACT, EXPERIENCE, EDUCATION, SKILLS, etc.)
+   - Groups related lines (e.g., lines 35-44 = Job 1)
+   - Stores in `resume_lines` table with AI metadata
+
+   **Part B: Structured Analysis (ATS-Style)**
+   - Extracts structured data like an ATS would parse it
+   - Stores in dedicated tables: `resume_analysis`, `resume_analysis_experience`, `resume_analysis_skill`, etc.
+   - Full contact information extraction
+   - Professional summary extraction
+   - Work experiences with job titles, companies, dates, descriptions
+   - Skills with categories
+   - Education, certifications, projects
+
+4. **Frontend Display Components**:
+
+   **AnalysisSummary Component** (Top of Editor):
+   - Displays structured ATS-parsed data
+   - Contact info cards
+   - Professional summary
+   - Statistics (count of experiences, skills, education, certs, projects)
+   - Collapsible detailed view showing all extracted data
+   - Work experiences sorted by date (most recent first)
+   - Job numbering (Job 1, Job 2, etc.)
+   - Action buttons: "Analyze Job" and "Find Similar Jobs" (placeholders for future)
+
+   **AnalysisOverlay Component** (Middle Section):
+   - Shows line-by-line grouped analysis
+   - Color-coded section badges
+   - Expandable groups with content preview
+   - AI insights and analysis notes
+   - Job numbering with extracted titles
+
+5. **Date Parsing & Sorting**:
+   - ResumeAnalysisService includes smart date parsing
+   - Supports multiple formats: "YYYY-MM-DD", "YYYY-MM", "YYYY", "Month YYYY", "MM/YYYY"
+   - Experiences automatically sorted by start date (newest first)
+
+### Architecture Highlights
+
+**Three-Layer Data Model**:
+1. `resumes` table - Raw uploaded resume metadata
+2. `resume_lines` table - Line-by-line content with AI group metadata
+3. `resume_analysis_*` tables - Structured ATS-style parsed data (6 related tables)
+
+**Two Analysis Approaches**:
+- Line-based: Good for showing how AI interprets the resume structure
+- Structured: Good for displaying what an ATS would extract
+
+**Frontend Component Hierarchy**:
+```
+LexicalEditor (Main container)
+├── AnalysisSummary (Top - ATS structured data)
+│   └── Work Experience entries with action buttons
+├── Toolbar (Save, Analyze buttons)
+├── AnalysisOverlay (Middle - Line groups)
+│   └── Expandable groups with color coding
+└── Lexical Editor Core (Bottom - Rich text editing)
+```
+
+### Key Design Decisions
+
+1. **Why Two Analysis Systems?**
+   - Line-based: Shows resume structure and grouping (useful for debugging, understanding)
+   - Structured: Shows extracted data (useful for ATS preview, job matching)
+   - Both work together to give users complete visibility
+
+2. **Why Date Sorting?**
+   - Resumes traditionally show most recent experience first
+   - ATS systems expect reverse chronological order
+   - Smart parsing handles various date formats from AI extraction
+
+3. **Why Action Buttons in ATS Summary?**
+   - Centralized location for future job-specific features
+   - Users see structured data and can act on specific jobs
+   - Removed from line overlay to avoid duplication
+
+4. **Why Lexical Instead of TipTap?**
+   - Better React integration
+   - More flexible plugin system
+   - Official Facebook/Meta support
+   - JSON-based state makes persistence easier
+
+### What Needs to Be Built Next
+
+1. **ATS Scoring System**:
+   - Calculate compatibility score (0-100)
+   - Check for keywords, formatting, section completeness
+   - Display score in AnalysisSummary
+   - Provide improvement suggestions
+
+2. **Job-Specific Analysis**:
+   - Implement "Analyze Job" button functionality
+   - Analyze individual work experience quality
+   - Suggest improvements for specific job entries
+   - Check for quantifiable achievements
+
+3. **Job Search Integration**:
+   - Implement "Find Similar Jobs" button functionality
+   - Integrate with job search APIs (LinkedIn, Indeed, etc.)
+   - Match skills and experience to available positions
+   - Display job recommendations
+
+4. **Real-Time Editing Sync**:
+   - When user edits in Lexical editor, update analysis
+   - Re-analyze changed sections automatically
+   - Show "Analysis outdated" warning if edits made
+
+5. **Export Functionality**:
+   - Export to PDF with formatting
+   - Export to ATS-friendly plain text
+   - Export structured JSON for external use
+
+### Important Notes for Future Development
+
+**DO NOT**:
+- Change the dual analysis system (line-based + structured) - they serve different purposes
+- Remove the date sorting logic - it's essential for proper chronological order
+- Modify the core database schema without migration plan
+- Break the action button placement in AnalysisSummary
+
+**DO**:
+- Use the existing structured data for new features
+- Extend the DTOs rather than changing existing ones
+- Follow the plugin pattern for new Lexical features
+- Keep the ATS summary as the primary action hub
+
+**Performance Considerations**:
+- OpenAI API calls are expensive - cache analysis results
+- Large resumes may have 100+ lines - pagination may be needed
+- Structured analysis should be lazy-loaded
+- Editor state JSON can be large - consider compression
+
+**Testing Reminders**:
+- Test with various resume formats (traditional, modern, academic)
+- Test date parsing with international formats
+- Test with resumes in different languages (if expanding scope)
+- Test with very long resumes (10+ pages)
+
+### Configuration Files to Check
+
+- `backend/src/main/resources/application.yml` - OpenAI API key, database config
+- `backend/.env` - Local environment variables
+- `frontend/.env.local` - Frontend API URL
+- `backend/src/main/resources/prompts/` - AI prompt templates
+
+### Common Issues & Solutions
+
+**Issue**: Analysis not showing
+- **Solution**: Check resume status is "ANALYZED", verify OpenAI API key, check console logs
+
+**Issue**: Dates not sorting correctly
+- **Solution**: Check date format in database, verify parseDate() method handles format
+
+**Issue**: Editor state not persisting
+- **Solution**: Verify editor_state column in resumes table, check Save button functionality
+
+**Issue**: Docker Docling service not responding
+- **Solution**: Run `docker-compose logs -f` in docling-service directory, restart Docker
+
+This documentation should help future Claude instances or developers understand the current state and continue building effectively!

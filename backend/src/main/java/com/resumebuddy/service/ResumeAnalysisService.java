@@ -8,6 +8,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -45,9 +50,13 @@ public class ResumeAnalysisService {
         dto.setCreatedAt(analysis.getCreatedAt());
         dto.setUpdatedAt(analysis.getUpdatedAt());
 
-        // Convert experiences
+        // Convert experiences - sort by date (most recent first)
         if (analysis.getExperiences() != null) {
             dto.setExperiences(analysis.getExperiences().stream()
+                .sorted(Comparator.comparing(
+                    (ResumeAnalysisExperience exp) -> parseDate(exp.getStartDate()),
+                    Comparator.nullsLast(Comparator.reverseOrder())
+                ))
                 .map(this::convertExperienceToDto)
                 .collect(Collectors.toList()));
         }
@@ -130,5 +139,61 @@ public class ResumeAnalysisService {
         dto.setTechnologiesUsed(project.getTechnologiesUsed());
         dto.setProjectUrl(project.getProjectUrl());
         return dto;
+    }
+
+    /**
+     * Parse various date formats commonly found in resumes
+     * Supports: "YYYY-MM-DD", "YYYY-MM", "YYYY", "Month YYYY", "MM/YYYY", etc.
+     * Returns a comparable date for sorting
+     */
+    private LocalDate parseDate(String dateStr) {
+        if (dateStr == null || dateStr.trim().isEmpty()) {
+            return LocalDate.MIN; // Null dates go to the end
+        }
+
+        String normalized = dateStr.trim();
+
+        try {
+            // Try ISO date format: 2021-10-15
+            return LocalDate.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE);
+        } catch (DateTimeParseException e) {
+            // Continue to next format
+        }
+
+        try {
+            // Try year-month format: 2021-10
+            YearMonth ym = YearMonth.parse(normalized, DateTimeFormatter.ofPattern("yyyy-MM"));
+            return ym.atDay(1);
+        } catch (DateTimeParseException e) {
+            // Continue to next format
+        }
+
+        try {
+            // Try month/year format: 10/2021
+            YearMonth ym = YearMonth.parse(normalized, DateTimeFormatter.ofPattern("MM/yyyy"));
+            return ym.atDay(1);
+        } catch (DateTimeParseException e) {
+            // Continue to next format
+        }
+
+        try {
+            // Try month year format: "October 2021"
+            YearMonth ym = YearMonth.parse(normalized, DateTimeFormatter.ofPattern("MMMM yyyy"));
+            return ym.atDay(1);
+        } catch (DateTimeParseException e) {
+            // Continue to next format
+        }
+
+        try {
+            // Try just year: 2021
+            int year = Integer.parseInt(normalized);
+            return LocalDate.of(year, 1, 1);
+        } catch (NumberFormatException e) {
+            // Continue to next format
+        }
+
+        // If all parsing fails, return MIN date
+        log.warn("Could not parse date: {}", dateStr);
+        return LocalDate.MIN;
     }
 }

@@ -4,9 +4,11 @@ import { ResumeAnalysisDto } from '@/lib/types';
 
 interface AnalysisSummaryProps {
   analysis: ResumeAnalysisDto;
+  onAnalyzeJob?: (experienceId: string) => void;
+  onFindJobs?: (experienceId: string) => void;
 }
 
-export default function AnalysisSummary({ analysis }: AnalysisSummaryProps) {
+export default function AnalysisSummary({ analysis, onAnalyzeJob, onFindJobs }: AnalysisSummaryProps) {
   return (
     <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 mb-4">
       <div className="flex items-center gap-2 mb-4">
@@ -106,11 +108,16 @@ export default function AnalysisSummary({ analysis }: AnalysisSummaryProps) {
               <div>
                 <h5 className="font-semibold text-gray-700 mb-3">Work Experience</h5>
                 <div className="space-y-3">
-                  {analysis.experiences.map((exp) => (
+                  {analysis.experiences.map((exp, index) => (
                     <div key={exp.id} className="text-sm border-l-4 border-blue-400 pl-4 py-2 bg-blue-50 rounded-r">
-                      <div className="font-bold text-gray-900 mb-1">
-                        {exp.jobTitle || 'Position not specified'}
-                        {exp.companyName && <span className="font-normal text-gray-700"> at {exp.companyName}</span>}
+                      <div className="flex items-start justify-between mb-1">
+                        <div className="font-bold text-gray-900">
+                          {exp.jobTitle || 'Position not specified'}
+                          {exp.companyName && <span className="font-normal text-gray-700"> at {exp.companyName}</span>}
+                        </div>
+                        <span className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full ml-2">
+                          Job {index + 1}
+                        </span>
                       </div>
                       {(exp.startDate || exp.endDate) && (
                         <div className="text-gray-600 text-xs mb-2 flex items-center gap-1">
@@ -121,10 +128,41 @@ export default function AnalysisSummary({ analysis }: AnalysisSummaryProps) {
                         </div>
                       )}
                       {exp.description && (
-                        <div className="text-gray-700 text-xs leading-relaxed mt-2 whitespace-pre-line">
+                        <div className="text-gray-700 text-xs leading-relaxed mt-2 mb-3 whitespace-pre-line">
                           {exp.description}
                         </div>
                       )}
+
+                      {/* Action Buttons */}
+                      <div className="flex gap-2 mt-3 pt-2 border-t border-blue-200">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAnalyzeJob?.(exp.id);
+                          }}
+                          className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-md text-xs font-medium hover:bg-purple-200 transition-colors flex items-center gap-1"
+                          title="Analyze this job experience with AI (Coming soon)"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                          </svg>
+                          Analyze Job
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onFindJobs?.(exp.id);
+                          }}
+                          className="px-3 py-1.5 bg-green-100 text-green-700 rounded-md text-xs font-medium hover:bg-green-200 transition-colors flex items-center gap-1"
+                          title="Find similar job opportunities (Coming soon)"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                          Find Similar Jobs
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
