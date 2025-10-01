@@ -29,6 +29,30 @@ const SECTION_COLORS: Record<string, { bg: string; text: string; border: string 
 export default function AnalysisOverlay({ lines, onAnalyzeGroup, onFindJobs }: AnalysisOverlayProps) {
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
 
+  // Helper function to extract group title from content
+  const extractGroupTitle = (lines: ResumeLine[], groupType: string): string | null => {
+    if (groupType === 'JOB' || groupType === 'EXPERIENCE_JOB') {
+      // Try to find company name or position from first few non-empty lines
+      const contentLines = lines
+        .filter(l => l.content && l.content.trim().length > 0)
+        .slice(0, 3); // Check first 3 lines
+
+      for (const line of contentLines) {
+        const content = line.content.trim();
+        // Skip lines that look like headers or sections
+        if (content.toLowerCase().includes('experience') ||
+            content.toLowerCase().includes('work history')) {
+          continue;
+        }
+        // Return first meaningful line (likely company or position)
+        if (content.length > 0 && content.length < 100) {
+          return content;
+        }
+      }
+    }
+    return null;
+  };
+
   // Group lines by groupId and organize by sections
   const analysisGroups = useMemo(() => {
     const groups: AnalysisGroup[] = [];
@@ -103,38 +127,60 @@ export default function AnalysisOverlay({ lines, onAnalyzeGroup, onFindJobs }: A
         </span>
       </div>
 
-      {analysisGroups.map((group) => {
-        const colors = getColorScheme(group.sectionType);
-        const isExpanded = expandedGroups.has(group.groupId);
-        const hasAnalysisNotes = group.lines.some(line => line.analysisNotes);
+      {/* Track job numbers by section type */}
+      {(() => {
+        const sectionCounters = new Map<string, number>();
 
-        return (
-          <div
-            key={group.groupId}
-            className={`border-2 ${colors.border} ${colors.bg} rounded-lg overflow-hidden transition-all`}
-          >
-            {/* Group Header */}
+        return analysisGroups.map((group) => {
+          const colors = getColorScheme(group.sectionType);
+          const isExpanded = expandedGroups.has(group.groupId);
+          const hasAnalysisNotes = group.lines.some(line => line.analysisNotes);
+          const groupTitle = extractGroupTitle(group.lines, group.groupType);
+
+          // Track numbering for groups of same section type
+          let groupNumber: number | null = null;
+          if (group.groupType === 'JOB' || group.groupType === 'EXPERIENCE_JOB') {
+            const key = `${group.sectionType}_JOB`;
+            const currentCount = (sectionCounters.get(key) || 0) + 1;
+            sectionCounters.set(key, currentCount);
+            groupNumber = currentCount;
+          }
+
+          return (
             <div
-              className="p-3 cursor-pointer hover:opacity-80 transition-opacity"
-              onClick={() => toggleGroup(group.groupId)}
+              key={group.groupId}
+              className={`border-2 ${colors.border} ${colors.bg} rounded-lg overflow-hidden transition-all`}
             >
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {/* Section Badge */}
-                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${colors.text} bg-white border ${colors.border}`}>
-                    {group.sectionType}
-                  </span>
+              {/* Group Header */}
+              <div
+                className="p-3 cursor-pointer hover:opacity-80 transition-opacity"
+                onClick={() => toggleGroup(group.groupId)}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    {/* Section Badge */}
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${colors.text} bg-white border ${colors.border}`}>
+                      {group.sectionType}
+                    </span>
 
-                  {/* Group Type Badge */}
-                  <span className={`px-2 py-1 rounded text-xs font-medium ${colors.text}`}>
-                    {group.groupType}
-                  </span>
+                    {/* Group Type Badge with Number */}
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${colors.text}`}>
+                      {group.groupType}
+                      {groupNumber !== null && ` ${groupNumber}`}
+                    </span>
 
-                  {/* Line Range */}
-                  <span className="text-xs text-gray-500">
-                    Lines {group.startLine}–{group.endLine}
-                  </span>
-                </div>
+                    {/* Group Title (extracted from content) */}
+                    {groupTitle && (
+                      <span className="text-sm font-semibold text-gray-800 max-w-md truncate">
+                        {groupTitle}
+                      </span>
+                    )}
+
+                    {/* Line Range */}
+                    <span className="text-xs text-gray-500">
+                      Lines {group.startLine}–{group.endLine}
+                    </span>
+                  </div>
 
                 {/* Expand/Collapse Icon */}
                 <svg
@@ -219,9 +265,10 @@ export default function AnalysisOverlay({ lines, onAnalyzeGroup, onFindJobs }: A
                 </div>
               </div>
             )}
-          </div>
-        );
-      })}
+            </div>
+          );
+        });
+      })()}
     </div>
   );
 }

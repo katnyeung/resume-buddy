@@ -59,3 +59,62 @@ export interface LineAnalysisDto {
   groupType: string;
   analysisNotes: string;
 }
+
+// Structured Analysis types
+export interface ResumeAnalysisDto {
+  id: string;
+  resumeId: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+  linkedinUrl?: string;
+  githubUrl?: string;
+  websiteUrl?: string;
+  summary?: string;
+  experiences: ExperienceDto[];
+  skills: SkillDto[];
+  educations: EducationDto[];
+  certifications: CertificationDto[];
+  projects: ProjectDto[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExperienceDto {
+  id: string;
+  jobTitle?: string;
+  companyName?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+}
+
+export interface SkillDto {
+  id: string;
+  skillName?: string;
+  category?: string;
+}
+
+export interface EducationDto {
+  id: string;
+  degree?: string;
+  institution?: string;
+  graduationDate?: string;
+  description?: string;
+}
+
+export interface CertificationDto {
+  id: string;
+  certificationName?: string;
+  issuingOrganization?: string;
+  issueDate?: string;
+  credentialId?: string;
+}
+
+export interface ProjectDto {
+  id: string;
+  projectName?: string;
+  description?: string;
+  technologiesUsed?: string;
+  projectUrl?: string;
+}

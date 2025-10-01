@@ -18,10 +18,11 @@ import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
 import AutoFocusPlugin from './plugins/AutoFocusPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume } from '@/lib/api';
+import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume, getStructuredAnalysis } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
-import { ResumeLine } from '@/lib/types';
+import { ResumeLine, ResumeAnalysisDto } from '@/lib/types';
 import AnalysisOverlay from './AnalysisOverlay';
+import AnalysisSummary from './AnalysisSummary';
 
 interface LexicalEditorProps {
   resumeId: string;
@@ -37,6 +38,7 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisStatus, setAnalysisStatus] = useState<string>('');
   const [analyzedLines, setAnalyzedLines] = useState<ResumeLine[]>([]);
+  const [structuredAnalysis, setStructuredAnalysis] = useState<ResumeAnalysisDto | null>(null);
 
   // Load editor state or resume lines on mount
   useEffect(() => {
@@ -48,10 +50,14 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
         // Check resume status first
         const resume = await getResume(resumeId);
 
-        // If resume is already analyzed, load the analyzed lines for display
+        // If resume is already analyzed, load the analyzed lines and structured analysis for display
         if (resume.status === 'ANALYZED') {
           const lines = await getResumeLines(resumeId);
           setAnalyzedLines(lines);
+
+          // Load structured analysis summary
+          const analysis = await getStructuredAnalysis(resumeId);
+          setStructuredAnalysis(analysis);
         }
 
         // First try to load the saved editor state
@@ -148,6 +154,10 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       // Store analyzed lines for overlay display
       setAnalyzedLines(updatedLines);
 
+      // Load structured analysis summary
+      const analysis = await getStructuredAnalysis(resumeId);
+      setStructuredAnalysis(analysis);
+
       setTimeout(() => setAnalysisStatus(''), 5000);
     } catch (error) {
       console.error('Analysis error:', error);
@@ -221,6 +231,13 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
 
   return (
     <div className="w-full max-w-5xl mx-auto">
+      {/* ATS Analysis Summary - displayed at the very top when available */}
+      {structuredAnalysis && (
+        <div className="mb-4">
+          <AnalysisSummary analysis={structuredAnalysis} />
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="bg-white border border-gray-300 rounded-t-lg p-4 flex items-center justify-between">
         <h2 className="text-xl font-semibold text-gray-800">Resume Editor</h2>

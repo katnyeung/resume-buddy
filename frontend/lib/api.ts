@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Resume, ResumeLine, ResumeLineUpdateDto, BatchUpdateResponse } from './types';
+import { Resume, ResumeLine, ResumeLineUpdateDto, BatchUpdateResponse, ResumeAnalysisDto } from './types';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 
@@ -118,5 +118,19 @@ export const analyzeResume = async (id: string): Promise<any> => {
 
 export const getAnalysisStatus = async (id: string): Promise<{ resumeId: string; isAnalyzed: boolean }> => {
   const response = await apiClient.get(`/resumes/${id}/analysis-status`);
+  return response.data;
+};
+
+export const getStructuredAnalysis = async (id: string): Promise<ResumeAnalysisDto | null> => {
+  try {
+    const response = await apiClient.get<ResumeAnalysisDto>(`/resumes/${id}/structured-analysis`);
+    return response.data;
+  } catch (error) {
+    return null;
+  }
+};
+
+export const checkAnalysisExists = async (id: string): Promise<boolean> => {
+  const response = await apiClient.get<boolean>(`/resumes/${id}/analysis-exists`);
   return response.data;
 };
