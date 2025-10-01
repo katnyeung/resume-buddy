@@ -20,7 +20,7 @@ spring:
         dialect: org.hibernate.dialect.MySQL8Dialect
         # Enhanced schema management
         hbm2ddl:
-          auto: create-drop
+          auto: update
         jdbc:
           batch_size: 20
         order_inserts: true
@@ -46,9 +46,11 @@ springdoc:
 # Custom Application Properties
 app:
   openai:
-    api-key: ${OPENAI_API_KEY:your-openai-api-key}
-    model: ${OPENAI_MODEL:gpt-4}
-    base-url: https://api.openai.com/v1
+    # Grok AI uses OpenAI-compatible API format
+    # Get your API key from: https://console.x.ai/
+    api-key: ${OPENAI_API_KEY:}
+    model: ${OPENAI_MODEL:grok-4-fast-reasoning}
+    base-url: ${OPENAI_BASE_URL:https://api.x.ai/v1}
 
 
   file:

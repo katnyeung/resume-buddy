@@ -14,11 +14,15 @@ Resume Buddy is an MVP application that enables users to upload resumes and leve
 
 ### Frontend
 - **Framework**: Next.js 14+ with TypeScript
-- **Editor**: TipTap rich text editor for real-time resume editing
+- **Editor**: Lexical rich text editor with full formatting support and markdown parsing
 - **UI Library**: Tailwind CSS with modern components
 - **State Management**: React hooks and context API
 - **HTTP Client**: Axios for API communication
 - **File Upload**: react-dropzone for drag & drop functionality
+
+### AI Services
+- **OpenAI Integration**: GPT-4 for resume analysis and section detection
+- **Analysis Features**: Line-by-line section identification and content grouping
 
 ### Development Tools
 - **Build Tool**: Maven (backend), npm/yarn (frontend)
@@ -38,7 +42,8 @@ resume-buddy/
 │   │   ├── service/
 │   │   │   ├── DoclingHttpService.java    # HTTP client for Docling service
 │   │   │   ├── FileStorageService.java    # File storage operations
-│   │   │   └── ResumeLineService.java     # Line processing for editing
+│   │   │   ├── ResumeLineService.java     # Line processing for editing
+│   │   │   └── AIAnalysisService.java     # OpenAI integration for AI analysis
 │   │   ├── model/
 │   │   │   ├── Resume.java                # Main resume entity
 │   │   │   ├── ResumeLine.java            # Line-based resume content
@@ -133,12 +138,18 @@ CREATE TABLE resumes (
     updated_at TIMESTAMP NOT NULL
 );
 
--- Line-by-line resume content
+-- Line-by-line resume content with AI analysis
 CREATE TABLE resume_lines (
     id VARCHAR(36) PRIMARY KEY,
     resume_id VARCHAR(36) NOT NULL,
     line_number INT NOT NULL,
     content TEXT,
+    -- AI Analysis fields (populated after analysis)
+    section_type VARCHAR(50),           -- CONTACT, EXPERIENCE, EDUCATION, SKILLS, etc.
+    group_id INT,                       -- Groups related lines (e.g., same job entry)
+    group_type VARCHAR(50),             -- JOB, PROJECT, EDUCATION_ITEM, SKILL_CATEGORY, etc.
+    analysis_notes TEXT,                -- AI findings and notes for this line
+    analyzed_at TIMESTAMP,              -- When this line was last analyzed
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     FOREIGN KEY (resume_id) REFERENCES resumes(id) ON DELETE CASCADE
@@ -176,6 +187,15 @@ CREATE TABLE suggestions (
 - `PUT /api/resumes/{id}/lines/{lineNumber}` - Update specific line
 - `POST /api/resumes/{id}/lines` - Insert a new line
 - `GET /api/resumes/{id}/lines/count` - Get total line count
+- `PUT /api/resumes/{id}/lines/batch` - Batch update multiple lines
+
+### Editor State Management
+- `PUT /api/resumes/{id}/editor-state` - Save Lexical editor state with formatting
+- `GET /api/resumes/{id}/editor-state` - Load Lexical editor state
+
+### AI Analysis
+- `POST /api/resumes/{id}/analyze` - Analyze resume with AI (section detection, grouping)
+- `GET /api/resumes/{id}/analysis-status` - Check if resume has been analyzed
 
 ### Health & Utility
 - `GET /api/resumes/health` - Backend health check
@@ -305,17 +325,20 @@ NEXT_PUBLIC_ENABLE_JOB_MATCHING=false
 
 ### Phase 3: Frontend Integration
 1. ✅ Create Next.js frontend
-2. ✅ Integrate TipTap editor
+2. ✅ Integrate Lexical editor with full formatting support
 3. ✅ Implement resume management UI
-4. ✅ Add line-based editing UI
-5. 🔄 Implement auto-save functionality (In Progress)
-6. 🔄 Add UI refinements and polish (In Progress)
+4. ✅ Add markdown parsing from Docling output
+5. ✅ Implement block type selector (H1-H6, Normal)
+6. ✅ Add editor state persistence with formatting
+7. ✅ Preserve empty lines in resume structure
 
 ### Phase 4: AI Integration
-1. 📋 Integrate OpenAI API for text analysis (Planned)
-2. 📋 Implement suggestion generation system (Planned)
-3. 📋 Create analysis endpoints and services (Planned)
-4. 📋 Add ATS scoring functionality (Planned)
+1. 🔄 Add analysis fields to ResumeLine entity (In Progress)
+2. 🔄 Create AIAnalysisService with OpenAI integration (In Progress)
+3. 🔄 Implement analysis API endpoint (In Progress)
+4. 📋 Frontend analysis UI with section highlighting (Planned)
+5. 📋 Group visualization for related lines (Planned)
+6. 📋 Add ATS scoring functionality (Planned)
 
 ### Phase 5: Job Matching
 1. 📋 Implement job search API integration (Planned)

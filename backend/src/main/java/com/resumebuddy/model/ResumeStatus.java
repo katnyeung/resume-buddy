@@ -4,6 +4,7 @@ public enum ResumeStatus {
     UPLOADED("File uploaded successfully"),
     PARSING("Document parsing in progress"),
     PARSED("Document parsed successfully"),
+    ANALYZED("AI analysis completed"),
     FAILED("Parsing failed");
 
     private final String description;

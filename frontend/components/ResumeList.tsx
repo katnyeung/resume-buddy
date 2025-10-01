@@ -29,6 +29,8 @@ export default function ResumeList({ resumes, onDelete }: ResumeListProps) {
 
   const getStatusColor = (status: string) => {
     switch (status.toLowerCase()) {
+      case 'analyzed':
+        return 'bg-purple-100 text-purple-800';
       case 'parsed':
         return 'bg-green-100 text-green-800';
       case 'parsing':
@@ -103,7 +105,7 @@ export default function ResumeList({ resumes, onDelete }: ResumeListProps) {
           <div className="flex gap-2">
             <button
               onClick={() => router.push(`/edit/${resume.id}`)}
-              disabled={resume.status.toLowerCase() !== 'parsed'}
+              disabled={resume.status.toLowerCase() !== 'parsed' && resume.status.toLowerCase() !== 'analyzed'}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm font-medium"
             >
               Edit

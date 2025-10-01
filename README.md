@@ -88,10 +88,14 @@ resume-buddy/
 
 ### Frontend
 - **Framework**: Next.js 14+ with TypeScript
-- **Editor**: TipTap rich text editor for line-by-line editing
+- **Editor**: Lexical rich text editor with full formatting and markdown support
 - **UI Library**: Tailwind CSS with modern components
 - **State Management**: React hooks and context API
 - **File Upload**: react-dropzone for drag & drop uploads
+
+### AI Services
+- **OpenAI Integration**: GPT-4 for intelligent resume analysis
+- **Analysis Features**: Section detection, content grouping, line-by-line insights
 
 ## 🚀 Quick Start
 
@@ -180,26 +184,29 @@ docker-compose down
 
 ### ✅ Completed
 - **Document Upload**: Support for PDF, DOCX, TXT files
-- **Advanced Parsing**: Docling integration with Docker
-- **Database Schema**: MySQL with JPA entities
+- **Advanced Parsing**: Docling integration with Docker and markdown support
+- **Database Schema**: MySQL with JPA entities and AI analysis fields
 - **REST API**: Spring Boot with Swagger documentation
 - **Health Monitoring**: Service health checks
 - **CORS Configuration**: Frontend integration ready
-- **Line-based Editing**: Support for line-by-line resume editing
-- **Basic Resume Processing**: Resume upload, parsing, and retrieval
-- **Stateful Workflow**: Upload → Parse → Edit workflow with status tracking
-- **Frontend Implementation**: Next.js with TipTap editor integration
+- **Lexical Editor**: Full rich text editing with formatting preservation
+- **Block Type Selector**: Convert text to headings (H1-H6) via dropdown
+- **Markdown Parsing**: Automatic conversion from Docling output (##, **, etc.)
+- **Editor State Persistence**: Save/load with all formatting intact
+- **Empty Line Preservation**: Maintains resume structure and spacing
 - **Resume Management UI**: List, view, edit, and delete resumes
-- **Resume Editing Interface**: Line-by-line editing with TipTap
+- **Stateful Workflow**: Upload → Parse → Edit workflow with status tracking
 
 ### 🔄 In Progress
-- **Auto-save functionality**: Automatically save changes during editing
-- **UI Refinements**: Improved user experience and visual polish
+- **AI Resume Analysis**: Line-by-line section detection and content grouping
+- **OpenAI Integration**: GPT-4 for intelligent resume insights
+- **Analysis API**: Endpoint for AI-powered resume analysis
 
 ### 📋 Planned
-- **AI Integration**: OpenAI API for suggestions and improvements
+- **Frontend Analysis UI**: Visual display of AI analysis results
+- **Section Highlighting**: Color-coded sections and groups
 - **Job Matching**: Skills and position matching
-- **Analytics**: Resume scoring and improvement metrics
+- **ATS Scoring**: Resume optimization for applicant tracking systems
 
 ## 🐳 Docker Integration
 
@@ -223,6 +230,9 @@ Access the interactive API documentation at:
 - `GET /api/resumes/{id}/lines` - Get resume content as lines
 - `PUT /api/resumes/{id}/lines/{lineNumber}` - Update specific line
 - `POST /api/resumes/{id}/lines` - Insert new line
+- `PUT /api/resumes/{id}/editor-state` - Save Lexical editor state
+- `GET /api/resumes/{id}/editor-state` - Load Lexical editor state
+- `POST /api/resumes/{id}/analyze` - AI analysis of resume
 - `GET /api/resumes/health` - Service health check
 
 ## 📚 Implementation Progress
@@ -230,11 +240,11 @@ Access the interactive API documentation at:
 The current implementation follows an MVP (Minimum Viable Product) approach:
 
 1. ✅ **Core Infrastructure**: Backend API, database setup, Docling service
-2. ✅ **Document Processing**: Upload, parse, and store resumes
-3. ✅ **Line-based Editing**: Edit resume content line by line
-4. ✅ **Frontend Integration**: Next.js with TipTap editor implementation
-5. 🔄 **UI Refinements**: Improving user interface and experience
-6. 📋 **AI-powered Suggestions**: Planned for future implementation
+2. ✅ **Document Processing**: Upload, parse with markdown support, and store resumes
+3. ✅ **Rich Text Editing**: Lexical editor with full formatting and block type selection
+4. ✅ **Frontend Integration**: Next.js with Lexical editor and state persistence
+5. 🔄 **AI Analysis**: OpenAI integration for section detection and grouping
+6. 📋 **Analysis UI**: Frontend display of AI analysis results
 7. 📋 **Job Matching**: Planned for future implementation
 
 ## 🤝 Contributing
