@@ -168,15 +168,15 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
     }
   };
 
-  // Handler for future "Analyze Group" feature
-  const handleAnalyzeGroup = (groupId: number, groupType: string) => {
-    console.log(`Future feature: Analyze ${groupType} group ${groupId}`);
+  // Handler for analyzing specific job from ATS summary
+  const handleAnalyzeJob = (experienceId: string) => {
+    console.log(`Future feature: Analyze job experience ${experienceId}`);
     // TODO: Implement in Phase 5
   };
 
-  // Handler for future "Find Similar Jobs" feature
-  const handleFindJobs = (groupId: number) => {
-    console.log(`Future feature: Find jobs for group ${groupId}`);
+  // Handler for finding similar jobs from ATS summary
+  const handleFindJobsForExperience = (experienceId: string) => {
+    console.log(`Future feature: Find similar jobs for experience ${experienceId}`);
     // TODO: Implement in Phase 6
   };
 
@@ -234,7 +234,11 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       {/* ATS Analysis Summary - displayed at the very top when available */}
       {structuredAnalysis && (
         <div className="mb-4">
-          <AnalysisSummary analysis={structuredAnalysis} />
+          <AnalysisSummary
+            analysis={structuredAnalysis}
+            onAnalyzeJob={handleAnalyzeJob}
+            onFindJobs={handleFindJobsForExperience}
+          />
         </div>
       )}
 
@@ -292,11 +296,7 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       {/* Analysis Overlay - displayed above editor when analysis is available */}
       {analyzedLines.length > 0 && (
         <div className="bg-white border-x border-gray-300 p-4">
-          <AnalysisOverlay
-            lines={analyzedLines}
-            onAnalyzeGroup={handleAnalyzeGroup}
-            onFindJobs={handleFindJobs}
-          />
+          <AnalysisOverlay lines={analyzedLines} />
         </div>
       )}
 

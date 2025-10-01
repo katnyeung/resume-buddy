@@ -56,7 +56,13 @@ resume-buddy/
 │   │   │   └── upload/                   # Resume upload
 │   │   ├── components/
 │   │   │   ├── ResumeItem.tsx            # Resume card component
-│   │   │   └── RichResumeEditor.tsx      # TipTap editor
+│   │   │   ├── LexicalEditor.tsx         # Lexical editor with analysis
+│   │   │   ├── AnalysisSummary.tsx       # ATS structured analysis display
+│   │   │   ├── AnalysisOverlay.tsx       # Line-based grouped analysis
+│   │   │   └── plugins/                  # Lexical editor plugins
+│   │   │       ├── ToolbarPlugin.tsx
+│   │   │       ├── OnChangePlugin.tsx
+│   │   │       └── AutoFocusPlugin.tsx
 │   │   ├── lib/
 │   │   │   ├── api.ts                    # API integration
 │   │   │   └── utils.ts                  # Utility functions
@@ -95,7 +101,9 @@ resume-buddy/
 
 ### AI Services
 - **OpenAI Integration**: GPT-4 for intelligent resume analysis
-- **Analysis Features**: Section detection, content grouping, line-by-line insights
+- **Line-by-Line Analysis**: Section detection, content grouping, AI insights
+- **Structured Extraction**: Contact info, experiences, skills, education, certifications, projects
+- **ATS Parsing**: Parse resume like an Applicant Tracking System would
 
 ## 🚀 Quick Start
 
@@ -185,7 +193,7 @@ docker-compose down
 ### ✅ Completed
 - **Document Upload**: Support for PDF, DOCX, TXT files
 - **Advanced Parsing**: Docling integration with Docker and markdown support
-- **Database Schema**: MySQL with JPA entities and AI analysis fields
+- **Database Schema**: MySQL with JPA entities, AI analysis fields, and structured analysis tables
 - **REST API**: Spring Boot with Swagger documentation
 - **Health Monitoring**: Service health checks
 - **CORS Configuration**: Frontend integration ready
@@ -195,18 +203,28 @@ docker-compose down
 - **Editor State Persistence**: Save/load with all formatting intact
 - **Empty Line Preservation**: Maintains resume structure and spacing
 - **Resume Management UI**: List, view, edit, and delete resumes
-- **Stateful Workflow**: Upload → Parse → Edit workflow with status tracking
-
-### 🔄 In Progress
-- **AI Resume Analysis**: Line-by-line section detection and content grouping
-- **OpenAI Integration**: GPT-4 for intelligent resume insights
-- **Analysis API**: Endpoint for AI-powered resume analysis
+- **Stateful Workflow**: Upload → Parse → Analyze → Edit workflow with status tracking
+- **AI Resume Analysis**:
+  - Line-by-line section detection and content grouping with OpenAI GPT-4
+  - Structured analysis extraction (contact info, experiences, skills, education, certifications, projects)
+  - Analysis persistence in dedicated database tables
+- **ATS Analysis Display**:
+  - AnalysisSummary component showing structured parsed data at top of editor
+  - Contact information, professional summary, and statistics cards
+  - Collapsible detailed view with full work experience, skills, education, certifications, and projects
+  - Date-based sorting (most recent first) for work experiences
+  - Job numbering with action buttons for future enhancements
+- **Line Analysis Display**:
+  - AnalysisOverlay component showing grouped line analysis
+  - Color-coded sections (CONTACT, EXPERIENCE, EDUCATION, SKILLS, etc.)
+  - Expandable groups with content preview and AI insights
+  - Job numbering with extracted titles from content
 
 ### 📋 Planned
-- **Frontend Analysis UI**: Visual display of AI analysis results
-- **Section Highlighting**: Color-coded sections and groups
-- **Job Matching**: Skills and position matching
-- **ATS Scoring**: Resume optimization for applicant tracking systems
+- **ATS Scoring**: Resume optimization scoring for applicant tracking systems
+- **Job-Specific Analysis**: Analyze individual job experiences for improvements
+- **Job Matching**: Skills and position matching with job postings
+- **Job Search Integration**: Find similar jobs based on experience
 
 ## 🐳 Docker Integration
 
@@ -224,15 +242,17 @@ Access the interactive API documentation at:
 
 ### Key Endpoints
 - `POST /api/resumes/upload` - Upload resume file
-- `POST /api/resumes/{id}/parse` - Parse uploaded resume
+- `POST /api/resumes/{id}/parse` - Parse uploaded resume with Docling
 - `GET /api/resumes/{id}` - Get resume metadata
-- `GET /api/resumes/{id}/parsed` - Get structured resume data
+- `GET /api/resumes/{id}/parsed` - Get raw parsed resume data
 - `GET /api/resumes/{id}/lines` - Get resume content as lines
 - `PUT /api/resumes/{id}/lines/{lineNumber}` - Update specific line
 - `POST /api/resumes/{id}/lines` - Insert new line
-- `PUT /api/resumes/{id}/editor-state` - Save Lexical editor state
+- `PUT /api/resumes/{id}/editor-state` - Save Lexical editor state with formatting
 - `GET /api/resumes/{id}/editor-state` - Load Lexical editor state
-- `POST /api/resumes/{id}/analyze` - AI analysis of resume
+- `POST /api/resumes/{id}/analyze` - Run AI analysis (line-by-line + structured extraction)
+- `GET /api/resumes/{id}/structured-analysis` - Get ATS-style structured analysis
+- `GET /api/resumes/{id}/analysis-exists` - Check if analysis exists
 - `GET /api/resumes/health` - Service health check
 
 ## 📚 Implementation Progress
@@ -243,9 +263,13 @@ The current implementation follows an MVP (Minimum Viable Product) approach:
 2. ✅ **Document Processing**: Upload, parse with markdown support, and store resumes
 3. ✅ **Rich Text Editing**: Lexical editor with full formatting and block type selection
 4. ✅ **Frontend Integration**: Next.js with Lexical editor and state persistence
-5. 🔄 **AI Analysis**: OpenAI integration for section detection and grouping
-6. 📋 **Analysis UI**: Frontend display of AI analysis results
-7. 📋 **Job Matching**: Planned for future implementation
+5. ✅ **AI Analysis**: OpenAI integration for line-by-line and structured analysis
+6. ✅ **Analysis UI**:
+   - ATS Summary component (top) - structured data display
+   - Analysis Overlay component (middle) - grouped line analysis
+   - Date-based sorting for chronological resume order
+7. 📋 **ATS Scoring**: Calculate and display ATS compatibility score
+8. 📋 **Job Matching**: Search and match relevant job postings
 
 ## 🤝 Contributing
 
