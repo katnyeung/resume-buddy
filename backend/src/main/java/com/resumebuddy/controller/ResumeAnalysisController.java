@@ -3,7 +3,6 @@ package com.resumebuddy.controller;
 import com.resumebuddy.model.dto.AnalysisResultDto;
 import com.resumebuddy.model.dto.LineAnalysisDto;
 import com.resumebuddy.model.dto.ResumeAnalysisDto;
-import com.resumebuddy.service.AIAnalysisService;
 import com.resumebuddy.service.ResumeAnalysisService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -23,7 +22,6 @@ import java.util.List;
 @Tag(name = "Resume Analysis", description = "AI-powered resume analysis and structured data extraction")
 public class ResumeAnalysisController {
 
-    private final AIAnalysisService aiAnalysisService;
     private final ResumeAnalysisService resumeAnalysisService;
 
     @PostMapping("/{id}/analyze")
@@ -32,7 +30,7 @@ public class ResumeAnalysisController {
         log.info("Received request to analyze resume ID: {}", id);
 
         try {
-            List<LineAnalysisDto> analyses = aiAnalysisService.analyzeResume(id);
+            List<LineAnalysisDto> analyses = resumeAnalysisService.analyzeResume(id);
 
             if (analyses.isEmpty()) {
                 return ResponseEntity.badRequest().build();

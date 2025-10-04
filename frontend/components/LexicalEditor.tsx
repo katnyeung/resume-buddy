@@ -18,11 +18,12 @@ import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
 import AutoFocusPlugin from './plugins/AutoFocusPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume, getStructuredAnalysis } from '@/lib/api';
+import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume, getStructuredAnalysis, analyzeJob } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
-import { ResumeLine, ResumeAnalysisDto } from '@/lib/types';
+import { ResumeLine, ResumeAnalysisDto, JobAnalysisResult } from '@/lib/types';
 import AnalysisOverlay from './AnalysisOverlay';
 import AnalysisSummary from './AnalysisSummary';
+import JobAnalysisResults from './JobAnalysisResults';
 
 interface LexicalEditorProps {
   resumeId: string;
@@ -39,6 +40,9 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
   const [analysisStatus, setAnalysisStatus] = useState<string>('');
   const [analyzedLines, setAnalyzedLines] = useState<ResumeLine[]>([]);
   const [structuredAnalysis, setStructuredAnalysis] = useState<ResumeAnalysisDto | null>(null);
+  const [analyzingJob, setAnalyzingJob] = useState(false);
+  const [jobAnalysisResult, setJobAnalysisResult] = useState<JobAnalysisResult | null>(null);
+  const [showJobAnalysis, setShowJobAnalysis] = useState(false);
 
   // Load editor state or resume lines on mount
   useEffect(() => {
@@ -169,9 +173,26 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
   };
 
   // Handler for analyzing specific job from ATS summary
-  const handleAnalyzeJob = (experienceId: string) => {
-    console.log(`Future feature: Analyze job experience ${experienceId}`);
-    // TODO: Implement in Phase 5
+  const handleAnalyzeJob = async (experienceId: string) => {
+    if (analyzingJob) return;
+
+    try {
+      setAnalyzingJob(true);
+      setSaveStatus('Analyzing job experience...');
+
+      const result = await analyzeJob(resumeId, experienceId);
+      setJobAnalysisResult(result);
+      setShowJobAnalysis(true);
+      setSaveStatus('Job analysis completed!');
+      setTimeout(() => setSaveStatus(''), 3000);
+
+    } catch (error) {
+      console.error('Job analysis error:', error);
+      setSaveStatus('Error analyzing job');
+      setTimeout(() => setSaveStatus(''), 3000);
+    } finally {
+      setAnalyzingJob(false);
+    }
   };
 
   // Handler for finding similar jobs from ATS summary
@@ -323,6 +344,14 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
           <AutoFocusPlugin />
         </div>
       </LexicalComposer>
+
+      {/* Job Analysis Results Modal */}
+      {showJobAnalysis && jobAnalysisResult && (
+        <JobAnalysisResults
+          analysis={jobAnalysisResult}
+          onClose={() => setShowJobAnalysis(false)}
+        />
+      )}
     </div>
   );
 }
