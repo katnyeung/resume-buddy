@@ -52,18 +52,57 @@ public class ONetIntegrationService {
         try {
             // Fetch occupation details
             JsonNode occupation = callONetApi("/online/occupations/" + socCode);
+            log.debug("Occupation response keys: {}", occupation.fieldNames());
 
-            // Fetch detailed work activities
-            JsonNode activities = callONetApi("/online/occupations/" + socCode + "/details/work_activities");
+            // Fetch detailed work activities (may not be available for all occupations)
+            JsonNode activities = null;
+            try {
+                activities = callONetApi("/online/occupations/" + socCode + "/details/work_activities");
+                log.debug("Activities response keys: {}", activities.fieldNames());
+            } catch (Exception e) {
+                log.warn("Work activities not available for SOC {}: {}", socCode, e.getMessage());
+                activities = objectMapper.createObjectNode(); // Empty node
+            }
 
             // Fetch skills
-            JsonNode skills = callONetApi("/online/occupations/" + socCode + "/details/skills");
+            JsonNode skills = null;
+            try {
+                skills = callONetApi("/online/occupations/" + socCode + "/details/skills");
+                log.debug("Skills response keys: {}", skills.fieldNames());
+            } catch (Exception e) {
+                log.warn("Skills not available for SOC {}: {}", socCode, e.getMessage());
+                skills = objectMapper.createObjectNode();
+            }
 
             // Fetch knowledge
-            JsonNode knowledge = callONetApi("/online/occupations/" + socCode + "/details/knowledge");
+            JsonNode knowledge = null;
+            try {
+                knowledge = callONetApi("/online/occupations/" + socCode + "/details/knowledge");
+                log.debug("Knowledge response keys: {}", knowledge.fieldNames());
+            } catch (Exception e) {
+                log.warn("Knowledge not available for SOC {}: {}", socCode, e.getMessage());
+                knowledge = objectMapper.createObjectNode();
+            }
 
-            // Fetch technology skills
-            JsonNode technology = callONetApi("/online/occupations/" + socCode + "/details/technology_skills");
+            // Fetch technology skills (with ?all=1 to get complete list, not just top 10 categories)
+            JsonNode technology = null;
+            try {
+                technology = callONetApi("/online/occupations/" + socCode + "/details/technology_skills?all=1");
+                log.debug("Technology response keys: {}", technology.fieldNames());
+            } catch (Exception e) {
+                log.warn("Technology skills not available for SOC {}: {}", socCode, e.getMessage());
+                technology = objectMapper.createObjectNode();
+            }
+
+            // Fetch tasks (specific duties for this occupation)
+            JsonNode tasks = null;
+            try {
+                tasks = callONetApi("/online/occupations/" + socCode + "/details/tasks");
+                log.debug("Tasks response keys: {}", tasks.fieldNames());
+            } catch (Exception e) {
+                log.warn("Tasks not available for SOC {}: {}", socCode, e.getMessage());
+                tasks = objectMapper.createObjectNode();
+            }
 
             // Build comprehensive occupation data
             Map<String, Object> occupationData = new HashMap<>();
@@ -71,39 +110,138 @@ public class ONetIntegrationService {
             occupationData.put("title", occupation.path("title").asText());
             occupationData.put("description", occupation.path("description").asText());
 
-            // Extract tasks
-            List<String> tasks = new ArrayList<>();
-            JsonNode tasksNode = occupation.path("tasks");
-            if (tasksNode.isArray()) {
-                tasksNode.forEach(task -> tasks.add(task.path("statement").asText()));
+            // Extract tasks with importance and category from separate tasks endpoint
+            List<Map<String, Object>> tasksList = new ArrayList<>();
+            JsonNode tasksArray = tasks.path("task");
+            if (!tasksArray.isArray()) {
+                tasksArray = tasks.path("element");
             }
-            occupationData.put("tasks", tasks);
+
+            log.debug("Tasks array found: {}, isArray: {}, size: {}",
+                tasksArray != null, tasksArray.isArray(),
+                tasksArray.isArray() ? tasksArray.size() : 0);
+
+            if (tasksArray.isArray()) {
+                tasksArray.forEach(task -> {
+                    Map<String, Object> taskMap = new HashMap<>();
+                    // O*NET tasks have "statement" field for the task description
+                    String taskName = task.path("statement").asText();
+                    if (taskName.isEmpty()) {
+                        taskName = task.path("name").asText();
+                    }
+                    taskMap.put("name", taskName);
+
+                    // Importance score from O*NET
+                    double importance = task.path("score").path("value").asDouble(0);
+                    if (importance == 0) {
+                        importance = task.path("scale").path("value").asDouble(0);
+                    }
+                    taskMap.put("importance", importance);
+
+                    // Category: Core or Supplemental
+                    String category = task.path("task_type").path("name").asText("Core");
+                    if (category.isEmpty()) {
+                        category = task.path("category").asText("Core");
+                    }
+                    taskMap.put("category", category);
+
+                    if (!taskName.isEmpty()) {
+                        tasksList.add(taskMap);
+                    }
+                });
+            }
+            occupationData.put("tasks", tasksList);
+            log.info("Extracted {} O*NET tasks", tasksList.size());
 
             // Extract detailed work activities
             List<Map<String, Object>> activitiesList = new ArrayList<>();
-            JsonNode activitiesArray = activities.path("work_activities");
+
+            // Log the full activities response to debug
+            log.debug("Full activities response: {}", activities.toString().substring(0, Math.min(500, activities.toString().length())));
+
+            // Try multiple possible paths - O*NET uses "element" array
+            JsonNode activitiesArray = activities.path("element");
+            if (!activitiesArray.isArray()) {
+                activitiesArray = activities.path("work_activities");
+            }
+            if (!activitiesArray.isArray()) {
+                activitiesArray = activities.path("detailed_work_activity");
+            }
+
+            log.debug("Activities array found: {}, isArray: {}, size: {}",
+                activitiesArray != null, activitiesArray.isArray(),
+                activitiesArray.isArray() ? activitiesArray.size() : 0);
+
+            // Log first activity if found
+            if (activitiesArray.isArray() && activitiesArray.size() > 0) {
+                log.debug("First activity structure: {}", activitiesArray.get(0).toString());
+            }
+
             if (activitiesArray.isArray()) {
                 activitiesArray.forEach(activity -> {
                     Map<String, Object> activityMap = new HashMap<>();
-                    activityMap.put("name", activity.path("element_name").asText());
-                    activityMap.put("importance", activity.path("scale_value").asDouble(0));
+                    // Try both field name patterns
+                    String activityName = activity.path("name").asText();
+                    if (activityName.isEmpty()) {
+                        activityName = activity.path("element_name").asText();
+                    }
+                    activityMap.put("name", activityName);
+
+                    double importance = activity.path("score").path("value").asDouble(0);
+                    if (importance == 0) {
+                        importance = activity.path("scale_value").asDouble(0);
+                    }
+                    activityMap.put("importance", importance);
+
                     activitiesList.add(activityMap);
                 });
             }
             occupationData.put("detailed_work_activities", activitiesList);
+            log.info("Extracted {} detailed work activities", activitiesList.size());
 
             // Extract skills
             List<Map<String, Object>> skillsList = new ArrayList<>();
+
+            // Try multiple possible paths for skills
             JsonNode skillsArray = skills.path("skills");
+            if (!skillsArray.isArray()) {
+                skillsArray = skills.path("skill");
+            }
+            if (!skillsArray.isArray()) {
+                skillsArray = skills.path("element");
+            }
+
+            log.debug("Skills array found: {}, isArray: {}, size: {}",
+                skillsArray != null, skillsArray.isArray(),
+                skillsArray.isArray() ? skillsArray.size() : 0);
+
+            // Log first skill element structure if available
+            if (skillsArray.isArray() && skillsArray.size() > 0) {
+                log.debug("First skill structure: {}", skillsArray.get(0).toString());
+            }
+
             if (skillsArray.isArray()) {
                 skillsArray.forEach(skill -> {
                     Map<String, Object> skillMap = new HashMap<>();
-                    skillMap.put("name", skill.path("element_name").asText());
-                    skillMap.put("level", skill.path("scale_value").asDouble(0));
+                    // O*NET uses "name" not "element_name"
+                    String skillName = skill.path("name").asText();
+                    if (skillName.isEmpty()) {
+                        skillName = skill.path("element_name").asText();
+                    }
+                    skillMap.put("name", skillName);
+
+                    // O*NET uses "score.value" not "scale_value"
+                    double level = skill.path("score").path("value").asDouble(0);
+                    if (level == 0) {
+                        level = skill.path("scale_value").asDouble(0);
+                    }
+                    skillMap.put("level", level);
+
                     skillsList.add(skillMap);
                 });
             }
             occupationData.put("skills", skillsList);
+            log.info("Extracted {} O*NET skills", skillsList.size());
 
             // Extract knowledge
             List<Map<String, Object>> knowledgeList = new ArrayList<>();
@@ -119,14 +257,40 @@ public class ONetIntegrationService {
             occupationData.put("knowledge", knowledgeList);
 
             // Extract technology skills
-            List<String> techSkills = new ArrayList<>();
-            JsonNode techArray = technology.path("technology");
-            if (techArray.isArray()) {
-                techArray.forEach(tech -> {
-                    techSkills.add(tech.path("example").asText());
+            List<Map<String, Object>> techSkills = new ArrayList<>();
+
+            // Log technology response for debugging
+            log.debug("Full technology response: {}", technology.toString().substring(0, Math.min(500, technology.toString().length())));
+
+            // O*NET technology endpoint returns "category" array (NOT "element")
+            JsonNode categoryArray = technology.path("category");
+            log.debug("Technology category array found: {}, isArray: {}, size: {}",
+                categoryArray != null, categoryArray.isArray(),
+                categoryArray.isArray() ? categoryArray.size() : 0);
+
+            if (categoryArray.isArray() && categoryArray.size() > 0) {
+                log.debug("First category structure: {}", categoryArray.get(0).toString());
+
+                // O*NET returns categories with nested examples
+                categoryArray.forEach(category -> {
+                    String categoryName = category.path("title").path("name").asText("");
+                    JsonNode examples = category.path("example");
+
+                    if (examples.isArray()) {
+                        examples.forEach(example -> {
+                            Map<String, Object> techMap = new HashMap<>();
+                            String techName = example.path("name").asText();
+                            if (!techName.isEmpty()) {
+                                techMap.put("name", techName);
+                                techMap.put("category", categoryName);
+                                techSkills.add(techMap);
+                            }
+                        });
+                    }
                 });
             }
             occupationData.put("technology_skills", techSkills);
+            log.info("Extracted {} O*NET technology skills", techSkills.size());
 
             return objectMapper.writeValueAsString(occupationData);
 

@@ -27,7 +27,7 @@ import org.springframework.web.client.RestTemplate;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.util.List;
+import java.util.*;
 import java.util.Map;
 
 @Service
@@ -77,18 +77,44 @@ public class JobAnalysisService {
         log.info("Normalizing job title with LLM...");
         NormalizedJobDto normalized = normalizeJobWithLLM(experience);
 
-        // Step 3: Fetch O*NET data
-        log.info("Fetching O*NET occupation data for SOC code: {}", normalized.getSocCodes().get(0).getCode());
-        String onetData = fetchONetData(normalized.getSocCodes().get(0).getCode());
+        // Step 3: Fetch O*NET data for ALL mapped occupations (multi-occupation mapping)
+        log.info("Fetching O*NET data for {} occupations", normalized.getSocCodes().size());
+        Map<String, String> allOccupationData = new HashMap<>();
+        for (NormalizedJobDto.SocCodeMapping socMapping : normalized.getSocCodes()) {
+            String socCode = socMapping.getCode();
+            log.info("Fetching O*NET data for SOC: {} ({})", socCode, socMapping.getTitle());
+            String onetData = fetchONetData(socCode);
+            allOccupationData.put(socCode, onetData);
+        }
 
-        // Step 4: Update Neo4j graph
+        // Aggregate O*NET data from all occupations
+        String aggregatedOnetData = aggregateONetData(allOccupationData);
+        String primarySocCode = normalized.getSocCodes().get(0).getCode();
+
+        // Step 4: Update Neo4j graph with multi-occupation support
         log.info("Storing job analysis in Neo4j graph database");
         neo4jGraphService.storeJobAnalysisInGraph(resumeId, experienceId, experience, normalized);
-        neo4jGraphService.storeWorkActivities(normalized.getSocCodes().get(0).getCode(), onetData);
 
-        // Step 5: Evaluate job with LLM
+        // Store O*NET data for ALL occupations
+        for (Map.Entry<String, String> entry : allOccupationData.entrySet()) {
+            neo4jGraphService.storeWorkActivities(entry.getKey(), entry.getValue());
+        }
+
+        // Create MAPS_TO relationships for all occupations
+        neo4jGraphService.createMultiOccupationMappings(experienceId, normalized.getSocCodes());
+
+        // Step 4.5: Map job skills to O*NET soft skills and technologies (using aggregated data)
+        log.info("Mapping job skills to O*NET skills and technologies from {} occupations", allOccupationData.size());
+        neo4jGraphService.mapSkillsToONet(
+                experienceId,
+                primarySocCode,
+                neo4jGraphService.getLastExtractedSkills(),
+                aggregatedOnetData
+        );
+
+        // Step 5: Evaluate job with LLM (use primary occupation data)
         log.info("Evaluating job quality with LLM...");
-        Map<String, Object> evaluation = evaluateJobWithLLM(experience, normalized, onetData);
+        Map<String, Object> evaluation = evaluateJobWithLLM(experience, normalized, allOccupationData.get(primarySocCode));
 
         // Step 6: Save to database
         JobAnalysis analysis = createJobAnalysisEntity(resume, experience, normalized, evaluation);
@@ -214,6 +240,87 @@ public class JobAnalysisService {
     // ==================== O*NET Methods ====================
 
     /**
+     * Aggregate O*NET data from multiple occupations
+     * Combines skills, technologies, activities, and knowledge from all mapped occupations
+     */
+    private String aggregateONetData(Map<String, String> allOccupationData) {
+        try {
+            Map<String, Object> aggregated = new HashMap<>();
+            Set<Map<String, Object>> allSkills = new HashSet<>();
+            Set<Map<String, Object>> allTechnologies = new HashSet<>();
+            Set<Map<String, Object>> allActivities = new HashSet<>();
+            Set<Map<String, Object>> allKnowledge = new HashSet<>();
+
+            // Aggregate from all occupations
+            for (String onetDataJson : allOccupationData.values()) {
+                JsonNode onetData = objectMapper.readTree(onetDataJson);
+
+                // Aggregate skills
+                JsonNode skills = onetData.path("skills");
+                if (skills.isArray()) {
+                    skills.forEach(skill -> {
+                        Map<String, Object> skillMap = new HashMap<>();
+                        skillMap.put("name", skill.path("name").asText());
+                        skillMap.put("level", skill.path("level").asDouble(0));
+                        allSkills.add(skillMap);
+                    });
+                }
+
+                // Aggregate technology_skills
+                JsonNode techs = onetData.path("technology_skills");
+                if (techs.isArray()) {
+                    techs.forEach(tech -> {
+                        Map<String, Object> techMap = new HashMap<>();
+                        techMap.put("name", tech.path("name").asText());
+                        techMap.put("category", tech.path("category").asText(""));
+                        allTechnologies.add(techMap);
+                    });
+                }
+
+                // Aggregate detailed_work_activities
+                JsonNode activities = onetData.path("detailed_work_activities");
+                if (activities.isArray()) {
+                    activities.forEach(activity -> {
+                        Map<String, Object> activityMap = new HashMap<>();
+                        activityMap.put("name", activity.path("name").asText());
+                        activityMap.put("importance", activity.path("importance").asDouble(0));
+                        allActivities.add(activityMap);
+                    });
+                }
+
+                // Aggregate knowledge
+                JsonNode knowledge = onetData.path("knowledge");
+                if (knowledge.isArray()) {
+                    knowledge.forEach(k -> {
+                        Map<String, Object> knowledgeMap = new HashMap<>();
+                        knowledgeMap.put("name", k.path("name").asText());
+                        knowledgeMap.put("level", k.path("level").asDouble(0));
+                        allKnowledge.add(knowledgeMap);
+                    });
+                }
+            }
+
+            // Build aggregated result
+            aggregated.put("skills", new ArrayList<>(allSkills));
+            aggregated.put("technology_skills", new ArrayList<>(allTechnologies));
+            aggregated.put("detailed_work_activities", new ArrayList<>(allActivities));
+            aggregated.put("knowledge", new ArrayList<>(allKnowledge));
+            aggregated.put("code", "AGGREGATED");
+            aggregated.put("title", "Aggregated from " + allOccupationData.size() + " occupations");
+            aggregated.put("description", "Combined O*NET data from multiple occupations");
+
+            log.info("Aggregated O*NET data: {} skills, {} technologies, {} activities",
+                    allSkills.size(), allTechnologies.size(), allActivities.size());
+
+            return objectMapper.writeValueAsString(aggregated);
+
+        } catch (Exception e) {
+            log.error("Error aggregating O*NET data", e);
+            return "{}";
+        }
+    }
+
+    /**
      * Fetch O*NET occupation data from real O*NET Web Services API
      */
     private String fetchONetData(String socCode) {
@@ -249,11 +356,15 @@ public class JobAnalysisService {
         analysis.setPrimarySocCode(normalized.getSocCodes().get(0).getCode());
         analysis.setSeniorityLevel(normalized.getSeniority());
 
-        // Scores
-        analysis.setImpactScore(BigDecimal.valueOf((Double) evaluation.get("impactScore")));
-        analysis.setTechnicalDepthScore(BigDecimal.valueOf((Double) evaluation.get("technicalDepthScore")));
-        analysis.setLeadershipScore(BigDecimal.valueOf((Double) evaluation.get("leadershipScore")));
-        analysis.setOverallScore(BigDecimal.valueOf((Double) evaluation.get("overallScore")));
+        // Scores (with null-safe handling)
+        analysis.setImpactScore(BigDecimal.valueOf(
+            evaluation.get("impactScore") != null ? (Double) evaluation.get("impactScore") : 0.0));
+        analysis.setTechnicalDepthScore(BigDecimal.valueOf(
+            evaluation.get("technicalDepthScore") != null ? (Double) evaluation.get("technicalDepthScore") : 0.0));
+        analysis.setLeadershipScore(BigDecimal.valueOf(
+            evaluation.get("leadershipScore") != null ? (Double) evaluation.get("leadershipScore") : 0.0));
+        analysis.setOverallScore(BigDecimal.valueOf(
+            evaluation.get("overallScore") != null ? (Double) evaluation.get("overallScore") : 0.0));
 
         // Analysis text
         analysis.setRecruiterSummary((String) evaluation.get("recruiterSummary"));

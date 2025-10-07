@@ -9,7 +9,9 @@ Description: {description}
 Please analyze and provide:
 
 1. **Normalized Job Title**: The most appropriate standard title that would be recognized across industries
-2. **O*NET SOC Codes**: List up to 3 most relevant SOC codes with confidence scores (0-1). Higher confidence means better match.
+2. **O*NET SOC Codes**: List 2-3 most relevant SOC codes with confidence scores (0-1). Higher confidence means better match.
+   - Include multiple occupations to capture diverse skill sets (e.g., a DevOps engineer might map to Software Developers + Network Administrators + Database Administrators)
+   - This ensures we get comprehensive O*NET technology and skill coverage
 3. **Seniority Level**: One of: Entry, Mid, Senior, Lead, or Principal
 4. **Job Families**: Categories this role belongs to (e.g., "Software Development", "Project Management")
 5. **Key Responsibilities**: Main duties extracted and normalized from the description
@@ -21,7 +23,8 @@ Format your response as JSON:
   "normalizedTitle": "Senior Software Engineer",
   "socCodes": [
     {"code": "15-1252.00", "title": "Software Developers", "confidence": 0.95},
-    {"code": "15-1254.00", "title": "Web Developers", "confidence": 0.70}
+    {"code": "15-1244.00", "title": "Network and Computer Systems Administrators", "confidence": 0.60},
+    {"code": "15-1243.00", "title": "Database Administrators and Architects", "confidence": 0.50}
   ],
   "seniority": "Senior",
   "jobFamilies": ["Software Development", "Technology"],
