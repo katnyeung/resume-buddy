@@ -52,15 +52,19 @@ public class JobAnalysisService {
     @Value("${app.openai.model}")
     private String model;
 
+    @Value("${app.onet.data-refresh-days:30}")
+    private int onetDataRefreshDays;
+
     /**
      * Main orchestration method for job analysis
      * Steps:
      * 1. Get experience from DB
-     * 2. Normalize job title with LLM → SOC codes
-     * 3. Call O*NET API for occupation details (placeholder - you implement)
-     * 4. Store in Neo4j graph (placeholder - you implement)
-     * 5. Evaluate job with LLM
-     * 6. Save to job_analysis table
+     * 2. Comprehensive LLM analysis (normalize job + extract skills) - MERGED
+     * 3. Fetch O*NET data for all mapped occupations
+     * 4. Store in Neo4j graph (occupations, skills)
+     * 5. Parse description lines and map to O*NET activities/tasks - NEW
+     * 6. Evaluate job quality with LLM
+     * 7. Save to job_analysis table
      */
     @Transactional
     public JobAnalysisResultDto analyzeJob(String resumeId, String experienceId) {
@@ -73,9 +77,11 @@ public class JobAnalysisService {
         ResumeAnalysisExperience experience = experienceRepository.findById(experienceId)
                 .orElseThrow(() -> new RuntimeException("Experience not found: " + experienceId));
 
-        // Step 2: Normalize job with LLM
-        log.info("Normalizing job title with LLM...");
-        NormalizedJobDto normalized = normalizeJobWithLLM(experience);
+        // Step 2: Comprehensive LLM analysis (MERGED: normalization + skill extraction)
+        log.info("Running comprehensive job analysis with LLM (normalization + skills)...");
+        ComprehensiveAnalysisResult comprehensiveResult = analyzeJobComprehensive(experience);
+        NormalizedJobDto normalized = comprehensiveResult.getNormalized();
+        List<Map<String, Object>> skills = comprehensiveResult.getSkills();
 
         // Step 3: Fetch O*NET data for ALL mapped occupations (multi-occupation mapping)
         log.info("Fetching O*NET data for {} occupations", normalized.getSocCodes().size());
@@ -93,30 +99,44 @@ public class JobAnalysisService {
 
         // Step 4: Update Neo4j graph with multi-occupation support
         log.info("Storing job analysis in Neo4j graph database");
-        neo4jGraphService.storeJobAnalysisInGraph(resumeId, experienceId, experience, normalized);
+        neo4jGraphService.storeJobAnalysisInGraphWithSkills(resumeId, experienceId, experience, normalized, skills);
 
-        // Store O*NET data for ALL occupations
+        // Store O*NET data only if occupation is stale (not updated recently)
         for (Map.Entry<String, String> entry : allOccupationData.entrySet()) {
-            neo4jGraphService.storeWorkActivities(entry.getKey(), entry.getValue());
+            String socCode = entry.getKey();
+            if (neo4jGraphService.isOccupationDataStale(socCode, onetDataRefreshDays)) {
+                log.info("Refreshing O*NET data for SOC {} (stale or missing)", socCode);
+                neo4jGraphService.storeWorkActivities(socCode, entry.getValue());
+            } else {
+                log.info("Skipping O*NET refresh for SOC {} - updated within {} days",
+                        socCode, onetDataRefreshDays);
+            }
         }
 
         // Create MAPS_TO relationships for all occupations
         neo4jGraphService.createMultiOccupationMappings(experienceId, normalized.getSocCodes());
 
-        // Step 4.5: Map job skills to O*NET soft skills and technologies (using aggregated data)
-        log.info("Mapping job skills to O*NET skills and technologies from {} occupations", allOccupationData.size());
-        neo4jGraphService.mapSkillsToONet(
-                experienceId,
-                primarySocCode,
-                neo4jGraphService.getLastExtractedSkills(),
-                aggregatedOnetData
-        );
+        // Step 4.5: Map job skills to O*NET soft skills and technologies
+        log.info("Mapping job skills to O*NET taxonomy using graph data");
+        Map<String, List<String>> onetTaxonomy = neo4jGraphService.fetchONetTaxonomyFromGraph(primarySocCode);
 
-        // Step 5: Evaluate job with LLM (use primary occupation data)
+        if (onetTaxonomy.get("skills").isEmpty() && onetTaxonomy.get("technologies").isEmpty()) {
+            log.warn("O*NET taxonomy not found in graph for SOC {}, using LLM fallback", primarySocCode);
+            neo4jGraphService.mapSkillsToONet(experienceId, primarySocCode, skills, aggregatedOnetData);
+        } else {
+            neo4jGraphService.createSkillMappingsFromGraph(experienceId, primarySocCode, skills, onetTaxonomy);
+        }
+
+        // Step 5: Parse description lines and map to O*NET activities/tasks (NEW)
+        log.info("Parsing description lines and mapping to O*NET activities/tasks");
+        analyzeDescriptionLines(experienceId, experience.getDescription(), primarySocCode,
+                                normalized.getNormalizedTitle(), experience.getJobTitle());
+
+        // Step 6: Evaluate job with LLM (use primary occupation data)
         log.info("Evaluating job quality with LLM...");
         Map<String, Object> evaluation = evaluateJobWithLLM(experience, normalized, allOccupationData.get(primarySocCode));
 
-        // Step 6: Save to database
+        // Step 7: Save to database
         JobAnalysis analysis = createJobAnalysisEntity(resume, experience, normalized, evaluation);
         JobAnalysis saved = jobAnalysisRepository.save(analysis);
 
@@ -153,8 +173,96 @@ public class JobAnalysisService {
     // ==================== LLM Methods ====================
 
     /**
-     * Call LLM to normalize job title and map to O*NET SOC codes
+     * Comprehensive job analysis combining normalization and skill extraction
+     * MERGED LLM call to reduce API calls and cost
      */
+    private ComprehensiveAnalysisResult analyzeJobComprehensive(ResumeAnalysisExperience experience) {
+        try {
+            String prompt = loadPromptTemplate("prompts/comprehensive-job-analysis-prompt.txt");
+            prompt = prompt.replace("{jobTitle}", experience.getJobTitle() != null ? experience.getJobTitle() : "")
+                    .replace("{company}", experience.getCompanyName() != null ? experience.getCompanyName() : "")
+                    .replace("{startDate}", experience.getStartDate() != null ? experience.getStartDate() : "")
+                    .replace("{endDate}", experience.getEndDate() != null ? experience.getEndDate() : "")
+                    .replace("{description}", experience.getDescription() != null ? experience.getDescription() : "");
+
+            String llmResponse = callLLM(prompt);
+
+            // Parse the comprehensive response
+            com.resumebuddy.model.dto.ComprehensiveJobAnalysisDto comprehensiveDto =
+                objectMapper.readValue(llmResponse, com.resumebuddy.model.dto.ComprehensiveJobAnalysisDto.class);
+
+            // Convert to internal format
+            NormalizedJobDto normalized = convertToNormalizedJobDto(comprehensiveDto.getJobNormalization());
+            List<Map<String, Object>> skills = convertToSkillsList(comprehensiveDto.getSkillExtraction().getSkills());
+
+            return new ComprehensiveAnalysisResult(normalized, skills);
+
+        } catch (Exception e) {
+            log.error("Error in comprehensive job analysis with LLM", e);
+            throw new RuntimeException("Failed to analyze job comprehensively", e);
+        }
+    }
+
+    /**
+     * Parse description lines and map to O*NET activities/tasks
+     */
+    private void analyzeDescriptionLines(String experienceId, String description, String socCode,
+                                         String occupationTitle, String jobTitle) {
+        if (description == null || description.trim().isEmpty()) {
+            log.warn("No description to analyze for experience {}", experienceId);
+            return;
+        }
+
+        // Step 1: Parse description into lines
+        List<String> descriptionLines = neo4jGraphService.parseDescriptionIntoLines(experienceId, description);
+        if (descriptionLines.isEmpty()) {
+            log.warn("No description lines parsed for experience {}", experienceId);
+            return;
+        }
+
+        // Step 2: Fetch O*NET activities and tasks for this occupation
+        Map<String, List<String>> onetData = neo4jGraphService.fetchONetActivitiesAndTasks(socCode);
+        List<String> activities = onetData.get("activities");
+        List<String> tasks = onetData.get("tasks");
+
+        if (activities.isEmpty() && tasks.isEmpty()) {
+            log.warn("No O*NET activities/tasks found for SOC {}. Skipping line mapping.", socCode);
+            return;
+        }
+
+        // Step 3: Call LLM to map description lines to O*NET activities/tasks
+        try {
+            String prompt = loadPromptTemplate("prompts/description-activity-mapping-prompt.txt");
+            prompt = prompt.replace("{jobTitle}", jobTitle)
+                    .replace("{occupationTitle}", occupationTitle)
+                    .replace("{socCode}", socCode)
+                    .replace("{descriptionLines}", formatDescriptionLinesForPrompt(descriptionLines))
+                    .replace("{onetActivities}", formatONetDataForPrompt(activities))
+                    .replace("{onetTasks}", formatONetDataForPrompt(tasks));
+
+            String llmResponse = callLLM(prompt);
+
+            // Parse response
+            com.resumebuddy.model.dto.DescriptionLineMappingDto mappingDto =
+                objectMapper.readValue(llmResponse, com.resumebuddy.model.dto.DescriptionLineMappingDto.class);
+
+            // Convert to internal format and store in graph
+            List<Map<String, Object>> lineMappings = convertToLineMappings(mappingDto.getLineMappings());
+            neo4jGraphService.storeDescriptionLineMappings(experienceId, socCode, lineMappings);
+
+            log.info("Successfully mapped {} description lines to O*NET activities/tasks", lineMappings.size());
+
+        } catch (Exception e) {
+            log.error("Error mapping description lines to O*NET activities/tasks", e);
+            // Don't throw - allow job analysis to continue
+        }
+    }
+
+    /**
+     * Call LLM to normalize job title and map to O*NET SOC codes
+     * @deprecated Use analyzeJobComprehensive instead - merges normalization + skill extraction
+     */
+    @Deprecated
     private NormalizedJobDto normalizeJobWithLLM(ResumeAnalysisExperience experience) {
         try {
             String prompt = loadPromptTemplate("prompts/job-normalization-prompt.txt");
@@ -411,5 +519,154 @@ public class JobAnalysisService {
 
         dto.setCreatedAt(analysis.getCreatedAt());
         return dto;
+    }
+
+    // ==================== Conversion Helper Methods ====================
+
+    /**
+     * Convert ComprehensiveJobAnalysisDto.JobNormalizationDto to NormalizedJobDto
+     */
+    private NormalizedJobDto convertToNormalizedJobDto(
+            com.resumebuddy.model.dto.ComprehensiveJobAnalysisDto.JobNormalizationDto jobNorm) {
+
+        NormalizedJobDto normalized = new NormalizedJobDto();
+        normalized.setNormalizedTitle(jobNorm.getNormalizedTitle());
+        normalized.setSeniority(jobNorm.getSeniority());
+        normalized.setJobFamilies(jobNorm.getJobFamilies());
+        normalized.setKeyResponsibilities(jobNorm.getKeyResponsibilities());
+        normalized.setTechnicalDepth(jobNorm.getTechnicalDepth());
+        normalized.setHasLeadership(jobNorm.getHasLeadership());
+        normalized.setLeadershipScope(jobNorm.getLeadershipScope());
+
+        // Convert SOC codes
+        List<NormalizedJobDto.SocCodeMapping> socCodes = new ArrayList<>();
+        for (com.resumebuddy.model.dto.ComprehensiveJobAnalysisDto.SocCodeMappingDto socDto : jobNorm.getSocCodes()) {
+            NormalizedJobDto.SocCodeMapping mapping = new NormalizedJobDto.SocCodeMapping();
+            mapping.setCode(socDto.getCode());
+            mapping.setTitle(socDto.getTitle());
+            mapping.setConfidence(socDto.getConfidence());
+            socCodes.add(mapping);
+        }
+        normalized.setSocCodes(socCodes);
+
+        return normalized;
+    }
+
+    /**
+     * Convert SkillDto list to Map<String, Object> list for Neo4j
+     */
+    private List<Map<String, Object>> convertToSkillsList(
+            List<com.resumebuddy.model.dto.ComprehensiveJobAnalysisDto.SkillDto> skillDtos) {
+
+        List<Map<String, Object>> skills = new ArrayList<>();
+        for (com.resumebuddy.model.dto.ComprehensiveJobAnalysisDto.SkillDto skillDto : skillDtos) {
+            Map<String, Object> skill = new HashMap<>();
+            skill.put("name", skillDto.getName());
+            skill.put("category", skillDto.getCategory());
+            skill.put("subcategory", skillDto.getSubcategory());
+            skill.put("proficiencyLevel", skillDto.getProficiencyLevel());
+            skill.put("isTechnical", skillDto.getIsTechnical());
+            skill.put("isPrimary", skillDto.getIsPrimary());
+            skill.put("mentionedCount", skillDto.getMentionedCount());
+            skills.add(skill);
+        }
+        return skills;
+    }
+
+    /**
+     * Convert LineMappingDto list to Map<String, Object> list for Neo4j
+     */
+    private List<Map<String, Object>> convertToLineMappings(
+            List<com.resumebuddy.model.dto.DescriptionLineMappingDto.LineMappingDto> lineDtos) {
+
+        List<Map<String, Object>> lineMappings = new ArrayList<>();
+        for (com.resumebuddy.model.dto.DescriptionLineMappingDto.LineMappingDto lineDto : lineDtos) {
+            Map<String, Object> lineMapping = new HashMap<>();
+            lineMapping.put("sequence", lineDto.getSequence());
+            lineMapping.put("text", lineDto.getText());
+            lineMapping.put("impactMetrics", lineDto.getImpactMetrics());
+            lineMapping.put("hasQuantifiableImpact", lineDto.getHasQuantifiableImpact());
+            lineMapping.put("impactLevel", lineDto.getImpactLevel());
+            lineMapping.put("scope", lineDto.getScope());
+
+            // Convert activities
+            List<Map<String, Object>> activities = new ArrayList<>();
+            if (lineDto.getActivities() != null) {
+                for (com.resumebuddy.model.dto.DescriptionLineMappingDto.ActivityMappingDto actDto : lineDto.getActivities()) {
+                    Map<String, Object> activity = new HashMap<>();
+                    activity.put("activityName", actDto.getActivityName());
+                    activity.put("activityId", actDto.getActivityId());
+                    activity.put("confidence", actDto.getConfidence());
+                    activity.put("reasoning", actDto.getReasoning());
+                    activities.add(activity);
+                }
+            }
+            lineMapping.put("activities", activities);
+
+            // Convert tasks
+            List<Map<String, Object>> tasks = new ArrayList<>();
+            if (lineDto.getTasks() != null) {
+                for (com.resumebuddy.model.dto.DescriptionLineMappingDto.TaskMappingDto taskDto : lineDto.getTasks()) {
+                    Map<String, Object> task = new HashMap<>();
+                    task.put("taskName", taskDto.getTaskName());
+                    task.put("taskId", taskDto.getTaskId());
+                    task.put("confidence", taskDto.getConfidence());
+                    task.put("reasoning", taskDto.getReasoning());
+                    tasks.add(task);
+                }
+            }
+            lineMapping.put("tasks", tasks);
+
+            lineMappings.add(lineMapping);
+        }
+        return lineMappings;
+    }
+
+    /**
+     * Format description lines for LLM prompt
+     */
+    private String formatDescriptionLinesForPrompt(List<String> lines) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            sb.append(String.format("%d. %s\n", i + 1, lines.get(i)));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Format O*NET activities/tasks for LLM prompt
+     */
+    private String formatONetDataForPrompt(List<String> data) {
+        StringBuilder sb = new StringBuilder();
+        for (String item : data) {
+            String[] parts = item.split("\\|");
+            if (parts.length == 2) {
+                sb.append(String.format("- ID: %s | Name: %s\n", parts[0], parts[1]));
+            }
+        }
+        return sb.toString();
+    }
+
+    // ==================== Inner Classes ====================
+
+    /**
+     * Result of comprehensive analysis (normalization + skills)
+     */
+    private static class ComprehensiveAnalysisResult {
+        private final NormalizedJobDto normalized;
+        private final List<Map<String, Object>> skills;
+
+        public ComprehensiveAnalysisResult(NormalizedJobDto normalized, List<Map<String, Object>> skills) {
+            this.normalized = normalized;
+            this.skills = skills;
+        }
+
+        public NormalizedJobDto getNormalized() {
+            return normalized;
+        }
+
+        public List<Map<String, Object>> getSkills() {
+            return skills;
+        }
     }
 }

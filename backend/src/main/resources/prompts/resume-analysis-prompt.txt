@@ -106,7 +106,7 @@ Response format:
         "companyName": "Company name",
         "startDate": "Start date as written",
         "endDate": "End date as written or 'Present'",
-        "description": "Combined description from all bullet points/lines for this job. IMPORTANT: Preserve newlines between bullet points by using \\n between each point."
+        "description": "Combined description from all bullet points/lines for this job. IMPORTANT: Separate bullet points with newline characters (use \n in JSON, which will be interpreted as actual newlines)."
       }
     ],
     "skills": [

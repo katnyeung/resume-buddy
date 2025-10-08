@@ -17,6 +17,10 @@ import org.springframework.data.neo4j.core.schema.Property;
  * - Description: "Research, design, and develop computer and network software..."
  *
  * Data Source: O*NET API or mock data
+ *
+ * Caching Strategy:
+ * - onetDataUpdatedAt tracks when O*NET child data (skills, technologies, tasks, activities) was last refreshed
+ * - This prevents redundant API calls and Neo4j operations for recently processed occupations
  */
 @Node("Occupation")
 @Data
@@ -39,4 +43,7 @@ public class Occupation {
 
     @Property("source")
     private String source;  // "ONET" or "MOCK" (for testing)
+
+    @Property("onet_data_updated_at")
+    private java.time.LocalDateTime onetDataUpdatedAt;  // When O*NET child nodes were last populated
 }

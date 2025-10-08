@@ -6,10 +6,9 @@ import com.resumebuddy.model.ResumeAnalysisExperience;
 import com.resumebuddy.model.dto.NormalizedJobDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.neo4j.driver.Driver;
-import org.neo4j.driver.Session;
-import org.neo4j.driver.TransactionContext;
-import org.neo4j.driver.Values;
+import org.neo4j.driver.*;
+import org.neo4j.driver.Record;
+import org.neo4j.driver.Result;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -20,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.time.ZonedDateTime;
 import java.util.*;
 
 /**
@@ -45,12 +45,65 @@ public class Neo4jGraphService {
     private String baseUrl;
 
     /**
-     * Store job experience and occupation mapping in Neo4j graph
-     * Enhanced to also extract and store skills
+     * Store job experience and occupation mapping in Neo4j graph with pre-extracted skills
+     * This version accepts skills from comprehensive LLM analysis
      */
     // Instance variable to store skills for later mapping
     private List<Map<String, Object>> lastExtractedSkills = new ArrayList<>();
 
+    public void storeJobAnalysisInGraphWithSkills(
+            String resumeId,
+            String experienceId,
+            ResumeAnalysisExperience experience,
+            NormalizedJobDto normalized,
+            List<Map<String, Object>> skills) {
+
+        log.info("Storing job analysis in Neo4j graph for experience: {}", experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            // Step 0: Clean up existing data for this experience (in case of re-analysis)
+            session.executeWrite(tx -> {
+                cleanupExistingJobData(tx, experienceId);
+                return null;
+            });
+
+            log.info("Using {} pre-extracted skills from comprehensive analysis", skills.size());
+
+            // Save for later O*NET mapping
+            this.lastExtractedSkills = skills;
+
+            // Step 1: Store everything in Neo4j
+            session.executeWrite(tx -> {
+                // Create or merge ALL Occupation nodes (multi-occupation support)
+                for (NormalizedJobDto.SocCodeMapping socMapping : normalized.getSocCodes()) {
+                    createOccupationNodeForSocCode(tx, socMapping, normalized);
+                }
+
+                // Create JobExperience node (MERGE not CREATE)
+                createJobExperienceNode(tx, resumeId, experienceId, experience, normalized);
+
+                // Note: MAPS_TO relationships are created later by createMultiOccupationMappings()
+                // to ensure all occupation nodes exist first
+
+                // Create Skill nodes and relationships
+                createSkillNodesAndRelationships(tx, experienceId, skills);
+
+                return null;
+            });
+
+            log.info("Successfully stored job analysis in Neo4j graph with {} skills", skills.size());
+
+        } catch (Exception e) {
+            log.error("Error storing job analysis in Neo4j graph", e);
+            // Don't throw - allow the analysis to continue even if graph storage fails
+        }
+    }
+
+    /**
+     * Store job experience and occupation mapping in Neo4j graph
+     * @deprecated Use storeJobAnalysisInGraphWithSkills instead - accepts pre-extracted skills
+     */
+    @Deprecated
     public void storeJobAnalysisInGraph(
             String resumeId,
             String experienceId,
@@ -132,7 +185,7 @@ public class Neo4jGraphService {
         String query = """
             MERGE (o:Occupation {soc_code: $socCode})
             SET o.title = $title,
-                o.normalized_title = $normalizedTitle,
+                o.normalized_title = $title,
                 o.confidence = $confidence,
                 o.seniority_level = $seniority,
                 o.technical_depth = $technicalDepth,
@@ -144,7 +197,6 @@ public class Neo4jGraphService {
         tx.run(query, Values.parameters(
                 "socCode", socMapping.getCode(),
                 "title", socMapping.getTitle(),
-                "normalizedTitle", normalized.getNormalizedTitle(),
                 "confidence", socMapping.getConfidence(),
                 "seniority", normalized.getSeniority(),
                 "technicalDepth", normalized.getTechnicalDepth(),
@@ -273,6 +325,54 @@ public class Neo4jGraphService {
     }
 
     /**
+     * Check if occupation's O*NET data (skills, technologies, tasks, activities)
+     * needs to be refreshed based on last update time.
+     *
+     * @param socCode SOC code to check
+     * @param daysThreshold Number of days before data is considered stale
+     * @return true if data doesn't exist or is older than threshold, false otherwise
+     */
+    public boolean isOccupationDataStale(String socCode, int daysThreshold) {
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    MATCH (o:Occupation {soc_code: $socCode})
+                    RETURN o.onet_data_updated_at AS lastUpdated
+                    """;
+
+                Result result = tx.run(query, Values.parameters("socCode", socCode));
+
+                if (!result.hasNext()) {
+                    // Occupation doesn't exist yet - needs to be populated
+                    log.debug("SOC {} not found in graph - needs O*NET data", socCode);
+                    return true;
+                }
+
+                Record record = result.single();
+                if (record.get("lastUpdated").isNull()) {
+                    // O*NET data never populated for this occupation
+                    log.debug("SOC {} exists but O*NET data never populated", socCode);
+                    return true;
+                }
+
+                // Neo4j datetime() returns ZonedDateTime, not LocalDateTime
+                java.time.ZonedDateTime lastUpdated = record.get("lastUpdated").asZonedDateTime();
+                java.time.ZonedDateTime threshold = java.time.ZonedDateTime.now().minusDays(daysThreshold);
+                boolean isStale = lastUpdated.isBefore(threshold);
+
+                log.debug("SOC {} last O*NET update: {}, threshold: {} days, isStale: {}",
+                        socCode, lastUpdated, daysThreshold, isStale);
+
+                return isStale;
+            });
+        } catch (Exception e) {
+            log.error("Error checking occupation staleness for SOC {}: {}", socCode, e.getMessage());
+            // On error, return true to trigger refresh (fail-safe behavior)
+            return true;
+        }
+    }
+
+    /**
      * Store work activities from O*NET data
      */
     public void storeWorkActivities(String socCode, String onetData) {
@@ -324,7 +424,23 @@ public class Neo4jGraphService {
                 });
             }
 
-            log.info("Created O*NET skill/technology/task nodes for occupation: {}", socCode);
+            // Extract and create O*NET Activity nodes (detailed work activities)
+            JsonNode activitiesArray = root.path("detailed_work_activities");
+            if (activitiesArray.isArray()) {
+                activitiesArray.forEach(activity -> {
+                    createONetActivityNode(tx, socCode, activity);
+                });
+            }
+
+            // Update occupation's onet_data_updated_at timestamp to mark data as fresh
+            String updateTimestampQuery = """
+                MATCH (o:Occupation {soc_code: $socCode})
+                SET o.onet_data_updated_at = datetime()
+                RETURN o
+                """;
+            tx.run(updateTimestampQuery, Values.parameters("socCode", socCode));
+
+            log.info("Created O*NET skill/technology/task/activity nodes for occupation: {}", socCode);
 
         } catch (Exception e) {
             log.error("Error parsing O*NET data for {}: {}", socCode, e.getMessage());
@@ -488,6 +604,203 @@ public class Neo4jGraphService {
         ));
 
         log.debug("Created ONetActivity: {} for occupation {}", activityName, socCode);
+    }
+
+    /**
+     * Fetch O*NET skills and technologies for an occupation from Neo4j graph
+     * instead of using LLM to map them. This avoids expensive LLM calls by
+     * querying existing O*NET taxonomy data already stored in the graph.
+     *
+     * @param socCode SOC code to fetch O*NET data for
+     * @return Map with "skills" and "technologies" lists
+     */
+    public Map<String, List<String>> fetchONetTaxonomyFromGraph(String socCode) {
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                Map<String, List<String>> result = new HashMap<>();
+
+                // Fetch O*NET soft skills
+                String skillQuery = """
+                    MATCH (o:Occupation {soc_code: $socCode})-[:REQUIRES_SKILL]->(s:ONetSkill)
+                    RETURN s.name AS name
+                    ORDER BY s.importance DESC
+                    """;
+                Result skillResult = tx.run(skillQuery, Values.parameters("socCode", socCode));
+                List<String> skills = skillResult.list(record -> record.get("name").asString());
+
+                // Fetch O*NET technologies
+                String techQuery = """
+                    MATCH (o:Occupation {soc_code: $socCode})-[:USES_TECHNOLOGY]->(t:ONetTechnology)
+                    RETURN t.name AS name
+                    ORDER BY t.name
+                    """;
+                Result techResult = tx.run(techQuery, Values.parameters("socCode", socCode));
+                List<String> technologies = techResult.list(record -> record.get("name").asString());
+
+                result.put("skills", skills);
+                result.put("technologies", technologies);
+
+                log.info("Fetched from Neo4j graph for SOC {}: {} soft skills, {} technologies",
+                        socCode, skills.size(), technologies.size());
+
+                return result;
+            });
+        } catch (Exception e) {
+            log.error("Error fetching O*NET taxonomy from graph for SOC {}: {}", socCode, e.getMessage());
+            return Map.of("skills", new ArrayList<>(), "technologies", new ArrayList<>());
+        }
+    }
+
+    /**
+     * Create skill mapping relationships using rule-based matching instead of LLM.
+     * Uses simple string matching and category-based rules to map job skills to O*NET taxonomy.
+     * This is much faster and cheaper than LLM-based mapping while maintaining good accuracy.
+     *
+     * @param experienceId The job experience ID
+     * @param socCode The SOC code for the occupation
+     * @param jobSkills List of extracted job skills
+     * @param onetTaxonomy Map containing "skills" and "technologies" from Neo4j graph
+     */
+    public void createSkillMappingsFromGraph(
+            String experienceId,
+            String socCode,
+            List<Map<String, Object>> jobSkills,
+            Map<String, List<String>> onetTaxonomy) {
+
+        List<String> onetSkills = onetTaxonomy.get("skills");
+        List<String> onetTechnologies = onetTaxonomy.get("technologies");
+
+        log.info("Creating skill mappings for {} job skills using graph taxonomy ({} O*NET skills, {} technologies)",
+                jobSkills.size(), onetSkills.size(), onetTechnologies.size());
+
+        try (Session session = neo4jDriver.session()) {
+            session.executeWrite(tx -> {
+                int softSkillMappings = 0;
+                int techMappings = 0;
+
+                for (Map<String, Object> jobSkill : jobSkills) {
+                    String skillName = (String) jobSkill.get("name");
+                    String category = (String) jobSkill.get("category");
+
+                    // Rule 1: Exact match with O*NET technology (case-insensitive)
+                    for (String tech : onetTechnologies) {
+                        if (skillName.equalsIgnoreCase(tech)) {
+                            createRelatedToRelationshipRuleBased(tx, experienceId, skillName, tech, socCode, 1.0, "exact");
+                            techMappings++;
+                            break;
+                        }
+                    }
+
+                    // Rule 2: Partial/substring match for technologies
+                    for (String tech : onetTechnologies) {
+                        String skillLower = skillName.toLowerCase();
+                        String techLower = tech.toLowerCase();
+
+                        if (skillLower.contains(techLower) || techLower.contains(skillLower)) {
+                            // Skip if already matched exactly
+                            if (!skillName.equalsIgnoreCase(tech)) {
+                                createRelatedToRelationshipRuleBased(tx, experienceId, skillName, tech, socCode, 0.85, "partial");
+                                techMappings++;
+                            }
+                        }
+                    }
+
+                    // Rule 3: Match extracted soft skills with O*NET soft skills
+                    // Soft skills like "Programming", "Critical Thinking" extracted from job description
+                    // will match O*NET soft skills directly (handled by exact/partial match above for skills too)
+                    for (String onetSkill : onetSkills) {
+                        String skillLower = skillName.toLowerCase();
+                        String onetSkillLower = onetSkill.toLowerCase();
+
+                        // Exact match
+                        if (skillLower.equals(onetSkillLower)) {
+                            createDemonstratesRelationshipRuleBased(tx, experienceId, skillName, onetSkill, socCode, 1.0);
+                            softSkillMappings++;
+                            break;
+                        }
+                        // Partial match (e.g., "Programming Languages" contains "Programming")
+                        else if (skillLower.contains(onetSkillLower) || onetSkillLower.contains(skillLower)) {
+                            createDemonstratesRelationshipRuleBased(tx, experienceId, skillName, onetSkill, socCode, 0.85);
+                            softSkillMappings++;
+                            break;
+                        }
+                    }
+                }
+
+                log.info("Created {} soft skill mappings and {} technology mappings using rule-based matching",
+                        softSkillMappings, techMappings);
+
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("Error creating skill mappings from graph: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Helper method to check if a list contains a string (case-insensitive)
+     */
+    private boolean containsIgnoreCase(List<String> list, String target) {
+        return list.stream().anyMatch(item -> item.equalsIgnoreCase(target));
+    }
+
+    /**
+     * Create DEMONSTRATES relationship using rule-based mapping (not LLM)
+     */
+    private void createDemonstratesRelationshipRuleBased(TransactionContext tx, String experienceId,
+                                                         String jobSkill, String onetSkill, String socCode, double confidence) {
+        String skillId = "skill-" + jobSkill.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+        String onetSkillId = "onet-skill-" + onetSkill.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+
+        String query = """
+            MATCH (exp:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(s:Skill {id: $skillId})
+            MATCH (os:ONetSkill {id: $onetSkillId})
+            MERGE (s)-[r:DEMONSTRATES]->(os)
+            SET r.confidence = $confidence,
+                r.mapped_by = 'rule',
+                r.mapped_at = datetime()
+            RETURN s, r, os
+            """;
+
+        tx.run(query, Values.parameters(
+                "experienceId", experienceId,
+                "skillId", skillId,
+                "onetSkillId", onetSkillId,
+                "confidence", confidence
+        ));
+
+        log.debug("Created DEMONSTRATES: {} -> {} (confidence: {}, rule-based)", jobSkill, onetSkill, confidence);
+    }
+
+    /**
+     * Create RELATED_TO relationship using rule-based mapping (not LLM)
+     */
+    private void createRelatedToRelationshipRuleBased(TransactionContext tx, String experienceId, String jobSkill,
+                                                      String onetTech, String socCode, double confidence, String relationshipType) {
+        String skillId = "skill-" + jobSkill.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+        String techId = "onet-tech-" + onetTech.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+
+        String query = """
+            MATCH (exp:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(s:Skill {id: $skillId})
+            MATCH (t:ONetTechnology {id: $techId})
+            MERGE (s)-[r:RELATED_TO]->(t)
+            SET r.confidence = $confidence,
+                r.relationship = $relationship,
+                r.mapped_by = 'rule',
+                r.mapped_at = datetime()
+            RETURN s, r, t
+            """;
+
+        tx.run(query, Values.parameters(
+                "experienceId", experienceId,
+                "skillId", skillId,
+                "techId", techId,
+                "confidence", confidence,
+                "relationship", relationshipType
+        ));
+
+        log.debug("Created RELATED_TO: {} -> {} ({}, confidence: {}, rule-based)",
+                jobSkill, onetTech, relationshipType, confidence);
     }
 
     /**
@@ -1037,5 +1350,277 @@ public class Neo4jGraphService {
      */
     private String generateSkillId(String name) {
         return "skill-" + name.toLowerCase().replaceAll("[^a-z0-9]+", "-");
+    }
+
+    // ==================== DESCRIPTION LINE PARSING ====================
+
+    /**
+     * Parse job description into individual lines and store in Neo4j graph
+     * Creates DescriptionLine nodes and HAS_DESCRIPTION_LINE relationships
+     */
+    public List<String> parseDescriptionIntoLines(String experienceId, String description) {
+        if (description == null || description.trim().isEmpty()) {
+            log.warn("Empty description for experience {}", experienceId);
+            return new ArrayList<>();
+        }
+
+        // Handle both actual newlines and escaped newlines (\n as string)
+        // First, convert escaped newlines to actual newlines if needed
+        String normalizedDescription = description.replace("\\n", "\n");
+
+        // Split description by newlines (handles \r\n, \n, and \r)
+        String[] lines = normalizedDescription.split("\\r?\\n");
+        List<String> parsedLines = new ArrayList<>();
+
+        log.debug("Attempting to parse {} raw lines from description", lines.length);
+
+        try (Session session = neo4jDriver.session()) {
+            session.executeWrite(tx -> {
+                // Clean up existing description lines first
+                String cleanupQuery = """
+                    MATCH (je:JobExperience {id: $experienceId})-[r:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)
+                    DETACH DELETE dl
+                    """;
+                tx.run(cleanupQuery, Values.parameters("experienceId", experienceId));
+
+                // Create new description line nodes
+                int sequence = 1;
+                for (String line : lines) {
+                    String trimmedLine = line.trim();
+
+                    // Skip empty lines or lines with only bullets/dashes
+                    if (trimmedLine.isEmpty() || trimmedLine.matches("^[-•*]+$")) {
+                        continue;
+                    }
+
+                    // Remove common bullet point characters at the start
+                    trimmedLine = trimmedLine.replaceFirst("^[-•*\\s]+", "").trim();
+
+                    if (!trimmedLine.isEmpty()) {
+                        createDescriptionLineNode(tx, experienceId, sequence, trimmedLine);
+                        parsedLines.add(trimmedLine);
+                        log.debug("Created DescriptionLine {} with text: {}",
+                                  sequence, trimmedLine.substring(0, Math.min(50, trimmedLine.length())) + "...");
+                        sequence++;
+                    }
+                }
+
+                log.info("Parsed {} description lines for experience {}", parsedLines.size(), experienceId);
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("Error parsing description into lines for experience {}", experienceId, e);
+        }
+
+        return parsedLines;
+    }
+
+    /**
+     * Create DescriptionLine node and link to JobExperience
+     */
+    private void createDescriptionLineNode(TransactionContext tx, String experienceId, int sequence, String text) {
+        String lineId = "desc-line-" + experienceId + "-" + sequence;
+
+        String query = """
+            MERGE (dl:DescriptionLine {id: $lineId})
+            SET dl.experience_id = $experienceId,
+                dl.sequence = $sequence,
+                dl.text = $text,
+                dl.parsed_at = datetime()
+            WITH dl
+            MATCH (je:JobExperience {id: $experienceId})
+            MERGE (je)-[r:HAS_DESCRIPTION_LINE {sequence: $sequence}]->(dl)
+            RETURN dl
+            """;
+
+        tx.run(query, Values.parameters(
+            "lineId", lineId,
+            "experienceId", experienceId,
+            "sequence", sequence,
+            "text", text
+        ));
+
+        log.debug("Created DescriptionLine node: {} (sequence {})", lineId, sequence);
+    }
+
+    /**
+     * Store description line mappings to O*NET activities and tasks
+     * Called after LLM analyzes description lines
+     */
+    public void storeDescriptionLineMappings(
+            String experienceId,
+            String socCode,
+            List<Map<String, Object>> lineMappings) {
+
+        log.info("Storing {} description line mappings for experience {}", lineMappings.size(), experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            session.executeWrite(tx -> {
+                for (Map<String, Object> lineMapping : lineMappings) {
+                    int sequence = (Integer) lineMapping.get("sequence");
+                    String lineId = "desc-line-" + experienceId + "-" + sequence;
+
+                    // Update DescriptionLine with impact data
+                    updateDescriptionLineMetadata(tx, lineId, lineMapping);
+
+                    // Create DEMONSTRATES_ACTIVITY relationships
+                    List<Map<String, Object>> activities =
+                        (List<Map<String, Object>>) lineMapping.get("activities");
+                    if (activities != null) {
+                        for (Map<String, Object> activity : activities) {
+                            createDemonstratesActivityRelationship(tx, lineId, activity);
+                        }
+                    }
+
+                    // Create DEMONSTRATES_TASK relationships
+                    List<Map<String, Object>> tasks =
+                        (List<Map<String, Object>>) lineMapping.get("tasks");
+                    if (tasks != null) {
+                        for (Map<String, Object> task : tasks) {
+                            createDemonstratesTaskRelationship(tx, lineId, task);
+                        }
+                    }
+                }
+                return null;
+            });
+
+            log.info("Successfully stored description line mappings for experience {}", experienceId);
+
+        } catch (Exception e) {
+            log.error("Error storing description line mappings", e);
+        }
+    }
+
+    /**
+     * Update DescriptionLine node with impact metadata
+     */
+    private void updateDescriptionLineMetadata(TransactionContext tx, String lineId, Map<String, Object> metadata) {
+        String query = """
+            MATCH (dl:DescriptionLine {id: $lineId})
+            SET dl.impact_metrics = $impactMetrics,
+                dl.has_quantifiable_impact = $hasQuantifiableImpact,
+                dl.impact_level = $impactLevel,
+                dl.scope = $scope
+            RETURN dl
+            """;
+
+        tx.run(query, Values.parameters(
+            "lineId", lineId,
+            "impactMetrics", metadata.get("impactMetrics"),
+            "hasQuantifiableImpact", metadata.get("hasQuantifiableImpact"),
+            "impactLevel", metadata.get("impactLevel"),
+            "scope", metadata.get("scope")
+        ));
+    }
+
+    /**
+     * Create DEMONSTRATES_ACTIVITY relationship: DescriptionLine -> ONetActivity
+     */
+    private void createDemonstratesActivityRelationship(
+            TransactionContext tx,
+            String lineId,
+            Map<String, Object> activity) {
+
+        String activityId = (String) activity.get("activityId");
+        Double confidence = (Double) activity.get("confidence");
+        String reasoning = (String) activity.get("reasoning");
+
+        String query = """
+            MATCH (dl:DescriptionLine {id: $lineId})
+            MATCH (oa:ONetActivity {id: $activityId})
+            MERGE (dl)-[r:DEMONSTRATES_ACTIVITY]->(oa)
+            SET r.confidence = $confidence,
+                r.reasoning = $reasoning,
+                r.mapped_at = datetime()
+            RETURN dl, r, oa
+            """;
+
+        tx.run(query, Values.parameters(
+            "lineId", lineId,
+            "activityId", activityId,
+            "confidence", confidence,
+            "reasoning", reasoning
+        ));
+
+        log.debug("Created DEMONSTRATES_ACTIVITY: {} -> {} (confidence: {})",
+            lineId, activityId, confidence);
+    }
+
+    /**
+     * Create DEMONSTRATES_TASK relationship: DescriptionLine -> ONetTask
+     */
+    private void createDemonstratesTaskRelationship(
+            TransactionContext tx,
+            String lineId,
+            Map<String, Object> task) {
+
+        String taskId = (String) task.get("taskId");
+        Double confidence = (Double) task.get("confidence");
+        String reasoning = (String) task.get("reasoning");
+
+        String query = """
+            MATCH (dl:DescriptionLine {id: $lineId})
+            MATCH (ot:ONetTask {id: $taskId})
+            MERGE (dl)-[r:DEMONSTRATES_TASK]->(ot)
+            SET r.confidence = $confidence,
+                r.reasoning = $reasoning,
+                r.mapped_at = datetime()
+            RETURN dl, r, ot
+            """;
+
+        tx.run(query, Values.parameters(
+            "lineId", lineId,
+            "taskId", taskId,
+            "confidence", confidence,
+            "reasoning", reasoning
+        ));
+
+        log.debug("Created DEMONSTRATES_TASK: {} -> {} (confidence: {})",
+            lineId, taskId, confidence);
+    }
+
+    /**
+     * Fetch O*NET activities and tasks for description line mapping
+     * Returns formatted lists for LLM prompt
+     */
+    public Map<String, List<String>> fetchONetActivitiesAndTasks(String socCode) {
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                Map<String, List<String>> result = new HashMap<>();
+
+                // Fetch O*NET activities
+                String activityQuery = """
+                    MATCH (o:Occupation {soc_code: $socCode})-[:REQUIRES_ACTIVITY]->(a:ONetActivity)
+                    RETURN a.id AS id, a.name AS name
+                    ORDER BY a.importance DESC
+                    """;
+                Result activityResult = tx.run(activityQuery, Values.parameters("socCode", socCode));
+                List<String> activities = activityResult.list(record ->
+                    String.format("%s|%s", record.get("id").asString(), record.get("name").asString())
+                );
+
+                // Fetch O*NET tasks
+                String taskQuery = """
+                    MATCH (o:Occupation {soc_code: $socCode})-[:REQUIRES_TASK]->(t:ONetTask)
+                    RETURN t.id AS id, t.name AS name
+                    ORDER BY t.importance DESC
+                    """;
+                Result taskResult = tx.run(taskQuery, Values.parameters("socCode", socCode));
+                List<String> tasks = taskResult.list(record ->
+                    String.format("%s|%s", record.get("id").asString(), record.get("name").asString())
+                );
+
+                result.put("activities", activities);
+                result.put("tasks", tasks);
+
+                log.info("Fetched {} activities and {} tasks for SOC {}",
+                    activities.size(), tasks.size(), socCode);
+
+                return result;
+            });
+        } catch (Exception e) {
+            log.error("Error fetching O*NET activities/tasks for SOC {}", socCode, e);
+            return Map.of("activities", new ArrayList<>(), "tasks", new ArrayList<>());
+        }
     }
 }
