@@ -118,3 +118,29 @@ export interface ProjectDto {
   technologiesUsed?: string;
   projectUrl?: string;
 }
+
+// Job Analysis types
+export interface JobAnalysisResult {
+  id: string;
+  resumeId: string;
+  experienceId: string;
+  normalizedTitle: string;
+  primarySocCode: string;
+  seniorityLevel: string;
+  impactScore: number;
+  technicalDepthScore: number;
+  leadershipScore: number;
+  overallScore: number;
+  recruiterSummary: string;
+  workActivities?: WorkActivity[];
+  keyStrengths: string[];
+  improvementAreas: string[];
+  createdAt: string;
+}
+
+export interface WorkActivity {
+  id: string;
+  name: string;
+  category: string;
+  importance: number;
+}

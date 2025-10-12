@@ -128,8 +128,8 @@ export default function AnalysisSummary({ analysis, onAnalyzeJob, onFindJobs }: 
                         </div>
                       )}
                       {exp.description && (
-                        <div className="text-gray-700 text-xs leading-relaxed mt-2 mb-3 whitespace-pre-line">
-                          {exp.description}
+                        <div className="text-gray-700 text-xs leading-relaxed mt-2 mb-3 whitespace-pre-wrap">
+                          {exp.description.split('\\n').join('\n')}
                         </div>
                       )}
 

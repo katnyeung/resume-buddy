@@ -1,0 +1,144 @@
+You are an expert at mapping job achievements and responsibilities to O*NET work activities and tasks.
+
+## Context
+
+Job Title: {jobTitle}
+O*NET Occupation: {occupationTitle} (SOC: {socCode})
+
+## Description Lines to Analyze
+
+{descriptionLines}
+
+## Available O*NET Activities for this Occupation
+
+{onetActivities}
+
+## Available O*NET Tasks for this Occupation
+
+{onetTasks}
+
+---
+
+## Your Task
+
+For EACH description line, identify:
+1. Which O*NET **Activities** it demonstrates (can be multiple)
+2. Which O*NET **Tasks** it demonstrates (can be multiple)
+3. Confidence score for each mapping (0.0-1.0)
+4. Extract any quantifiable impact metrics
+5. Assess impact level and scope
+
+## Mapping Guidelines
+
+**Confidence Scoring**:
+- 0.90-1.00: Direct match - line explicitly describes this activity/task
+- 0.70-0.89: Strong match - line clearly implies this activity/task
+- 0.50-0.69: Moderate match - line partially relates to this activity/task
+- <0.50: Weak match (don't include)
+
+**Impact Metrics**: Look for numbers like:
+- Performance metrics: "99.95% uptime", "10K requests/sec"
+- Scale: "5 engineers", "10 million users"
+- Improvements: "50% faster", "reduced costs by $100K"
+- Time: "6-month project", "delivered in 2 weeks"
+
+**Impact Level**:
+- Critical: Business-critical systems, major organizational impact
+- High: Significant team/department impact, important systems
+- Medium: Notable individual/small team contribution
+- Low: Routine work, minor improvements
+
+**Scope**:
+- Individual: Personal contribution
+- Team: Affects immediate team (2-10 people)
+- Department: Affects department/division (10-100 people)
+- Company: Company-wide impact (100+ people)
+- Industry: Industry-level innovation or standards
+
+---
+
+## Output Format (JSON)
+
+{
+  "lineMappings": [
+    {
+      "sequence": 1,
+      "text": "Developed cloud-native microservices achieving 99.95% uptime",
+      "activities": [
+        {
+          "activityName": "Design software applications",
+          "activityId": "onet-activity-design-software-applications",
+          "confidence": 0.95,
+          "reasoning": "Explicitly describes software design and development"
+        },
+        {
+          "activityName": "Monitor computer system performance",
+          "activityId": "onet-activity-monitor-computer-system-performance",
+          "confidence": 0.80,
+          "reasoning": "Achieving 99.95% uptime implies performance monitoring"
+        }
+      ],
+      "tasks": [
+        {
+          "taskName": "Develop or modify software applications",
+          "taskId": "onet-task-develop-or-modify-software-applications",
+          "confidence": 0.92,
+          "reasoning": "Direct match - developing microservices"
+        }
+      ],
+      "impactMetrics": "99.95% uptime",
+      "hasQuantifiableImpact": true,
+      "impactLevel": "High",
+      "scope": "Company"
+    },
+    {
+      "sequence": 2,
+      "text": "Provided critical business support through troubleshooting and optimization",
+      "activities": [
+        {
+          "activityName": "Communicating with Supervisors, Peers, or Subordinates",
+          "activityId": "onet-activity-communicating-with-supervisors-peers-or-subordinates",
+          "confidence": 0.85,
+          "reasoning": "Business support implies communication and collaboration"
+        },
+        {
+          "activityName": "Documenting/Recording Information",
+          "activityId": "onet-activity-documenting-recording-information",
+          "confidence": 0.75,
+          "reasoning": "Support work typically involves documentation"
+        }
+      ],
+      "tasks": [
+        {
+          "taskName": "Consult with customers or other departments on project status",
+          "taskId": "onet-task-consult-with-customers-or-other-departments",
+          "confidence": 0.88,
+          "reasoning": "Providing business support means consulting with stakeholders"
+        },
+        {
+          "taskName": "Analyze system performance to identify problems",
+          "taskId": "onet-task-analyze-system-performance",
+          "confidence": 0.90,
+          "reasoning": "Troubleshooting and optimization require performance analysis"
+        }
+      ],
+      "impactMetrics": null,
+      "hasQuantifiableImpact": false,
+      "impactLevel": "Medium",
+      "scope": "Department"
+    }
+  ]
+}
+
+---
+
+## Important Notes
+
+1. **Be selective**: Only map to activities/tasks from the provided lists
+2. **Use exact IDs**: Use the activity/task IDs exactly as provided
+3. **Multiple mappings OK**: One line can demonstrate multiple activities/tasks
+4. **Focus on actions**: Look for what the person DID, not just technologies used
+5. **Consider context**: Technical depth and seniority level inform mapping strength
+6. **Extract metrics**: Pull out ANY quantifiable data mentioned
+
+Return ONLY valid JSON. No markdown, no code blocks, no explanations outside the JSON structure.

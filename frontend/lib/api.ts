@@ -134,3 +134,27 @@ export const checkAnalysisExists = async (id: string): Promise<boolean> => {
   const response = await apiClient.get<boolean>(`/resumes/${id}/analysis-exists`);
   return response.data;
 };
+
+// Job Analysis
+export const analyzeJob = async (resumeId: string, experienceId: string): Promise<any> => {
+  const response = await apiClient.post(`/resumes/${resumeId}/experiences/${experienceId}/analyze`);
+  return response.data;
+};
+
+export const getJobAnalysis = async (resumeId: string, experienceId: string): Promise<any> => {
+  try {
+    const response = await apiClient.get(`/resumes/${resumeId}/experiences/${experienceId}/job-analysis`);
+    return response.data;
+  } catch (error) {
+    return null;
+  }
+};
+
+export const checkJobAnalysisExists = async (resumeId: string, experienceId: string): Promise<boolean> => {
+  const response = await apiClient.get<boolean>(`/resumes/${resumeId}/experiences/${experienceId}/job-analysis/exists`);
+  return response.data;
+};
+
+export const deleteJobAnalysis = async (resumeId: string, experienceId: string): Promise<void> => {
+  await apiClient.delete(`/resumes/${resumeId}/experiences/${experienceId}/job-analysis`);
+};

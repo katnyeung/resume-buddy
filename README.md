@@ -2,14 +2,21 @@
 
 ## 🚀 Overview
 
-Resume Buddy is an MVP application that enables users to upload resumes and leverage AI for comprehensive job search assistance, scoring, and description analysis. The platform provides real-time editing with TipTap integration, AI-powered suggestions, and job matching capabilities.
+Resume Buddy is an AI-powered platform for resume analysis and job matching. Upload your resume and get intelligent insights through:
+- **ATS-Style Analysis**: Parse resume structure like applicant tracking systems
+- **O*NET Job Mapping**: Map job experiences to official O*NET occupations
+- **Neo4j Knowledge Graph**: Visualize career paths and skill relationships
+- **Multi-Occupation Coverage**: Broader skill/technology matching through multiple O*NET mappings
 
 ## 🏗️ Architecture
 
 ```
-Frontend (Next.js + TipTap) ←→ Backend (Spring Boot + Undertow) ←→ Docling Service (Docker)
+Frontend (Next.js + Lexical) ←→ Backend (Spring Boot) ←→ Docling Service (Docker)
                                          ↓
-                                    MySQL Database
+                                MySQL Database (Structured Data)
+                                Neo4j Database (Graph Relationships)
+                                O*NET Web Services (Occupation Data)
+                                LLM API (X.AI Grok / OpenAI)
 ```
 
 ## 📁 Project Structure
@@ -81,10 +88,14 @@ resume-buddy/
 
 ### Backend
 - **Framework**: Spring Boot 3.2.1 with Java 17+ (Undertow Server)
-- **Database**: MySQL 8.0 with Spring Data JPA
+- **Databases**:
+  - MySQL 8.0 with Spring Data JPA (structured data)
+  - Neo4j 5.x with Java Driver (graph relationships)
 - **Document Parsing**: Docling HTTP microservice (Python FastAPI + Docker)
+- **External APIs**:
+  - O*NET Web Services (occupation data)
+  - X.AI Grok / OpenAI (LLM analysis)
 - **API Documentation**: Swagger/OpenAPI 3 with springdoc
-- **Dependencies**: Spring Web, Spring Data JPA, Spring Validation
 
 ### Docling Microservice
 - **Framework**: Python FastAPI
@@ -100,10 +111,19 @@ resume-buddy/
 - **File Upload**: react-dropzone for drag & drop uploads
 
 ### AI Services
-- **OpenAI Integration**: GPT-4 for intelligent resume analysis
-- **Line-by-Line Analysis**: Section detection, content grouping, AI insights
-- **Structured Extraction**: Contact info, experiences, skills, education, certifications, projects
-- **ATS Parsing**: Parse resume like an Applicant Tracking System would
+- **LLM Integration**: Grok-4-fast-reasoning (X.AI) or GPT-4 (OpenAI)
+  - Resume structure analysis (line-by-line section detection)
+  - Job title normalization to O*NET SOC codes
+  - Skill extraction from job descriptions
+  - LLM-based skill mapping to O*NET soft skills
+  - Recruiter-style job quality evaluation
+- **O*NET Integration**: Real O*NET Web Services API
+  - Occupation data (skills, technologies, work activities)
+  - Multi-occupation mapping for comprehensive coverage
+- **Neo4j Graph**: Knowledge graph for career insights
+  - Job → Occupation → Skills relationships
+  - Skill gap analysis
+  - Career path visualization
 
 ## 🚀 Quick Start
 
@@ -111,9 +131,12 @@ resume-buddy/
 - Java 17+
 - Maven 3.6+
 - MySQL 8.0+
+- Neo4j 5.x (local or cloud instance)
 - Docker & Docker Compose
 - Node.js 16+ and npm/yarn
 - Python 3.11+ (for Docling service)
+- O*NET Web Services account (free registration)
+- X.AI API key (or OpenAI API key)
 
 ### 1. Start Docling Service
 ```bash
@@ -134,11 +157,30 @@ npm install
 npm run dev
 ```
 
-### 4. Access Application
+### 4. Configure Environment Variables
+Create `backend/.env`:
+```bash
+# LLM Configuration
+OPENAI_API_KEY=your-xai-or-openai-key
+OPENAI_MODEL=grok-4-fast-reasoning
+OPENAI_BASE_URL=https://api.x.ai/v1
+
+# O*NET Configuration
+ONET_USERNAME=your-onet-username
+ONET_PASSWORD=your-onet-password
+
+# Neo4j Configuration
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USERNAME=neo4j
+NEO4J_PASSWORD=your-neo4j-password
+```
+
+### 5. Access Application
 - **Frontend**: http://localhost:3000
 - **Backend API**: http://localhost:8080/api
 - **Swagger UI**: http://localhost:8080/swagger-ui.html
 - **Docling Service**: http://localhost:8081/health
+- **Neo4j Browser**: http://localhost:7474
 
 ## 🔧 Development
 
@@ -241,35 +283,50 @@ Access the interactive API documentation at:
 - **OpenAPI JSON**: http://localhost:8080/v3/api-docs
 
 ### Key Endpoints
+
+**Resume Management**:
 - `POST /api/resumes/upload` - Upload resume file
 - `POST /api/resumes/{id}/parse` - Parse uploaded resume with Docling
 - `GET /api/resumes/{id}` - Get resume metadata
-- `GET /api/resumes/{id}/parsed` - Get raw parsed resume data
 - `GET /api/resumes/{id}/lines` - Get resume content as lines
-- `PUT /api/resumes/{id}/lines/{lineNumber}` - Update specific line
-- `POST /api/resumes/{id}/lines` - Insert new line
-- `PUT /api/resumes/{id}/editor-state` - Save Lexical editor state with formatting
+- `PUT /api/resumes/{id}/editor-state` - Save Lexical editor state
 - `GET /api/resumes/{id}/editor-state` - Load Lexical editor state
+
+**AI Analysis**:
 - `POST /api/resumes/{id}/analyze` - Run AI analysis (line-by-line + structured extraction)
 - `GET /api/resumes/{id}/structured-analysis` - Get ATS-style structured analysis
-- `GET /api/resumes/{id}/analysis-exists` - Check if analysis exists
-- `GET /api/resumes/health` - Service health check
+
+**Job Analysis** (New - Phase 5):
+- `POST /api/resumes/{resumeId}/experiences/{experienceId}/analyze` - Analyze job experience
+  - Normalizes job title to O*NET SOC codes (multi-occupation)
+  - Fetches O*NET data for all mapped occupations
+  - Extracts and maps skills to O*NET soft skills/technologies
+  - Creates Neo4j graph relationships
+  - Returns recruiter-style quality evaluation
+- `GET /api/resumes/{resumeId}/experiences/{experienceId}/analysis` - Get job analysis results
 
 ## 📚 Implementation Progress
 
 The current implementation follows an MVP (Minimum Viable Product) approach:
 
-1. ✅ **Core Infrastructure**: Backend API, database setup, Docling service
+1. ✅ **Core Infrastructure**: Backend API, MySQL + Neo4j databases, Docling service
 2. ✅ **Document Processing**: Upload, parse with markdown support, and store resumes
 3. ✅ **Rich Text Editing**: Lexical editor with full formatting and block type selection
 4. ✅ **Frontend Integration**: Next.js with Lexical editor and state persistence
-5. ✅ **AI Analysis**: OpenAI integration for line-by-line and structured analysis
+5. ✅ **AI Analysis**: LLM integration for line-by-line and structured analysis
 6. ✅ **Analysis UI**:
    - ATS Summary component (top) - structured data display
    - Analysis Overlay component (middle) - grouped line analysis
    - Date-based sorting for chronological resume order
-7. 📋 **ATS Scoring**: Calculate and display ATS compatibility score
-8. 📋 **Job Matching**: Search and match relevant job postings
+7. ✅ **Neo4j Graph Integration** (Phase 5 - Oct 2025):
+   - O*NET Web Services API integration
+   - Multi-occupation job mapping (2-3 SOC codes per job)
+   - LLM-based skill extraction and mapping
+   - Graph relationships: Job → Occupation → Skills → O*NET Skills/Technologies
+   - Graceful error handling for missing O*NET data
+8. 📋 **Graph Queries**: Skill gap analysis, career path queries, candidate comparison
+9. 📋 **ATS Scoring**: Calculate and display ATS compatibility score
+10. 📋 **Job Recommendations**: Find similar jobs based on graph relationships
 
 ## 🤝 Contributing
 
