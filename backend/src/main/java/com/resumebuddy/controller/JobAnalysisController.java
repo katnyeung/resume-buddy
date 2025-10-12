@@ -46,7 +46,7 @@ public class JobAnalysisController {
         }
     }
 
-    @GetMapping("/{resumeId}/experiences/{experienceId}/job-analysis")
+    @GetMapping("/{resumeId}/experiences/{experienceId}/analysis")
     @Operation(summary = "Get job analysis", description = "Retrieve existing job analysis results")
     public ResponseEntity<JobAnalysisResultDto> getJobAnalysis(
             @PathVariable String resumeId,
@@ -64,6 +64,27 @@ public class JobAnalysisController {
 
         } catch (Exception e) {
             log.error("Error getting job analysis: {}", experienceId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/analysis/{analysisId}")
+    @Operation(summary = "Get job analysis by ID", description = "Retrieve job analysis by its unique analysis ID")
+    public ResponseEntity<JobAnalysisResultDto> getJobAnalysisById(
+            @PathVariable String analysisId) {
+
+        log.info("Getting job analysis by ID: {}", analysisId);
+
+        try {
+            JobAnalysisResultDto result = jobAnalysisService.getJobAnalysisById(analysisId);
+            return ResponseEntity.ok(result);
+
+        } catch (RuntimeException e) {
+            log.warn("Job analysis not found with ID: {}", analysisId);
+            return ResponseEntity.notFound().build();
+
+        } catch (Exception e) {
+            log.error("Error getting job analysis by ID: {}", analysisId, e);
             return ResponseEntity.internalServerError().build();
         }
     }

@@ -4,6 +4,9 @@ export interface Resume {
   contentType: string;
   fileSize: number;
   status: string;
+  atsReport?: string; // JSON string containing ATS quality report
+  atsScore?: number;
+  atsAnalyzedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,12 +47,23 @@ export interface AnalysisGroup {
   endLine: number;
 }
 
+export interface ATSReport {
+  score: number;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  contentBalance: 'sparse' | 'balanced' | 'verbose';
+  readability: 'poor' | 'fair' | 'good' | 'excellent';
+  sectionOrganization: 'poor' | 'fair' | 'good' | 'excellent';
+}
+
 export interface AnalysisResultDto {
   resumeId: string;
   analyzedAt: string;
   totalLines: number;
   analyzedLines: number;
   lineAnalyses: LineAnalysisDto[];
+  atsReport?: ATSReport;
 }
 
 export interface LineAnalysisDto {
@@ -87,6 +101,9 @@ export interface ExperienceDto {
   startDate?: string;
   endDate?: string;
   description?: string;
+  isAnalyzed?: boolean;
+  analyzedAt?: string;
+  analysisId?: string;  // Latest job analysis ID
 }
 
 export interface SkillDto {

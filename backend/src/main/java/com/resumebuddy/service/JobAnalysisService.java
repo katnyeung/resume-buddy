@@ -128,30 +128,260 @@ public class JobAnalysisService {
         }
 
         // Step 5: Parse description lines and map to O*NET activities/tasks (NEW)
-        log.info("Parsing description lines and mapping to O*NET activities/tasks");
-        analyzeDescriptionLines(experienceId, experience.getDescription(), primarySocCode,
-                                normalized.getNormalizedTitle(), experience.getJobTitle());
+        log.info("Parsing description lines and mapping to O*NET activities/tasks and skills");
+        List<Map<String, Object>> lineMappings = analyzeDescriptionLines(
+            experienceId, experience.getDescription(), primarySocCode,
+            normalized.getNormalizedTitle(), experience.getJobTitle(), skills
+        );
 
         // Step 6: Evaluate job with LLM (use primary occupation data)
         log.info("Evaluating job quality with LLM...");
         Map<String, Object> evaluation = evaluateJobWithLLM(experience, normalized, allOccupationData.get(primarySocCode));
 
-        // Step 7: Save to database
-        JobAnalysis analysis = createJobAnalysisEntity(resume, experience, normalized, evaluation);
-        JobAnalysis saved = jobAnalysisRepository.save(analysis);
+        // Step 7: Build complete analysis result DTO
+        JobAnalysisResultDto result = buildAnalysisResultDto(
+            resume, experience, normalized, skills, lineMappings, evaluation
+        );
+
+        // Step 8: Save analysis to database as JSON
+        JobAnalysis analysis = new JobAnalysis();
+        analysis.setResumeId(resumeId);
+        analysis.setExperienceId(experienceId);
+        try {
+            analysis.setAnalysisResult(objectMapper.writeValueAsString(result));
+        } catch (Exception e) {
+            log.error("Error serializing job analysis result to JSON", e);
+            throw new RuntimeException("Failed to save job analysis", e);
+        }
+        jobAnalysisRepository.save(analysis);
+
+        // Step 9: Update experience to mark as analyzed
+        experience.setIsAnalyzed(true);
+        experience.setAnalyzedAt(java.time.LocalDateTime.now());
+        experienceRepository.save(experience);
 
         log.info("Job analysis completed successfully for experience {}", experienceId);
-        return mapToDto(saved);
+        return result;
     }
 
     /**
-     * Get existing job analysis
+     * Get existing job analysis with deep graph enrichment
      */
     @Transactional(readOnly = true)
     public JobAnalysisResultDto getJobAnalysis(String resumeId, String experienceId) {
-        JobAnalysis analysis = jobAnalysisRepository.findByResumeIdAndExperienceId(resumeId, experienceId)
+        JobAnalysis analysis = jobAnalysisRepository.findFirstByResumeIdAndExperienceIdOrderByCreatedAtDesc(resumeId, experienceId)
                 .orElseThrow(() -> new RuntimeException("Job analysis not found"));
-        return mapToDto(analysis);
+
+        try {
+            JobAnalysisResultDto dto = objectMapper.readValue(analysis.getAnalysisResult(), JobAnalysisResultDto.class);
+
+            // Set the analysis ID in the DTO
+            dto.setId(analysis.getId());
+
+            // NEW: Enrich with deep graph analysis (Phase 6)
+            enrichWithDeepGraphAnalysis(dto, experienceId);
+
+            return dto;
+        } catch (Exception e) {
+            log.error("Error parsing job analysis JSON", e);
+            throw new RuntimeException("Failed to parse job analysis", e);
+        }
+    }
+
+    /**
+     * Get existing job analysis by analysis ID with deep graph enrichment
+     */
+    @Transactional(readOnly = true)
+    public JobAnalysisResultDto getJobAnalysisById(String analysisId) {
+        JobAnalysis analysis = jobAnalysisRepository.findById(analysisId)
+                .orElseThrow(() -> new RuntimeException("Job analysis not found with ID: " + analysisId));
+
+        try {
+            JobAnalysisResultDto dto = objectMapper.readValue(analysis.getAnalysisResult(), JobAnalysisResultDto.class);
+
+            // Set the analysis ID in the DTO
+            dto.setId(analysis.getId());
+
+            // Enrich with deep graph analysis (Phase 6)
+            enrichWithDeepGraphAnalysis(dto, dto.getExperienceId());
+
+            return dto;
+        } catch (Exception e) {
+            log.error("Error parsing job analysis JSON for ID: {}", analysisId, e);
+            throw new RuntimeException("Failed to parse job analysis", e);
+        }
+    }
+
+    /**
+     * Enrich analysis DTO with real-time Neo4j graph insights (Phase 6)
+     * Computes:
+     * 1. Skill demonstration evidence
+     * 2. Description line value scores
+     * 3. Missing skill-task opportunities
+     * 4. Missing high-priority tasks/activities
+     */
+    private void enrichWithDeepGraphAnalysis(JobAnalysisResultDto dto, String experienceId) {
+        try {
+            log.info("Enriching analysis with deep graph insights for experience: {}", experienceId);
+
+            // 1. Skill demonstration analysis
+            List<Map<String, Object>> skillDemo = neo4jGraphService.getSkillDemonstrationAnalysis(experienceId);
+            log.info("Retrieved {} skill demonstration records from Neo4j", skillDemo != null ? skillDemo.size() : 0);
+            if (skillDemo != null && !skillDemo.isEmpty()) {
+                dto.setSkillDemonstrationAnalysis(convertToSkillDemonstrationDtos(skillDemo));
+                log.info("Added {} skill demonstration analyses to DTO", skillDemo.size());
+            } else {
+                log.warn("No skill demonstration data found for experience: {}", experienceId);
+            }
+
+            // 2. Description line value scores
+            List<Map<String, Object>> lineValues = neo4jGraphService.getDescriptionLineValueScores(experienceId);
+            if (lineValues != null && !lineValues.isEmpty()) {
+                dto.setDescriptionLineValues(convertToDescriptionLineValueDtos(lineValues));
+                log.debug("Added {} description line value scores", lineValues.size());
+            }
+
+            // 3. Missing skill-task opportunities
+            List<Map<String, Object>> opportunities = neo4jGraphService.getMissingSkillTaskOpportunities(experienceId, 60.0);
+            if (opportunities != null && !opportunities.isEmpty()) {
+                dto.setMissingOpportunities(convertToMissingOpportunityDtos(opportunities));
+                log.debug("Added {} missing opportunities", opportunities.size());
+            }
+
+            // 4. Missing high-priority tasks/activities
+            Map<String, List<Map<String, Object>>> missing = neo4jGraphService.getMissingTasksAndActivities(experienceId, 5, 60.0);
+            if (missing != null) {
+                List<Map<String, Object>> tasks = missing.get("tasks");
+                List<Map<String, Object>> activities = missing.get("activities");
+
+                if (tasks != null && !tasks.isEmpty()) {
+                    dto.setMissingTasks(convertToMissingTaskDtos(tasks));
+                    log.debug("Added {} missing tasks", tasks.size());
+                }
+
+                if (activities != null && !activities.isEmpty()) {
+                    dto.setMissingActivities(convertToMissingActivityDtos(activities));
+                    log.debug("Added {} missing activities", activities.size());
+                }
+            }
+
+            // 5. Missing skills by category (max 3 per category)
+            List<Map<String, Object>> missingSkills = neo4jGraphService.getMissingSkillsByCategory(experienceId, 3);
+            if (missingSkills != null && !missingSkills.isEmpty()) {
+                dto.setMissingSkillsByCategory(convertToMissingSkillByCategoryDtos(missingSkills));
+                log.debug("Added {} missing skills grouped by category", missingSkills.size());
+            }
+
+            log.info("Successfully enriched analysis with deep graph insights");
+
+        } catch (Exception e) {
+            log.error("Error enriching with deep graph analysis: {}", e.getMessage());
+            // Don't fail - just skip enrichment if graph queries fail
+        }
+    }
+
+    /**
+     * Convert skill demonstration maps to DTOs
+     */
+    private List<JobAnalysisResultDto.SkillDemonstrationDto> convertToSkillDemonstrationDtos(List<Map<String, Object>> skillMaps) {
+        List<JobAnalysisResultDto.SkillDemonstrationDto> dtos = new ArrayList<>();
+        for (Map<String, Object> map : skillMaps) {
+            JobAnalysisResultDto.SkillDemonstrationDto dto = new JobAnalysisResultDto.SkillDemonstrationDto();
+            dto.setSkillName((String) map.get("skillName"));
+            dto.setCategory((String) map.get("category"));
+            dto.setTasksLinked(((Number) map.get("tasksLinked")).intValue());
+            dto.setLinesShowcasing(((Number) map.get("linesShowcasing")).intValue());
+            dto.setExampleLines((List<String>) map.get("exampleLines"));
+            dto.setTaskNames((List<String>) map.get("taskNames"));  // Add this line!
+            dto.setIsPrimary((Boolean) map.get("isPrimary"));
+            dto.setEvidenceStrength((String) map.get("evidenceStrength"));
+            dtos.add(dto);
+        }
+        return dtos;
+    }
+
+    /**
+     * Convert description line value maps to DTOs
+     */
+    private List<JobAnalysisResultDto.DescriptionLineValueDto> convertToDescriptionLineValueDtos(List<Map<String, Object>> lineMaps) {
+        List<JobAnalysisResultDto.DescriptionLineValueDto> dtos = new ArrayList<>();
+        for (Map<String, Object> map : lineMaps) {
+            JobAnalysisResultDto.DescriptionLineValueDto dto = new JobAnalysisResultDto.DescriptionLineValueDto();
+            dto.setSequence(((Number) map.get("sequence")).intValue());
+            dto.setText((String) map.get("text"));
+            dto.setSkillsShowcased((List<String>) map.get("skillsShowcased"));
+            dto.setSkillCount(((Number) map.get("skillCount")).intValue());
+            dto.setImpactLevel((String) map.get("impactLevel"));
+            dto.setValueRating((String) map.get("valueRating"));
+            dtos.add(dto);
+        }
+        return dtos;
+    }
+
+    /**
+     * Convert missing opportunity maps to DTOs
+     */
+    private List<JobAnalysisResultDto.MissingSkillTaskOpportunityDto> convertToMissingOpportunityDtos(List<Map<String, Object>> oppMaps) {
+        List<JobAnalysisResultDto.MissingSkillTaskOpportunityDto> dtos = new ArrayList<>();
+        for (Map<String, Object> map : oppMaps) {
+            JobAnalysisResultDto.MissingSkillTaskOpportunityDto dto = new JobAnalysisResultDto.MissingSkillTaskOpportunityDto();
+            dto.setSkillName((String) map.get("skillName"));
+            dto.setTaskId((String) map.get("taskId"));
+            dto.setTaskName((String) map.get("taskName"));
+            dto.setImportance(((Number) map.get("importance")).doubleValue());
+            dto.setTaskCategory((String) map.get("taskCategory"));
+            dto.setOccupationTitle((String) map.get("occupationTitle"));
+            dtos.add(dto);
+        }
+        return dtos;
+    }
+
+    /**
+     * Convert missing task maps to DTOs
+     */
+    private List<JobAnalysisResultDto.MissingTaskDto> convertToMissingTaskDtos(List<Map<String, Object>> taskMaps) {
+        List<JobAnalysisResultDto.MissingTaskDto> dtos = new ArrayList<>();
+        for (Map<String, Object> map : taskMaps) {
+            JobAnalysisResultDto.MissingTaskDto dto = new JobAnalysisResultDto.MissingTaskDto();
+            dto.setTaskId((String) map.get("taskId"));
+            dto.setTaskName((String) map.get("taskName"));
+            dto.setImportance(((Number) map.get("importance")).doubleValue());
+            dto.setCategory((String) map.get("category"));
+            dtos.add(dto);
+        }
+        return dtos;
+    }
+
+    /**
+     * Convert missing activity maps to DTOs
+     */
+    private List<JobAnalysisResultDto.MissingActivityDto> convertToMissingActivityDtos(List<Map<String, Object>> activityMaps) {
+        List<JobAnalysisResultDto.MissingActivityDto> dtos = new ArrayList<>();
+        for (Map<String, Object> map : activityMaps) {
+            JobAnalysisResultDto.MissingActivityDto dto = new JobAnalysisResultDto.MissingActivityDto();
+            dto.setActivityId((String) map.get("activityId"));
+            dto.setActivityName((String) map.get("activityName"));
+            dto.setImportance(((Number) map.get("importance")).doubleValue());
+            dtos.add(dto);
+        }
+        return dtos;
+    }
+
+    /**
+     * Convert missing skill by category maps to DTOs
+     */
+    private List<JobAnalysisResultDto.MissingSkillByCategoryDto> convertToMissingSkillByCategoryDtos(List<Map<String, Object>> skillMaps) {
+        List<JobAnalysisResultDto.MissingSkillByCategoryDto> dtos = new ArrayList<>();
+        for (Map<String, Object> map : skillMaps) {
+            JobAnalysisResultDto.MissingSkillByCategoryDto dto = new JobAnalysisResultDto.MissingSkillByCategoryDto();
+            dto.setSkillName((String) map.get("skillName"));
+            dto.setCategory((String) map.get("category"));
+            dto.setRequiredByTasks(((Number) map.get("requiredByTasks")).intValue());
+            dto.setAvgImportance(((Number) map.get("avgImportance")).doubleValue());
+            dto.setTaskNames((List<String>) map.get("taskNames"));
+            dtos.add(dto);
+        }
+        return dtos;
     }
 
     /**
@@ -205,19 +435,22 @@ public class JobAnalysisService {
 
     /**
      * Parse description lines and map to O*NET activities/tasks
+     * Also maps skills to O*NET tasks
+     * Returns the line mappings for storage in MySQL
      */
-    private void analyzeDescriptionLines(String experienceId, String description, String socCode,
-                                         String occupationTitle, String jobTitle) {
+    private List<Map<String, Object>> analyzeDescriptionLines(String experienceId, String description, String socCode,
+                                                               String occupationTitle, String jobTitle,
+                                                               List<Map<String, Object>> skills) {
         if (description == null || description.trim().isEmpty()) {
             log.warn("No description to analyze for experience {}", experienceId);
-            return;
+            return new ArrayList<>();
         }
 
         // Step 1: Parse description into lines
         List<String> descriptionLines = neo4jGraphService.parseDescriptionIntoLines(experienceId, description);
         if (descriptionLines.isEmpty()) {
             log.warn("No description lines parsed for experience {}", experienceId);
-            return;
+            return new ArrayList<>();
         }
 
         // Step 2: Fetch O*NET activities and tasks for this occupation
@@ -227,15 +460,16 @@ public class JobAnalysisService {
 
         if (activities.isEmpty() && tasks.isEmpty()) {
             log.warn("No O*NET activities/tasks found for SOC {}. Skipping line mapping.", socCode);
-            return;
+            return new ArrayList<>();
         }
 
-        // Step 3: Call LLM to map description lines to O*NET activities/tasks
+        // Step 3: Call LLM to map description lines to O*NET activities/tasks AND skills to tasks
         try {
             String prompt = loadPromptTemplate("prompts/description-activity-mapping-prompt.txt");
             prompt = prompt.replace("{jobTitle}", jobTitle)
                     .replace("{occupationTitle}", occupationTitle)
                     .replace("{socCode}", socCode)
+                    .replace("{extractedSkills}", formatSkillsForPrompt(skills))
                     .replace("{descriptionLines}", formatDescriptionLinesForPrompt(descriptionLines))
                     .replace("{onetActivities}", formatONetDataForPrompt(activities))
                     .replace("{onetTasks}", formatONetDataForPrompt(tasks));
@@ -252,9 +486,17 @@ public class JobAnalysisService {
 
             log.info("Successfully mapped {} description lines to O*NET activities/tasks", lineMappings.size());
 
+            // Store skill-to-task mappings in Neo4j
+            if (mappingDto.getSkillToTaskMappings() != null && !mappingDto.getSkillToTaskMappings().isEmpty()) {
+                neo4jGraphService.storeSkillToTaskMappings(experienceId, mappingDto.getSkillToTaskMappings());
+                log.info("Successfully mapped {} skills to O*NET tasks", mappingDto.getSkillToTaskMappings().size());
+            }
+
+            return lineMappings;
+
         } catch (Exception e) {
             log.error("Error mapping description lines to O*NET activities/tasks", e);
-            // Don't throw - allow job analysis to continue
+            return new ArrayList<>();  // Return empty list on error
         }
     }
 
@@ -449,77 +691,170 @@ public class JobAnalysisService {
         return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     }
 
-    private JobAnalysis createJobAnalysisEntity(
+    /**
+     * Build complete JobAnalysisResultDto from all analysis components
+     */
+    private JobAnalysisResultDto buildAnalysisResultDto(
             Resume resume,
             ResumeAnalysisExperience experience,
             NormalizedJobDto normalized,
+            List<Map<String, Object>> skills,
+            List<Map<String, Object>> lineMappings,
             Map<String, Object> evaluation) {
 
-        JobAnalysis analysis = new JobAnalysis();
-        analysis.setResume(resume);
-        analysis.setExperience(experience);
+        JobAnalysisResultDto dto = new JobAnalysisResultDto();
+        dto.setResumeId(resume.getId());
+        dto.setExperienceId(experience.getId());
+
+        // Experience details
+        dto.setJobTitle(experience.getJobTitle());
+        dto.setCompanyName(experience.getCompanyName());
+        dto.setStartDate(experience.getStartDate());
+        dto.setEndDate(experience.getEndDate());
 
         // Normalization data
-        analysis.setNormalizedTitle(normalized.getNormalizedTitle());
-        analysis.setPrimarySocCode(normalized.getSocCodes().get(0).getCode());
-        analysis.setSeniorityLevel(normalized.getSeniority());
+        dto.setNormalizedTitle(normalized.getNormalizedTitle());
+        dto.setPrimarySocCode(normalized.getSocCodes().get(0).getCode());
+        dto.setSeniorityLevel(normalized.getSeniority());
+        dto.setTechnicalDepth(normalized.getTechnicalDepth() != null ?
+                BigDecimal.valueOf(normalized.getTechnicalDepth()) : null);
+        dto.setHasLeadership(normalized.getHasLeadership());
+        dto.setLeadershipScope(normalized.getLeadershipScope());
 
-        // Scores (with null-safe handling)
-        analysis.setImpactScore(BigDecimal.valueOf(
-            evaluation.get("impactScore") != null ? (Double) evaluation.get("impactScore") : 0.0));
-        analysis.setTechnicalDepthScore(BigDecimal.valueOf(
-            evaluation.get("technicalDepthScore") != null ? (Double) evaluation.get("technicalDepthScore") : 0.0));
-        analysis.setLeadershipScore(BigDecimal.valueOf(
-            evaluation.get("leadershipScore") != null ? (Double) evaluation.get("leadershipScore") : 0.0));
-        analysis.setOverallScore(BigDecimal.valueOf(
-            evaluation.get("overallScore") != null ? (Double) evaluation.get("overallScore") : 0.0));
+        // Scores
+        dto.setImpactScore(BigDecimal.valueOf(
+                evaluation.get("impactScore") != null ? ((Number) evaluation.get("impactScore")).doubleValue() : 0.0));
+        dto.setTechnicalDepthScore(BigDecimal.valueOf(
+                evaluation.get("technicalDepthScore") != null ? ((Number) evaluation.get("technicalDepthScore")).doubleValue() : 0.0));
+        dto.setLeadershipScore(BigDecimal.valueOf(
+                evaluation.get("leadershipScore") != null ? ((Number) evaluation.get("leadershipScore")).doubleValue() : 0.0));
+        dto.setOverallScore(BigDecimal.valueOf(
+                evaluation.get("overallScore") != null ? ((Number) evaluation.get("overallScore")).doubleValue() : 0.0));
 
         // Analysis text
-        analysis.setRecruiterSummary((String) evaluation.get("recruiterSummary"));
+        dto.setRecruiterSummary((String) evaluation.get("recruiterSummary"));
 
-        // JSON fields
-        try {
-            analysis.setKeyStrengths(objectMapper.writeValueAsString(evaluation.get("keyStrengths")));
-            analysis.setImprovementAreas(objectMapper.writeValueAsString(evaluation.get("improvementAreas")));
-        } catch (Exception e) {
-            log.error("Error serializing evaluation data", e);
+        // Lists
+        dto.setKeyStrengths((List<String>) evaluation.get("keyStrengths"));
+        dto.setImprovementAreas((List<String>) evaluation.get("improvementAreas"));
+        dto.setJobFamilies(normalized.getJobFamilies());
+        dto.setKeyResponsibilities(normalized.getKeyResponsibilities());
+
+        // Industry Classification
+        dto.setPrimaryIndustry(normalized.getPrimaryIndustry());
+        dto.setIndustryVertical(normalized.getIndustryVertical());
+        dto.setIndustrySectors(normalized.getIndustrySectors());
+
+        // SOC codes
+        List<JobAnalysisResultDto.SocCodeDto> socCodeDtos = new ArrayList<>();
+        for (NormalizedJobDto.SocCodeMapping socMapping : normalized.getSocCodes()) {
+            JobAnalysisResultDto.SocCodeDto socDto = new JobAnalysisResultDto.SocCodeDto();
+            socDto.setCode(socMapping.getCode());
+            socDto.setTitle(socMapping.getTitle());
+            socDto.setConfidence(socMapping.getConfidence());
+            socCodeDtos.add(socDto);
         }
+        dto.setSocCodes(socCodeDtos);
 
-        return analysis;
-    }
-
-    private JobAnalysisResultDto mapToDto(JobAnalysis analysis) {
-        JobAnalysisResultDto dto = new JobAnalysisResultDto();
-        dto.setId(analysis.getId());
-        dto.setResumeId(analysis.getResume().getId());
-        dto.setExperienceId(analysis.getExperience().getId());
-
-        dto.setNormalizedTitle(analysis.getNormalizedTitle());
-        dto.setPrimarySocCode(analysis.getPrimarySocCode());
-        dto.setSeniorityLevel(analysis.getSeniorityLevel());
-
-        dto.setImpactScore(analysis.getImpactScore());
-        dto.setTechnicalDepthScore(analysis.getTechnicalDepthScore());
-        dto.setLeadershipScore(analysis.getLeadershipScore());
-        dto.setOverallScore(analysis.getOverallScore());
-
-        dto.setRecruiterSummary(analysis.getRecruiterSummary());
-
-        // Parse JSON fields
-        try {
-            if (analysis.getKeyStrengths() != null) {
-                dto.setKeyStrengths(objectMapper.readValue(analysis.getKeyStrengths(), new TypeReference<List<String>>() {}));
-            }
-            if (analysis.getImprovementAreas() != null) {
-                dto.setImprovementAreas(objectMapper.readValue(analysis.getImprovementAreas(), new TypeReference<List<String>>() {}));
-            }
-        } catch (Exception e) {
-            log.error("Error parsing JSON fields", e);
+        // Skills
+        List<JobAnalysisResultDto.SkillDetailDto> skillDtos = new ArrayList<>();
+        for (Map<String, Object> skill : skills) {
+            JobAnalysisResultDto.SkillDetailDto skillDto = new JobAnalysisResultDto.SkillDetailDto();
+            skillDto.setName((String) skill.get("name"));
+            skillDto.setCategory((String) skill.get("category"));
+            skillDto.setSubcategory((String) skill.get("subcategory"));
+            skillDto.setProficiencyLevel(((Number) skill.get("proficiencyLevel")).intValue());
+            skillDto.setIsTechnical((Boolean) skill.get("isTechnical"));
+            skillDto.setIsPrimary((Boolean) skill.get("isPrimary"));
+            skillDto.setMentionedCount(((Number) skill.get("mentionedCount")).intValue());
+            skillDtos.add(skillDto);
         }
+        dto.setExtractedSkills(skillDtos);
 
-        dto.setCreatedAt(analysis.getCreatedAt());
+        // Line mappings
+        List<JobAnalysisResultDto.LineMappingDto> lineMappingDtos = new ArrayList<>();
+        for (Map<String, Object> lineMapping : lineMappings) {
+            JobAnalysisResultDto.LineMappingDto lineMappingDto = new JobAnalysisResultDto.LineMappingDto();
+            lineMappingDto.setSequence(((Number) lineMapping.get("sequence")).intValue());
+            lineMappingDto.setText((String) lineMapping.get("text"));
+            lineMappingDto.setImpactMetrics((String) lineMapping.get("impactMetrics"));
+            lineMappingDto.setHasQuantifiableImpact((Boolean) lineMapping.get("hasQuantifiableImpact"));
+            lineMappingDto.setImpactLevel((String) lineMapping.get("impactLevel"));
+            lineMappingDto.setScope((String) lineMapping.get("scope"));
+
+            // Activities
+            List<Map<String, Object>> activities = (List<Map<String, Object>>) lineMapping.get("activities");
+            if (activities != null) {
+                List<JobAnalysisResultDto.LineMappingDto.ActivityMappingDto> activityDtos = new ArrayList<>();
+                for (Map<String, Object> activity : activities) {
+                    JobAnalysisResultDto.LineMappingDto.ActivityMappingDto activityDto =
+                            new JobAnalysisResultDto.LineMappingDto.ActivityMappingDto();
+                    activityDto.setActivityName((String) activity.get("activityName"));
+                    activityDto.setActivityId((String) activity.get("activityId"));
+                    activityDto.setConfidence(((Number) activity.get("confidence")).doubleValue());
+                    activityDto.setReasoning((String) activity.get("reasoning"));
+                    activityDtos.add(activityDto);
+                }
+                lineMappingDto.setActivities(activityDtos);
+            }
+
+            // Tasks
+            List<Map<String, Object>> tasks = (List<Map<String, Object>>) lineMapping.get("tasks");
+            if (tasks != null) {
+                List<JobAnalysisResultDto.LineMappingDto.TaskMappingDto> taskDtos = new ArrayList<>();
+                for (Map<String, Object> task : tasks) {
+                    JobAnalysisResultDto.LineMappingDto.TaskMappingDto taskDto =
+                            new JobAnalysisResultDto.LineMappingDto.TaskMappingDto();
+                    taskDto.setTaskName((String) task.get("taskName"));
+                    taskDto.setTaskId((String) task.get("taskId"));
+                    taskDto.setConfidence(((Number) task.get("confidence")).doubleValue());
+                    taskDto.setReasoning((String) task.get("reasoning"));
+                    taskDtos.add(taskDto);
+                }
+                lineMappingDto.setTasks(taskDtos);
+            }
+
+            // Recruiter Insights
+            Map<String, Object> recruiterInsights = (Map<String, Object>) lineMapping.get("recruiterInsights");
+            if (recruiterInsights != null) {
+                JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto insightsDto =
+                        new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto();
+
+                // Strong signals
+                List<Map<String, Object>> strongSignals = (List<Map<String, Object>>) recruiterInsights.get("strongSignals");
+                if (strongSignals != null) {
+                    List<JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.SignalDto> signalDtos = new ArrayList<>();
+                    for (Map<String, Object> signal : strongSignals) {
+                        JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.SignalDto signalDto =
+                                new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.SignalDto();
+                        signalDto.setCategory((String) signal.get("category"));
+                        signalDto.setInsight((String) signal.get("insight"));
+                        signalDto.setWeight((String) signal.get("weight"));
+                        signalDtos.add(signalDto);
+                    }
+                    insightsDto.setStrongSignals(signalDtos);
+                }
+
+                insightsDto.setPotentialQuestions((List<String>) recruiterInsights.get("potentialQuestions"));
+                insightsDto.setRecruiterAppealScore(
+                        recruiterInsights.get("recruiterAppealScore") != null ?
+                                ((Number) recruiterInsights.get("recruiterAppealScore")).intValue() : null
+                );
+                insightsDto.setAppealReasoning((String) recruiterInsights.get("appealReasoning"));
+                insightsDto.setBestFitRoles((List<String>) recruiterInsights.get("bestFitRoles"));
+                insightsDto.setRedFlags((List<String>) recruiterInsights.get("redFlags"));
+
+                lineMappingDto.setRecruiterInsights(insightsDto);
+            }
+
+            lineMappingDtos.add(lineMappingDto);
+        }
+        dto.setDescriptionLineMappings(lineMappingDtos);
+
+        dto.setCreatedAt(java.time.LocalDateTime.now());
         return dto;
     }
+
 
     // ==================== Conversion Helper Methods ====================
 
@@ -537,6 +872,11 @@ public class JobAnalysisService {
         normalized.setTechnicalDepth(jobNorm.getTechnicalDepth());
         normalized.setHasLeadership(jobNorm.getHasLeadership());
         normalized.setLeadershipScope(jobNorm.getLeadershipScope());
+
+        // Industry Classification
+        normalized.setPrimaryIndustry(jobNorm.getPrimaryIndustry());
+        normalized.setIndustryVertical(jobNorm.getIndustryVertical());
+        normalized.setIndustrySectors(jobNorm.getIndustrySectors());
 
         // Convert SOC codes
         List<NormalizedJobDto.SocCodeMapping> socCodes = new ArrayList<>();
@@ -617,9 +957,45 @@ public class JobAnalysisService {
             }
             lineMapping.put("tasks", tasks);
 
+            // Convert recruiterInsights
+            if (lineDto.getRecruiterInsights() != null) {
+                Map<String, Object> recruiterInsights = new HashMap<>();
+                com.resumebuddy.model.dto.DescriptionLineMappingDto.RecruiterInsightsDto insights = lineDto.getRecruiterInsights();
+
+                // Strong signals
+                if (insights.getStrongSignals() != null) {
+                    List<Map<String, Object>> signals = new ArrayList<>();
+                    for (com.resumebuddy.model.dto.DescriptionLineMappingDto.SignalDto signal : insights.getStrongSignals()) {
+                        Map<String, Object> signalMap = new HashMap<>();
+                        signalMap.put("category", signal.getCategory());
+                        signalMap.put("insight", signal.getInsight());
+                        signalMap.put("weight", signal.getWeight());
+                        signals.add(signalMap);
+                    }
+                    recruiterInsights.put("strongSignals", signals);
+                }
+
+                recruiterInsights.put("potentialQuestions", insights.getPotentialQuestions());
+                recruiterInsights.put("recruiterAppealScore", insights.getRecruiterAppealScore());
+                recruiterInsights.put("appealReasoning", insights.getAppealReasoning());
+                recruiterInsights.put("bestFitRoles", insights.getBestFitRoles());
+                recruiterInsights.put("redFlags", insights.getRedFlags());
+
+                lineMapping.put("recruiterInsights", recruiterInsights);
+            }
+
             lineMappings.add(lineMapping);
         }
         return lineMappings;
+    }
+
+    /**
+     * Format skills for LLM prompt
+     */
+    private String formatSkillsForPrompt(List<Map<String, Object>> skills) {
+        return skills.stream()
+            .map(s -> (String) s.get("name"))
+            .collect(java.util.stream.Collectors.joining(", "));
     }
 
     /**

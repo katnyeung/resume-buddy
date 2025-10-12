@@ -5,6 +5,10 @@ You are an expert at mapping job achievements and responsibilities to O*NET work
 Job Title: {jobTitle}
 O*NET Occupation: {occupationTitle} (SOC: {socCode})
 
+## Extracted Skills from Job Description
+
+{extractedSkills}
+
 ## Description Lines to Analyze
 
 {descriptionLines}
@@ -21,12 +25,61 @@ O*NET Occupation: {occupationTitle} (SOC: {socCode})
 
 ## Your Task
 
+### Part 1: Map Description Lines to O*NET Activities/Tasks
+
 For EACH description line, identify:
 1. Which O*NET **Activities** it demonstrates (can be multiple)
 2. Which O*NET **Tasks** it demonstrates (can be multiple)
 3. Confidence score for each mapping (0.0-1.0)
 4. Extract any quantifiable impact metrics
 5. Assess impact level and scope
+
+### Part 2: Map Skills to O*NET Tasks
+
+For EACH extracted skill, identify which O*NET **Tasks** require that skill:
+- Example: "Java" skill → "Write, analyze, review Java programs" task
+- Example: "Testing" skill → "Develop or direct software testing" task
+- Example: "Kubernetes" skill → "Deploy containerized applications" task
+
+Focus on direct skill requirements for tasks. Only map skills that are clearly needed to perform the task.
+
+### Part 3: Recruiter Perspective Analysis
+
+For EACH description line, provide a recruiter's evaluation:
+
+**Strong Signals** - What makes this line appealing to recruiters:
+- **Industry Expertise**: Specific industries (banking, healthcare, e-commerce, etc.) and their value
+- **Scale & Responsibility**: Metrics indicating seniority (user count, request volume, team size)
+- **Business Impact**: Revenue, cost savings, customer satisfaction improvements
+- **Technical Depth**: Modern tech stack, architectural complexity, best practices
+- **Reliability**: Uptime, performance, production stability indicators
+- **Leadership**: Team leading, mentoring, project ownership signals
+
+**Potential Questions** - What recruiters might want clarified:
+- Role clarity (lead vs contributor vs owner)
+- Team context (solo work vs team collaboration vs leading)
+- Specific contributions vs team effort
+- Technology choices and constraints
+- Business outcomes beyond technical metrics
+
+**Recruiter Appeal Score** (0-10):
+- 9-10: Exceptional - Clear senior+ impact with quantifiable results
+- 7-8: Strong - Good technical depth with measurable outcomes
+- 5-6: Solid - Demonstrates competence but lacks specifics
+- 3-4: Weak - Vague or generic, needs more detail
+- 1-2: Poor - Red flags or unclear contribution
+
+**Best Fit Roles** - Which job titles this line appeals to (be specific):
+- Consider seniority level (Junior, Mid, Senior, Staff, Principal, Lead)
+- Consider specialization (Backend, Frontend, DevOps, Architect, etc.)
+- Consider industry fit
+
+**Red Flags** (if any):
+- Vague claims without evidence
+- Buzzwords without substance
+- Unclear personal contribution
+- Unrealistic metrics
+- Missing context
 
 ## Mapping Guidelines
 
@@ -89,7 +142,40 @@ For EACH description line, identify:
       "impactMetrics": "99.95% uptime",
       "hasQuantifiableImpact": true,
       "impactLevel": "High",
-      "scope": "Company"
+      "scope": "Company",
+      "recruiterInsights": {
+        "strongSignals": [
+          {
+            "category": "Technical Depth",
+            "insight": "Cloud-native architecture with microservices shows modern best practices",
+            "weight": "high"
+          },
+          {
+            "category": "Reliability",
+            "insight": "99.95% uptime demonstrates production-ready, mission-critical work",
+            "weight": "high"
+          },
+          {
+            "category": "Scale",
+            "insight": "Production systems requiring high availability indicate senior-level responsibility",
+            "weight": "medium"
+          }
+        ],
+        "potentialQuestions": [
+          "What was your specific role - architect, lead developer, or team contributor?",
+          "How large was the microservices ecosystem?",
+          "What cloud provider and what was the deployment architecture?"
+        ],
+        "recruiterAppealScore": 8,
+        "appealReasoning": "Strong technical depth with quantifiable uptime metric, but could use more scale context (request volume, user count, team size)",
+        "bestFitRoles": [
+          "Senior Backend Engineer",
+          "Cloud Solutions Architect",
+          "Microservices Developer",
+          "Platform Engineer"
+        ],
+        "redFlags": []
+      }
     },
     {
       "sequence": 2,
@@ -126,6 +212,29 @@ For EACH description line, identify:
       "hasQuantifiableImpact": false,
       "impactLevel": "Medium",
       "scope": "Department"
+    }
+  ],
+  "skillToTaskMappings": [
+    {
+      "skillName": "Java",
+      "taskName": "Write, analyze, review Java programs",
+      "taskId": "onet-task-write-analyze-review-java-programs",
+      "confidence": 0.95,
+      "reasoning": "Java skill directly required for writing Java programs"
+    },
+    {
+      "skillName": "Testing",
+      "taskName": "Develop or direct software testing",
+      "taskId": "onet-task-develop-or-direct-software-testing",
+      "confidence": 0.92,
+      "reasoning": "Testing skill is core to developing testing procedures"
+    },
+    {
+      "skillName": "Kubernetes",
+      "taskName": "Deploy containerized applications",
+      "taskId": "onet-task-deploy-containerized-applications",
+      "confidence": 0.88,
+      "reasoning": "Kubernetes is the primary tool for container deployment"
     }
   ]
 }

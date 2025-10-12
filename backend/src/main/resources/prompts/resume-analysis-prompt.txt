@@ -79,10 +79,11 @@ Example 6 - Summary Section (About Me) - ALL paragraphs share ONE groupId:
   {"lineNumber": 36, "sectionType": "SUMMARY", "groupId": 8, "groupType": null, "analysisNotes": "Third summary paragraph - career span and leadership"}
 ]
 
-IMPORTANT: Respond with a JSON object containing TWO parts:
+IMPORTANT: Respond with a JSON object containing THREE parts:
 
 1. **lineAnalysis**: Array of line-by-line analysis (same format as examples above)
 2. **structuredData**: Extracted structured resume information
+3. **atsQualityReport**: ATS-style quality assessment of resume format and content
 
 Response format:
 {
@@ -136,11 +137,91 @@ Response format:
         "projectUrl": "Project URL if mentioned"
       }
     ]
+  },
+  "atsQualityReport": {
+    "score": 85,
+    "summary": "Resume is well-structured with clear sections and balanced content. Professional format suitable for ATS parsing.",
+    "strengths": [
+      "L31: Job title and company clearly stated for current role",
+      "L37-L41: Multiple achievement-oriented bullet points with action verbs",
+      "L101-L105: Professional summary organized into 3 focused paragraphs"
+    ],
+    "improvements": [
+      "Consider adding more quantifiable metrics (percentages, numbers, time saved)",
+      "Skills section could benefit from categorization (e.g., Backend, DevOps, Frontend)"
+    ],
+    "contentBalance": "balanced",
+    "readability": "good",
+    "sectionOrganization": "excellent"
   }
 }
+
+GUIDELINES FOR atsQualityReport:
+IMPORTANT: Use your lineAnalysis results (section types, groups, analysis notes) to evaluate resume LAYOUT, STRUCTURE, and TEXT BALANCE. Focus on how well the resume is organized and whether content is properly distributed across sections.
+
+HOW TO GENERATE THE ATS REPORT:
+1. Look at your lineAnalysis array - examine the sectionType, groupId, groupType, and analysisNotes for each line
+2. Evaluate the STRUCTURE: Are sections clearly defined? Are groups properly organized?
+3. Evaluate TEXT BALANCE: Are job descriptions sufficiently detailed? Are sections proportionate?
+4. Evaluate LAYOUT: Does the resume flow logically? Are related items grouped together?
+
+- **score** (0-100): Overall resume quality score based on LAYOUT, STRUCTURE, and BALANCE
+  - 90-100: Excellent - Clear sections, well-grouped content, balanced detail across all areas, logical flow
+  - 80-89: Very Good - Good structure with minor gaps (some sections thin, uneven distribution)
+  - 70-79: Good - Solid organization but some sections need more detail or better grouping
+  - 60-69: Fair - Basic structure present but lacks balance or clear section definition
+  - Below 60: Needs Work - Poor organization, missing sections, unbalanced content
+
+- **summary**: 1-2 sentences summarizing overall STRUCTURE and BALANCE (not content)
+  - Focus on: section clarity, content distribution, logical organization, grouping quality
+
+- **strengths**: Array of STRUCTURE-BASED observations with line references
+  - Use format "L{lineNumber}: {observation}" or "L{start}-L{end}: {observation}"
+  - Look at your lineAnalysis results to find examples:
+    - Well-defined section headers (CONTACT, EXPERIENCE, SKILLS clearly separated)
+    - Properly grouped job entries (multiple lines with same groupId forming coherent JOB groups)
+    - Balanced content distribution (EXPERIENCE sections have sufficient detail)
+    - Clear grouping of related items (certifications, projects each with unique groupId)
+  - Examples:
+    - "L30-L45: Experience section well-structured with clear job grouping (groupId 3)"
+    - "L52-L58: Job responsibilities organized into distinct lines with detailed analysis notes"
+    - "L101-L105: Professional summary spans multiple well-organized paragraphs (groupId 8)"
+
+- **improvements**: Array of STRUCTURE-FOCUSED suggestions (NO line references)
+  - Look at your lineAnalysis to identify:
+    - Sections with too few lines (e.g., SKILLS section has only 2 lines - suggest adding more)
+    - Missing standard sections (no EDUCATION, no CERTIFICATIONS detected in lineAnalysis)
+    - Unbalanced groups (some JOB groups have 1 line, others have 10+ lines)
+    - Vague or thin analysis notes suggesting insufficient detail
+  - Examples:
+    - "Skills section appears sparse - consider adding more technical skills for better coverage"
+    - "Some job entries lack detailed descriptions - expand responsibilities and achievements"
+    - "Missing education section - include academic background for completeness"
+    - "Contact information could include LinkedIn or GitHub for professional networking"
+
+- **contentBalance**: "sparse" | "balanced" | "verbose"
+  - Look at lineAnalysis group sizes and analysis notes:
+    - sparse: Groups have very few lines (1-2 lines per JOB), analysis notes indicate minimal detail
+    - balanced: Groups have appropriate detail (3-8 lines per JOB), well-distributed content
+    - verbose: Groups have excessive lines (10+ per JOB), analysis notes suggest repetition
+
+- **readability**: "poor" | "fair" | "good" | "excellent"
+  - Evaluate based on lineAnalysis structure:
+    - poor: No clear sectionType patterns, inconsistent grouping, chaotic organization
+    - fair: Some section structure but groupId assignments are inconsistent
+    - good: Clear sectionType for most lines, logical groupId assignments
+    - excellent: Perfect section organization, coherent grouping, logical flow
+
+- **sectionOrganization**: "poor" | "fair" | "good" | "excellent"
+  - Count unique sectionType values in your lineAnalysis:
+    - poor: Missing 3+ standard sections (only CONTACT + EXPERIENCE detected)
+    - fair: Missing 1-2 standard sections (no EDUCATION or CERTIFICATIONS)
+    - good: All standard sections present (CONTACT, SUMMARY, EXPERIENCE, SKILLS, EDUCATION)
+    - excellent: All sections + optional (CONTACT, SUMMARY, EXPERIENCE, SKILLS, EDUCATION, CERTIFICATIONS, PROJECTS)
 
 IMPORTANT:
 - Respond ONLY with valid JSON object (not an array). No markdown code blocks, no additional text.
 - Extract actual values from the resume content - don't use placeholders
 - Use null for missing fields
 - For skills, split comma-separated lists into individual skill objects
+- Include ALL three parts: lineAnalysis, structuredData, AND atsQualityReport

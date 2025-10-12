@@ -6,6 +6,14 @@ Company: {company}
 Duration: {startDate} to {endDate}
 Description: {description}
 
+**IMPORTANT**: Before analyzing, use web search to look up information about "{company}" to understand:
+- What industry/sector the company operates in
+- What products/services they provide
+- Their business model and target market
+- Any relevant domain expertise (e.g., Financial Services, Healthcare, E-commerce)
+
+This company research will help you accurately classify the industry vertical and understand the domain context of the role.
+
 Please provide a comprehensive analysis with:
 
 ## Part 1: Job Normalization & O*NET Mapping
@@ -19,6 +27,10 @@ Please provide a comprehensive analysis with:
 5. **Key Responsibilities**: Main duties extracted and normalized
 6. **Technical Depth**: Score 1-10 based on technical complexity required
 7. **Leadership Indicators**: Whether this role involves management or mentoring
+8. **Industry Classification**: Identify the industry domain based on company, technologies, and context
+   - **Primary Industry**: Broad sector (e.g., "Financial Services", "Healthcare", "Technology", "Retail")
+   - **Industry Vertical**: Specific segment (e.g., "Fintech", "Banking", "Investment Banking", "Health Tech", "E-commerce")
+   - **Industry Sectors**: Related domains (e.g., ["Financial Technology", "Cloud Services", "Payments"])
 
 ## Part 2: Skill Extraction
 
@@ -70,7 +82,10 @@ Limit to top 15-20 most relevant skills.
     ],
     "technicalDepth": 8.5,
     "hasLeadership": true,
-    "leadershipScope": "team"
+    "leadershipScope": "team",
+    "primaryIndustry": "Financial Services",
+    "industryVertical": "Fintech",
+    "industrySectors": ["Financial Technology", "Cloud Services", "Payments"]
   },
   "skillExtraction": {
     "skills": [
@@ -136,5 +151,17 @@ Limit to top 15-20 most relevant skills.
 - 4-6: Moderate complexity, some architecture decisions
 - 7-8: High complexity, system design, advanced patterns
 - 9-10: Cutting-edge, research-level, or highly specialized
+
+**Industry Classification Guidelines**:
+- Use web search results about the company to determine accurate industry classification
+- Primary Industry should be broad (Financial Services, Healthcare, Technology, Manufacturing, etc.)
+- Industry Vertical should be specific (Fintech, Investment Banking, Health Tech, E-commerce, etc.)
+- Industry Sectors should list 2-4 related domains that provide context
+- Consider: company's products, services, clients, and market position
+- Examples:
+  - GFT Technologies (banking clients) → Financial Services / Banking / [Financial Technology, Enterprise Software]
+  - Stripe → Financial Services / Fintech / [Payment Processing, Financial Technology, SaaS]
+  - Epic Systems → Healthcare / Health Tech / [Electronic Health Records, Healthcare IT]
+  - Amazon → Technology / E-commerce / [Cloud Computing, Retail Technology, Logistics]
 
 Be accurate and use official O*NET SOC codes. The SOC code format is XX-XXXX.XX (e.g., 15-1252.00).

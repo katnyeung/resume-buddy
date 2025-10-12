@@ -324,9 +324,21 @@ The current implementation follows an MVP (Minimum Viable Product) approach:
    - LLM-based skill extraction and mapping
    - Graph relationships: Job → Occupation → Skills → O*NET Skills/Technologies
    - Graceful error handling for missing O*NET data
-8. 📋 **Graph Queries**: Skill gap analysis, career path queries, candidate comparison
-9. 📋 **ATS Scoring**: Calculate and display ATS compatibility score
-10. 📋 **Job Recommendations**: Find similar jobs based on graph relationships
+8. ✅ **Deep Graph Analysis UI** (Phase 6 - Oct 12, 2025):
+   - **Skill Credibility Report**: Shows which skills are demonstrated vs claimed
+     - Dynamic trust badges reflecting actual evidence count
+     - Graph-aware messaging explaining skill-task-line connections
+     - Task importance indicators for each skill
+   - **Missing Skills Suggestions**: Top 10 most important missing skills
+     - Filtered to exclude overly general categories (Domain Expertise/Knowledge)
+     - Smart sorting: Importance first, then task frequency
+     - Consistent expand/collapse behavior
+   - **Description Line Value Analysis**: Ranks resume lines by skill showcase count
+   - **Untapped Opportunities**: Skills user has but doesn't demonstrate
+   - **Missing High-Priority Tasks/Activities**: Critical O*NET gaps
+9. 📋 **Graph Queries**: Advanced career path queries, candidate comparison
+10. 📋 **ATS Scoring**: Calculate and display ATS compatibility score
+11. 📋 **Job Recommendations**: Find similar jobs based on graph relationships
 
 ## 🤝 Contributing
 

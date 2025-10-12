@@ -25,7 +25,7 @@ public class ResumeAnalysisController {
     private final ResumeAnalysisService resumeAnalysisService;
 
     @PostMapping("/{id}/analyze")
-    @Operation(summary = "Analyze resume with AI", description = "Perform line-by-line AI analysis and extract structured data in a single operation")
+    @Operation(summary = "Analyze resume with AI", description = "Perform line-by-line AI analysis, extract structured data, and generate ATS quality report in a single operation")
     public ResponseEntity<AnalysisResultDto> analyzeResume(@PathVariable String id) {
         log.info("Received request to analyze resume ID: {}", id);
 
@@ -36,12 +36,16 @@ public class ResumeAnalysisController {
                 return ResponseEntity.badRequest().build();
             }
 
+            // Get ATS report from the resume after analysis
+            var atsReport = resumeAnalysisService.getATSReport(id);
+
             AnalysisResultDto result = new AnalysisResultDto();
             result.setResumeId(id);
             result.setAnalyzedAt(LocalDateTime.now());
             result.setTotalLines(analyses.size());
             result.setAnalyzedLines(analyses.size());
             result.setLineAnalyses(analyses);
+            result.setAtsReport(atsReport);
 
             log.info("Successfully analyzed resume ID: {} with {} lines", id, analyses.size());
             return ResponseEntity.ok(result);

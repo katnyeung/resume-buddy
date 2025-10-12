@@ -1,14 +1,39 @@
 'use client';
 
 import { ResumeAnalysisDto } from '@/lib/types';
+import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
 interface AnalysisSummaryProps {
   analysis: ResumeAnalysisDto;
+  resumeId: string;
   onAnalyzeJob?: (experienceId: string) => void;
   onFindJobs?: (experienceId: string) => void;
 }
 
-export default function AnalysisSummary({ analysis, onAnalyzeJob, onFindJobs }: AnalysisSummaryProps) {
+export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFindJobs }: AnalysisSummaryProps) {
+  const router = useRouter();
+  const [analyzingJobId, setAnalyzingJobId] = useState<string | null>(null);
+
+  // Build analyzed experiences map from the isAnalyzed flag in each experience
+  const analyzedExperiences: Record<string, boolean> = {};
+  analysis.experiences.forEach(exp => {
+    analyzedExperiences[exp.id] = exp.isAnalyzed || false;
+  });
+
+  const handleViewAnalysis = (analysisId: string) => {
+    router.push(`/analysis/${analysisId}`);
+  };
+
+  const handleAnalyzeJobClick = async (experienceId: string) => {
+    setAnalyzingJobId(experienceId);
+    try {
+      await onAnalyzeJob?.(experienceId);
+    } finally {
+      setAnalyzingJobId(null);
+    }
+  };
+
   return (
     <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 mb-4">
       <div className="flex items-center gap-2 mb-4">
@@ -134,20 +159,86 @@ export default function AnalysisSummary({ analysis, onAnalyzeJob, onFindJobs }: 
                       )}
 
                       {/* Action Buttons */}
-                      <div className="flex gap-2 mt-3 pt-2 border-t border-blue-200">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onAnalyzeJob?.(exp.id);
-                          }}
-                          className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-md text-xs font-medium hover:bg-purple-200 transition-colors flex items-center gap-1"
-                          title="Analyze this job experience with AI (Coming soon)"
-                        >
-                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                          </svg>
-                          Analyze Job
-                        </button>
+                      <div className="flex gap-2 mt-3 pt-2 border-t border-blue-200 flex-wrap">
+                        {analyzedExperiences[exp.id] ? (
+                          <>
+                            {/* View Latest Report Button (Primary) */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (exp.analysisId) {
+                                  handleViewAnalysis(exp.analysisId);
+                                }
+                              }}
+                              className="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
+                              title="View latest analysis report"
+                              disabled={!exp.analysisId}
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                              View Latest Report
+                            </button>
+
+                            {/* Re-analyze Button (Secondary) */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (confirm('This job has already been analyzed. Re-analyze? This will overwrite the existing analysis.')) {
+                                  handleAnalyzeJobClick(exp.id);
+                                }
+                              }}
+                              disabled={analyzingJobId === exp.id}
+                              className="px-3 py-1.5 bg-purple-50 text-purple-600 border border-purple-200 rounded-md text-xs font-medium hover:bg-purple-100 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                              title="Re-analyze this job (will overwrite existing analysis)"
+                            >
+                              {analyzingJobId === exp.id ? (
+                                <>
+                                  <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                  </svg>
+                                  Analyzing...
+                                </>
+                              ) : (
+                                <>
+                                  <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                  </svg>
+                                  Re-analyze
+                                </>
+                              )}
+                            </button>
+                          </>
+                        ) : (
+                          /* Analyze Job Button (Primary - First time) */
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAnalyzeJobClick(exp.id);
+                            }}
+                            disabled={analyzingJobId === exp.id}
+                            className="px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-1 shadow-sm"
+                            title="Analyze this job experience with AI"
+                          >
+                            {analyzingJobId === exp.id ? (
+                              <>
+                                <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                                Analyzing...
+                              </>
+                            ) : (
+                              <>
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                </svg>
+                                Analyze Job
+                              </>
+                            )}
+                          </button>
+                        )}
 
                         <button
                           onClick={(e) => {

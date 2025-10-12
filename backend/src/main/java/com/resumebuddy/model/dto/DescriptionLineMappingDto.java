@@ -15,6 +15,7 @@ import java.util.List;
 public class DescriptionLineMappingDto {
 
     private List<LineMappingDto> lineMappings;
+    private List<SkillToTaskMappingDto> skillToTaskMappings;
 
     @Data
     @NoArgsConstructor
@@ -28,6 +29,7 @@ public class DescriptionLineMappingDto {
         private Boolean hasQuantifiableImpact;
         private String impactLevel;  // Low/Medium/High/Critical
         private String scope;  // Individual/Team/Department/Company/Industry
+        private RecruiterInsightsDto recruiterInsights;
     }
 
     @Data
@@ -48,5 +50,37 @@ public class DescriptionLineMappingDto {
         private String taskId;
         private Double confidence;
         private String reasoning;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SkillToTaskMappingDto {
+        private String skillName;
+        private String taskName;
+        private String taskId;
+        private Double confidence;
+        private String reasoning;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class RecruiterInsightsDto {
+        private List<SignalDto> strongSignals;
+        private List<String> potentialQuestions;
+        private Integer recruiterAppealScore;
+        private String appealReasoning;
+        private List<String> bestFitRoles;
+        private List<String> redFlags;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SignalDto {
+        private String category;
+        private String insight;
+        private String weight;  // "high", "medium", "low"
     }
 }

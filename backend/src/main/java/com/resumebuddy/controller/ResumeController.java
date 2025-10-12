@@ -7,6 +7,7 @@ import com.resumebuddy.model.dto.ParsedResume;
 import com.resumebuddy.repository.ResumeRepository;
 import com.resumebuddy.service.DoclingHttpService;
 import com.resumebuddy.service.FileStorageService;
+import com.resumebuddy.service.Neo4jGraphService;
 import com.resumebuddy.service.ResumeLineService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -34,6 +35,7 @@ public class ResumeController {
     private final DoclingHttpService doclingHttpService;
     private final FileStorageService fileStorageService;
     private final ResumeLineService resumeLineService;
+    private final Neo4jGraphService neo4jGraphService;
 
     @GetMapping("/health")
     @Operation(summary = "Health check", description = "Check if the service is running")
@@ -254,7 +256,16 @@ public class ResumeController {
                 }
             }
 
-            // Delete from database
+            // Delete from Neo4j graph database
+            try {
+                neo4jGraphService.deleteResumeFromGraph(id);
+                log.info("Successfully deleted graph data for resume {}", id);
+            } catch (Exception e) {
+                log.error("Error deleting graph data for resume {}: {}", id, e.getMessage());
+                // Continue with deletion even if graph cleanup fails
+            }
+
+            // Delete from database (this will cascade to related tables via JPA)
             resumeRepository.deleteById(id);
             log.info("Successfully deleted resume {} and associated file", id);
 

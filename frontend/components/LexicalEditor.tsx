@@ -20,10 +20,10 @@ import AutoFocusPlugin from './plugins/AutoFocusPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
 import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume, getStructuredAnalysis, analyzeJob } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
-import { ResumeLine, ResumeAnalysisDto, JobAnalysisResult } from '@/lib/types';
+import { ResumeLine, ResumeAnalysisDto, ATSReport } from '@/lib/types';
 import AnalysisOverlay from './AnalysisOverlay';
 import AnalysisSummary from './AnalysisSummary';
-import JobAnalysisResults from './JobAnalysisResults';
+import ATSQualityReport from './ATSQualityReport';
 
 interface LexicalEditorProps {
   resumeId: string;
@@ -41,8 +41,7 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
   const [analyzedLines, setAnalyzedLines] = useState<ResumeLine[]>([]);
   const [structuredAnalysis, setStructuredAnalysis] = useState<ResumeAnalysisDto | null>(null);
   const [analyzingJob, setAnalyzingJob] = useState(false);
-  const [jobAnalysisResult, setJobAnalysisResult] = useState<JobAnalysisResult | null>(null);
-  const [showJobAnalysis, setShowJobAnalysis] = useState(false);
+  const [atsReport, setATSReport] = useState<ATSReport | null>(null);
 
   // Load editor state or resume lines on mount
   useEffect(() => {
@@ -62,6 +61,16 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
           // Load structured analysis summary
           const analysis = await getStructuredAnalysis(resumeId);
           setStructuredAnalysis(analysis);
+
+          // Load ATS report if available
+          if (resume.atsReport) {
+            try {
+              const parsedReport = JSON.parse(resume.atsReport);
+              setATSReport(parsedReport);
+            } catch (e) {
+              console.error('Failed to parse ATS report', e);
+            }
+          }
         }
 
         // First try to load the saved editor state
@@ -162,6 +171,11 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       const analysis = await getStructuredAnalysis(resumeId);
       setStructuredAnalysis(analysis);
 
+      // Store ATS report
+      if (result.atsReport) {
+        setATSReport(result.atsReport);
+      }
+
       setTimeout(() => setAnalysisStatus(''), 5000);
     } catch (error) {
       console.error('Analysis error:', error);
@@ -180,11 +194,13 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       setAnalyzingJob(true);
       setSaveStatus('Analyzing job experience...');
 
-      const result = await analyzeJob(resumeId, experienceId);
-      setJobAnalysisResult(result);
-      setShowJobAnalysis(true);
+      await analyzeJob(resumeId, experienceId);
       setSaveStatus('Job analysis completed!');
       setTimeout(() => setSaveStatus(''), 3000);
+
+      // Reload structured analysis to update isAnalyzed flags
+      const updatedAnalysis = await getStructuredAnalysis(resumeId);
+      setStructuredAnalysis(updatedAnalysis);
 
     } catch (error) {
       console.error('Job analysis error:', error);
@@ -257,6 +273,7 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
         <div className="mb-4">
           <AnalysisSummary
             analysis={structuredAnalysis}
+            resumeId={resumeId}
             onAnalyzeJob={handleAnalyzeJob}
             onFindJobs={handleFindJobsForExperience}
           />
@@ -321,6 +338,13 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
         </div>
       )}
 
+      {/* ATS Quality Report - displayed below analysis overlay */}
+      {atsReport && (
+        <div className="bg-white border-x border-gray-300 p-4">
+          <ATSQualityReport report={atsReport} />
+        </div>
+      )}
+
       {/* Lexical Editor - key prop forces remount when editorState changes */}
       <LexicalComposer key={resumeId} initialConfig={initialConfig}>
         <div className={`relative bg-white border-x ${analyzedLines.length > 0 ? '' : 'border-t'} border-b border-gray-300 ${analyzedLines.length > 0 ? '' : 'rounded-b-lg'}`}>
@@ -344,14 +368,6 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
           <AutoFocusPlugin />
         </div>
       </LexicalComposer>
-
-      {/* Job Analysis Results Modal */}
-      {showJobAnalysis && jobAnalysisResult && (
-        <JobAnalysisResults
-          analysis={jobAnalysisResult}
-          onClose={() => setShowJobAnalysis(false)}
-        />
-      )}
     </div>
   );
 }

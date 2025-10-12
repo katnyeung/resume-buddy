@@ -30,6 +30,11 @@ public class ComprehensiveJobAnalysisDto {
         private Double technicalDepth;
         private Boolean hasLeadership;
         private String leadershipScope;
+
+        // Industry Classification (NEW)
+        private String primaryIndustry;       // e.g., "Financial Services"
+        private String industryVertical;      // e.g., "Fintech", "Banking", "Investment"
+        private List<String> industrySectors; // e.g., ["Financial Technology", "Cloud Services"]
     }
 
     @Data

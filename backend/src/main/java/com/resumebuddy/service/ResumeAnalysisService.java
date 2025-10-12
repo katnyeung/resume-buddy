@@ -36,6 +36,7 @@ public class ResumeAnalysisService {
     private final ResumeRepository resumeRepository;
     private final ResumeLineRepository resumeLineRepository;
     private final ResumeAnalysisRepository resumeAnalysisRepository;
+    private final JobAnalysisRepository jobAnalysisRepository;
     private final ObjectMapper objectMapper;
     private final EntityManager entityManager;
 
@@ -117,12 +118,25 @@ public class ResumeAnalysisService {
         @SuppressWarnings("unchecked")
         List<LineAnalysisDto> analyses = (List<LineAnalysisDto>) response.get("lineAnalysis");
         JsonNode structuredData = (JsonNode) response.get("structuredData");
+        ATSReportDto atsReport = (ATSReportDto) response.get("atsReport");
 
         // Update resume lines with analysis results
         updateResumeLines(resumeLines, analyses);
 
         // Create structured analysis from LLM's structured data
         createStructuredAnalysisFromLLM(resume, structuredData);
+
+        // Store ATS report in Resume entity
+        if (atsReport != null) {
+            try {
+                resume.setAtsReport(objectMapper.writeValueAsString(atsReport));
+                resume.setAtsScore(atsReport.getScore());
+                resume.setAtsAnalyzedAt(LocalDateTime.now());
+                log.info("Stored ATS report with score: {} for resume ID: {}", atsReport.getScore(), resumeId);
+            } catch (Exception e) {
+                log.error("Failed to serialize ATS report for resume ID: {}", resumeId, e);
+            }
+        }
 
         // Update resume status to ANALYZED
         resume.setStatus(ResumeStatus.ANALYZED.name());
@@ -320,9 +334,41 @@ public class ResumeAnalysisService {
             // Parse structuredData
             JsonNode structuredDataNode = responseObject.path("structuredData");
 
+            // Parse atsQualityReport
+            JsonNode atsReportNode = responseObject.path("atsQualityReport");
+            ATSReportDto atsReport = null;
+            if (!atsReportNode.isMissingNode()) {
+                atsReport = new ATSReportDto();
+                atsReport.setScore(atsReportNode.path("score").asInt(0));
+                atsReport.setSummary(getTextOrNull(atsReportNode, "summary"));
+
+                // Parse strengths array
+                JsonNode strengthsArray = atsReportNode.path("strengths");
+                if (strengthsArray.isArray()) {
+                    List<String> strengths = new ArrayList<>();
+                    strengthsArray.forEach(node -> strengths.add(node.asText()));
+                    atsReport.setStrengths(strengths);
+                }
+
+                // Parse improvements array
+                JsonNode improvementsArray = atsReportNode.path("improvements");
+                if (improvementsArray.isArray()) {
+                    List<String> improvements = new ArrayList<>();
+                    improvementsArray.forEach(node -> improvements.add(node.asText()));
+                    atsReport.setImprovements(improvements);
+                }
+
+                atsReport.setContentBalance(getTextOrNull(atsReportNode, "contentBalance"));
+                atsReport.setReadability(getTextOrNull(atsReportNode, "readability"));
+                atsReport.setSectionOrganization(getTextOrNull(atsReportNode, "sectionOrganization"));
+
+                log.info("Successfully parsed ATS quality report with score: {}", atsReport.getScore());
+            }
+
             Map<String, Object> result = new HashMap<>();
             result.put("lineAnalysis", analyses);
             result.put("structuredData", structuredDataNode);
+            result.put("atsReport", atsReport);
 
             log.info("Successfully parsed {} line analyses from LLM response", analyses.size());
             return result;
@@ -389,6 +435,25 @@ public class ResumeAnalysisService {
         return resumeAnalysisRepository.existsByResumeId(resumeId);
     }
 
+    @Transactional(readOnly = true)
+    public ATSReportDto getATSReport(String resumeId) {
+        log.info("Retrieving ATS report for resume ID: {}", resumeId);
+
+        return resumeRepository.findById(resumeId)
+            .map(resume -> {
+                if (resume.getAtsReport() != null) {
+                    try {
+                        return objectMapper.readValue(resume.getAtsReport(), ATSReportDto.class);
+                    } catch (Exception e) {
+                        log.error("Failed to parse ATS report for resume ID: {}", resumeId, e);
+                        return null;
+                    }
+                }
+                return null;
+            })
+            .orElse(null);
+    }
+
     private ResumeAnalysisDto convertToDto(ResumeAnalysis analysis) {
         ResumeAnalysisDto dto = new ResumeAnalysisDto();
         dto.setId(analysis.getId());
@@ -453,6 +518,16 @@ public class ResumeAnalysisService {
         dto.setStartDate(experience.getStartDate());
         dto.setEndDate(experience.getEndDate());
         dto.setDescription(experience.getDescription());
+        dto.setIsAnalyzed(experience.getIsAnalyzed());
+        dto.setAnalyzedAt(experience.getAnalyzedAt());
+
+        // Fetch the latest job analysis ID if experience has been analyzed
+        if (experience.getIsAnalyzed()) {
+            String resumeId = experience.getAnalysis().getResume().getId();
+            jobAnalysisRepository.findFirstByResumeIdAndExperienceIdOrderByCreatedAtDesc(resumeId, experience.getId())
+                .ifPresent(analysis -> dto.setAnalysisId(analysis.getId()));
+        }
+
         return dto;
     }
 
