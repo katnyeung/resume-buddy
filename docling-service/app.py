@@ -51,7 +51,14 @@ async def parse_document(file: UploadFile = File(...)):
 
 
     # Validate file type
-    allowed_types = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain"]
+    allowed_types = [
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "text/plain",
+        "image/jpeg",
+        "image/jpg",
+        "image/png"
+    ]
     if file.content_type not in allowed_types:
         raise HTTPException(
             status_code=400,
@@ -182,7 +189,14 @@ async def parse_document_from_url(request: FileUrlRequest):
         logger.info(f"Response content length: {len(response.content)} bytes")
 
         # Validate file type
-        allowed_types = ["application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "text/plain"]
+        allowed_types = [
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
+            "image/jpeg",
+            "image/jpg",
+            "image/png"
+        ]
         if content_type not in allowed_types:
             logger.error(f"Unsupported file type: {content_type}. Allowed types: {allowed_types}")
             raise HTTPException(
@@ -194,7 +208,10 @@ async def parse_document_from_url(request: FileUrlRequest):
         extension_map = {
             "application/pdf": ".pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-            "text/plain": ".txt"
+            "text/plain": ".txt",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png"
         }
         file_extension = extension_map.get(content_type, "")
         logger.info(f"Using file extension: {file_extension}")
