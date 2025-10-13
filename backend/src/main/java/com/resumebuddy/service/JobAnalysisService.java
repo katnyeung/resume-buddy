@@ -224,11 +224,16 @@ public class JobAnalysisService {
         try {
             log.info("Enriching analysis with deep graph insights for experience: {}", experienceId);
 
-            // 1. Skill demonstration analysis
+            // 1. Skill demonstration analysis (WITHOUT task-level popularity for performance)
             List<Map<String, Object>> skillDemo = neo4jGraphService.getSkillDemonstrationAnalysis(experienceId);
             log.info("Retrieved {} skill demonstration records from Neo4j", skillDemo != null ? skillDemo.size() : 0);
             if (skillDemo != null && !skillDemo.isEmpty()) {
-                dto.setSkillDemonstrationAnalysis(convertToSkillDemonstrationDtos(skillDemo));
+                List<JobAnalysisResultDto.SkillDemonstrationDto> skillDemos = convertToSkillDemonstrationDtos(skillDemo);
+
+                // PHASE 6.5: Task-level popularity now loaded on-demand via API endpoint
+                // enrichSkillsWithTaskPopularity(skillDemos, experienceId); // REMOVED
+
+                dto.setSkillDemonstrationAnalysis(skillDemos);
                 log.info("Added {} skill demonstration analyses to DTO", skillDemo.size());
             } else {
                 log.warn("No skill demonstration data found for experience: {}", experienceId);
@@ -281,6 +286,99 @@ public class JobAnalysisService {
     }
 
     /**
+     * PHASE 6.5: Enrich skills with task-level popularity data
+     * For each skill, iterate through its linked tasks and fetch:
+     * 1. Skill popularity for that specific task
+     * 2. Skill co-occurrence patterns
+     * 3. Missing skills for that task
+     */
+    private void enrichSkillsWithTaskPopularity(List<JobAnalysisResultDto.SkillDemonstrationDto> skillDemos, String experienceId) {
+        for (JobAnalysisResultDto.SkillDemonstrationDto skill : skillDemos) {
+            try {
+                // Get task IDs and names from the Neo4j query result
+                // taskNames format: "taskId|taskName"
+                List<String> taskNames = skill.getTaskNames();
+                if (taskNames == null || taskNames.isEmpty()) {
+                    continue;
+                }
+
+                List<JobAnalysisResultDto.TaskPopularityDataDto> taskPopularityList = new ArrayList<>();
+
+                // Process each task linked to this skill
+                for (String taskData : taskNames) {
+                    String[] parts = taskData.split("\\|");
+                    if (parts.length < 2) continue;
+
+                    String taskId = parts[0];
+                    String taskName = parts[1];
+
+                    // 1. Get task-level skill popularity
+                    List<Map<String, Object>> skillPopularityRaw = neo4jGraphService.getTaskSkillPopularityAnalysis(experienceId, taskId);
+                    List<JobAnalysisResultDto.SkillPopularityDto> skillPopularityDtos = new ArrayList<>();
+                    for (Map<String, Object> row : skillPopularityRaw) {
+                        JobAnalysisResultDto.SkillPopularityDto popDto = new JobAnalysisResultDto.SkillPopularityDto();
+                        popDto.setSkillName((String) row.get("skillName"));
+                        popDto.setSkillCategory((String) row.get("skillCategory"));
+                        popDto.setPeopleWithSkill(((Number) row.get("peopleWithSkill")).intValue());
+                        popDto.setUserHasSkill((Boolean) row.get("userHasSkill"));
+                        skillPopularityDtos.add(popDto);
+                    }
+
+                    // 2. Get missing skills for this task
+                    List<Map<String, Object>> missingSkillsRaw = neo4jGraphService.getTaskMissingSkillsAnalysis(experienceId, taskId);
+                    List<JobAnalysisResultDto.MissingTaskSkillDto> missingSkillDtos = new ArrayList<>();
+                    for (Map<String, Object> row : missingSkillsRaw) {
+                        JobAnalysisResultDto.MissingTaskSkillDto missingDto = new JobAnalysisResultDto.MissingTaskSkillDto();
+                        missingDto.setSkillName((String) row.get("skillName"));
+                        missingDto.setCategory((String) row.get("category"));
+                        missingDto.setPeopleWithSkill(((Number) row.get("peopleWithSkill")).intValue());
+                        missingDto.setTaskImportance(((Number) row.get("taskImportance")).doubleValue());
+                        missingSkillDtos.add(missingDto);
+                    }
+
+                    // Create task popularity data DTO
+                    JobAnalysisResultDto.TaskPopularityDataDto taskPopDto = new JobAnalysisResultDto.TaskPopularityDataDto();
+                    taskPopDto.setTaskId(taskId);
+                    taskPopDto.setTaskName(taskName);
+                    taskPopDto.setSkillPopularity(skillPopularityDtos);
+                    taskPopDto.setMissingSkills(missingSkillDtos);
+                    taskPopularityList.add(taskPopDto);
+                }
+
+                // Set task popularity data for this skill
+                skill.setTaskPopularityData(taskPopularityList);
+
+                // 3. Get skill co-occurrence for the user's skill (aggregate across all tasks)
+                // We'll use the first task for co-occurrence analysis (could be enhanced to aggregate all tasks)
+                if (!taskNames.isEmpty()) {
+                    String firstTaskData = taskNames.get(0);
+                    String[] parts = firstTaskData.split("\\|");
+                    if (parts.length >= 1) {
+                        String firstTaskId = parts[0];
+                        List<Map<String, Object>> cooccurrenceRaw = neo4jGraphService.getTaskSkillCooccurrence(
+                                experienceId, firstTaskId, skill.getSkillName());
+                        List<JobAnalysisResultDto.SkillCooccurrenceDto> cooccurrenceDtos = new ArrayList<>();
+                        for (Map<String, Object> row : cooccurrenceRaw) {
+                            JobAnalysisResultDto.SkillCooccurrenceDto coDto = new JobAnalysisResultDto.SkillCooccurrenceDto();
+                            coDto.setSkillName((String) row.get("skillName"));
+                            coDto.setCategory((String) row.get("category"));
+                            coDto.setPeopleCount(((Number) row.get("peopleCount")).intValue());
+                            coDto.setPercentage(((Number) row.get("percentage")).doubleValue());
+                            coDto.setUserHasSkill((Boolean) row.get("userHasSkill"));
+                            cooccurrenceDtos.add(coDto);
+                        }
+                        skill.setCooccurringSkills(cooccurrenceDtos);
+                    }
+                }
+
+            } catch (Exception e) {
+                log.error("Error enriching skill {} with task popularity: {}", skill.getSkillName(), e.getMessage());
+                // Continue with next skill - don't fail entire enrichment
+            }
+        }
+    }
+
+    /**
      * Convert skill demonstration maps to DTOs
      */
     private List<JobAnalysisResultDto.SkillDemonstrationDto> convertToSkillDemonstrationDtos(List<Map<String, Object>> skillMaps) {
@@ -292,7 +390,14 @@ public class JobAnalysisService {
             dto.setTasksLinked(((Number) map.get("tasksLinked")).intValue());
             dto.setLinesShowcasing(((Number) map.get("linesShowcasing")).intValue());
             dto.setExampleLines((List<String>) map.get("exampleLines"));
-            dto.setTaskNames((List<String>) map.get("taskNames"));  // Add this line!
+            dto.setTaskNames((List<String>) map.get("taskNames"));
+
+            // PHASE 6.5: Add avgTaskImportance if present
+            Object avgImportance = map.get("avgTaskImportance");
+            if (avgImportance != null) {
+                dto.setAvgTaskImportance(((Number) avgImportance).doubleValue());
+            }
+
             dto.setIsPrimary((Boolean) map.get("isPrimary"));
             dto.setEvidenceStrength((String) map.get("evidenceStrength"));
             dtos.add(dto);
@@ -1021,6 +1126,46 @@ public class JobAnalysisService {
             }
         }
         return sb.toString();
+    }
+
+    // ==================== PHASE 6.5: ON-DEMAND TASK POPULARITY ====================
+
+    /**
+     * Get task-level popularity data for a specific skill (on-demand)
+     * Called when user clicks on a skill badge in the frontend
+     */
+    public Map<String, Object> getSkillTaskPopularity(String experienceId, String skillName) {
+        log.info("Fetching task popularity for skill '{}' in experience {}", skillName, experienceId);
+
+        // Get skill demonstration data for this specific skill
+        List<Map<String, Object>> skillDemo = neo4jGraphService.getSkillDemonstrationAnalysis(experienceId);
+        Map<String, Object> targetSkill = skillDemo.stream()
+                .filter(s -> skillName.equals(s.get("skillName")))
+                .findFirst()
+                .orElse(null);
+
+        if (targetSkill == null) {
+            log.warn("Skill '{}' not found in experience {}", skillName, experienceId);
+            return Map.of("error", "Skill not found");
+        }
+
+        // Convert to DTO and enrich with task popularity
+        List<JobAnalysisResultDto.SkillDemonstrationDto> skillDemos = List.of(
+                convertToSkillDemonstrationDtos(List.of(targetSkill)).get(0)
+        );
+        enrichSkillsWithTaskPopularity(skillDemos, experienceId);
+
+        JobAnalysisResultDto.SkillDemonstrationDto enrichedSkill = skillDemos.get(0);
+
+        // Return the enriched data
+        Map<String, Object> result = new HashMap<>();
+        result.put("skillName", enrichedSkill.getSkillName());
+        result.put("category", enrichedSkill.getCategory());
+        result.put("taskPopularityData", enrichedSkill.getTaskPopularityData());
+        result.put("cooccurringSkills", enrichedSkill.getCooccurringSkills());
+
+        log.info("Successfully fetched task popularity for skill '{}'", skillName);
+        return result;
     }
 
     // ==================== Inner Classes ====================

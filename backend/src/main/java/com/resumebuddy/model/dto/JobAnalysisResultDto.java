@@ -165,8 +165,13 @@ public class JobAnalysisResultDto {
         private Integer linesShowcasing;
         private List<String> exampleLines;
         private List<String> taskNames;  // O*NET task names
+        private Double avgTaskImportance;  // Average importance of linked tasks
         private Boolean isPrimary;
         private String evidenceStrength;  // STRONG, MODERATE, WEAK, NONE
+
+        // PHASE 6.5: Task-level popularity data
+        private List<TaskPopularityDataDto> taskPopularityData;
+        private List<SkillCooccurrenceDto> cooccurringSkills;
     }
 
     @Data
@@ -221,5 +226,63 @@ public class JobAnalysisResultDto {
         private Integer requiredByTasks;
         private Double avgImportance;
         private List<String> taskNames;
+    }
+
+    // ==================== PHASE 6.5: Task-Level Skill Popularity DTOs ====================
+
+    /**
+     * Represents task-level popularity analysis for a specific O*NET task
+     * Shows which skills can accomplish this task and their popularity
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TaskPopularityDataDto {
+        private String taskId;
+        private String taskName;
+        private List<SkillPopularityDto> skillPopularity;
+        private List<MissingTaskSkillDto> missingSkills;
+    }
+
+    /**
+     * Represents a single skill's popularity for a specific task
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SkillPopularityDto {
+        private String skillName;
+        private String skillCategory;
+        private Integer peopleWithSkill;
+        private Boolean userHasSkill;
+    }
+
+    /**
+     * Represents skills that co-occur with the user's skill
+     * Example: "72% of Spring Boot users also have Docker"
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SkillCooccurrenceDto {
+        private String skillName;
+        private String category;
+        private Integer peopleCount;
+        private Double percentage;
+        private Boolean userHasSkill;
+    }
+
+    /**
+     * Represents a skill missing for a specific task
+     * Shows competitive gaps at the task level
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class MissingTaskSkillDto {
+        private String skillName;
+        private String category;
+        private Integer peopleWithSkill;
+        private Double taskImportance;
     }
 }

@@ -198,4 +198,24 @@ public class JobAnalysisController {
             return ResponseEntity.internalServerError().build();
         }
     }
+
+    @GetMapping("/{resumeId}/experiences/{experienceId}/skills/{skillName}/task-popularity")
+    @Operation(summary = "Get task-level skill popularity (on-demand)",
+               description = "Fetch task-level popularity data for a specific skill when user clicks on it")
+    public ResponseEntity<Map<String, Object>> getSkillTaskPopularity(
+            @PathVariable String resumeId,
+            @PathVariable String experienceId,
+            @PathVariable String skillName) {
+
+        log.info("Getting task popularity for skill '{}' in experience {}", skillName, experienceId);
+
+        try {
+            Map<String, Object> result = jobAnalysisService.getSkillTaskPopularity(experienceId, skillName);
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            log.error("Error getting task popularity for skill '{}': {}", skillName, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
 }

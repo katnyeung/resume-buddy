@@ -1727,7 +1727,7 @@ public class Neo4jGraphService {
                          count(DISTINCT t) AS tasksLinked,
                          count(DISTINCT dl) AS linesShowcasing,
                          collect(DISTINCT dl.text) AS exampleLines,
-                         collect(DISTINCT t.name) AS taskNames,
+                         collect(DISTINCT t.id + '|' + t.name) AS taskNames,
                          avg(t.importance) AS avgTaskImportance,
                          req.is_primary AS isPrimary,
                          s.category AS category
@@ -2071,6 +2071,218 @@ public class Neo4jGraphService {
             });
         } catch (Exception e) {
             log.error("Error finding missing skills for experience {}: {}", experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    // ==================== TASK-LEVEL SKILL POPULARITY ANALYSIS (PHASE 6.5) ====================
+
+    /**
+     * Get task-level skill popularity analysis for a specific O*NET task
+     * Shows all skills that can accomplish this task and how many people use each skill
+     * Also indicates whether the current user has each skill
+     *
+     * @param experienceId Current user's job experience ID
+     * @param taskId O*NET task ID
+     * @return List of skills with popularity counts and user ownership flag
+     */
+    public List<Map<String, Object>> getTaskSkillPopularityAnalysis(String experienceId, String taskId) {
+        log.info("Analyzing skill popularity for task {} in experience {}", taskId, experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Get the task
+                    MATCH (task:ONetTask {id: $taskId})
+
+                    // Find all skills that relate to this task
+                    MATCH (skill:Skill)-[:RELATES_TO_TASK]->(task)
+
+                    // Count how many JobExperiences use each skill
+                    MATCH (je:JobExperience)-[:REQUIRES_SKILL]->(skill)
+                    WITH task, skill,
+                         count(DISTINCT je) AS jobCount,
+                         count(DISTINCT je.resume_id) AS resumeCount
+
+                    // Check if current user has this skill
+                    OPTIONAL MATCH (userJe:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(skill)
+
+                    RETURN skill.name AS skillName,
+                           skill.category AS skillCategory,
+                           resumeCount AS peopleWithSkill,
+                           (userJe IS NOT NULL) AS userHasSkill
+                    ORDER BY resumeCount DESC
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "taskId", taskId
+                ));
+
+                List<Map<String, Object>> skillPopularity = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> skillData = new HashMap<>();
+                    skillData.put("skillName", record.get("skillName").asString());
+                    skillData.put("skillCategory", record.get("skillCategory").asString(""));
+                    skillData.put("peopleWithSkill", record.get("peopleWithSkill").asInt());
+                    skillData.put("userHasSkill", record.get("userHasSkill").asBoolean());
+                    skillPopularity.add(skillData);
+                }
+
+                log.info("Found {} skills for task {}, {} professionals total",
+                        skillPopularity.size(), taskId,
+                        skillPopularity.stream().mapToInt(s -> (Integer) s.get("peopleWithSkill")).sum());
+
+                return skillPopularity;
+            });
+        } catch (Exception e) {
+            log.error("Error analyzing skill popularity for task {} in experience {}: {}",
+                    taskId, experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Get skill co-occurrence analysis for a specific task and user skill
+     * Shows which OTHER skills are commonly paired with the user's skill
+     * Example: "72% of Spring Boot users also have Docker"
+     *
+     * @param experienceId Current user's job experience ID
+     * @param taskId O*NET task ID
+     * @param userSkill The skill the user has for this task
+     * @return List of co-occurring skills with percentages and counts
+     */
+    public List<Map<String, Object>> getTaskSkillCooccurrence(String experienceId, String taskId, String userSkill) {
+        log.info("Analyzing skill co-occurrence for {} on task {} in experience {}",
+                userSkill, taskId, experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Find JobExperiences that use this skill for this task
+                    MATCH (skill:Skill {name: $userSkill})-[:RELATES_TO_TASK]->(task:ONetTask {id: $taskId})
+                    MATCH (je:JobExperience)-[:REQUIRES_SKILL]->(skill)
+
+                    // Find other skills these JobExperiences have
+                    MATCH (je)-[:REQUIRES_SKILL]->(coSkill:Skill)
+                    WHERE coSkill <> skill
+
+                    // Count co-occurrence
+                    WITH coSkill,
+                         count(DISTINCT je) AS coCount,
+                         count(DISTINCT je.resume_id) AS resumeCount
+
+                    // Calculate percentage
+                    MATCH (allJe:JobExperience)-[:REQUIRES_SKILL]->(skill:Skill {name: $userSkill})
+                    WITH coSkill,
+                         resumeCount,
+                         count(DISTINCT allJe.resume_id) AS totalWithUserSkill,
+                         (resumeCount * 100.0 / count(DISTINCT allJe.resume_id)) AS cooccurrencePercentage
+
+                    // Check if current user has this co-occurring skill
+                    OPTIONAL MATCH (userJe:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(coSkill)
+
+                    RETURN coSkill.name AS skillName,
+                           coSkill.category AS category,
+                           resumeCount AS peopleCount,
+                           cooccurrencePercentage AS percentage,
+                           (userJe IS NOT NULL) AS userHasSkill
+                    ORDER BY cooccurrencePercentage DESC
+                    LIMIT 10
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "taskId", taskId,
+                        "userSkill", userSkill
+                ));
+
+                List<Map<String, Object>> cooccurrence = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> coSkillData = new HashMap<>();
+                    coSkillData.put("skillName", record.get("skillName").asString());
+                    coSkillData.put("category", record.get("category").asString(""));
+                    coSkillData.put("peopleCount", record.get("peopleCount").asInt());
+                    coSkillData.put("percentage", record.get("percentage").asDouble());
+                    coSkillData.put("userHasSkill", record.get("userHasSkill").asBoolean());
+                    cooccurrence.add(coSkillData);
+                }
+
+                log.info("Found {} co-occurring skills for {} on task {}",
+                        cooccurrence.size(), userSkill, taskId);
+
+                return cooccurrence;
+            });
+        } catch (Exception e) {
+            log.error("Error analyzing skill co-occurrence for {} on task {} in experience {}: {}",
+                    userSkill, taskId, experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Find skills for a specific task that the user doesn't have (but others do)
+     * Shows competitive gaps - skills commonly used for this task that user is missing
+     *
+     * @param experienceId Current user's job experience ID
+     * @param taskId O*NET task ID
+     * @return List of missing skills with popularity counts
+     */
+    public List<Map<String, Object>> getTaskMissingSkillsAnalysis(String experienceId, String taskId) {
+        log.info("Finding missing skills for task {} in experience {}", taskId, experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Get the task and related skills
+                    MATCH (task:ONetTask {id: $taskId})
+                    MATCH (skill:Skill)-[:RELATES_TO_TASK]->(task)
+
+                    // Count popularity
+                    MATCH (je:JobExperience)-[:REQUIRES_SKILL]->(skill)
+                    WITH task, skill, count(DISTINCT je.resume_id) AS resumeCount
+
+                    // Check if user has this skill
+                    MATCH (userJe:JobExperience {id: $experienceId})
+                    WHERE NOT EXISTS {
+                      MATCH (userJe)-[:REQUIRES_SKILL]->(userSkill:Skill)
+                      WHERE userSkill.name = skill.name
+                    }
+
+                    RETURN skill.name AS skillName,
+                           skill.category AS category,
+                           resumeCount AS peopleWithSkill,
+                           task.importance AS taskImportance
+                    ORDER BY resumeCount DESC, taskImportance DESC
+                    LIMIT 5
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "taskId", taskId
+                ));
+
+                List<Map<String, Object>> missingSkills = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> missingSkillData = new HashMap<>();
+                    missingSkillData.put("skillName", record.get("skillName").asString());
+                    missingSkillData.put("category", record.get("category").asString(""));
+                    missingSkillData.put("peopleWithSkill", record.get("peopleWithSkill").asInt());
+                    missingSkillData.put("taskImportance", record.get("taskImportance").asDouble());
+                    missingSkills.add(missingSkillData);
+                }
+
+                log.info("Found {} missing skills for task {} in experience {}",
+                        missingSkills.size(), taskId, experienceId);
+
+                return missingSkills;
+            });
+        } catch (Exception e) {
+            log.error("Error finding missing skills for task {} in experience {}: {}",
+                    taskId, experienceId, e.getMessage());
             return new ArrayList<>();
         }
     }
