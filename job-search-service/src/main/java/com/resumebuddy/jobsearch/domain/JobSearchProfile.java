@@ -1,0 +1,81 @@
+package com.resumebuddy.jobsearch.domain;
+
+import jakarta.persistence.*;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UuidGenerator;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+/**
+ * Aggregate Root: Job Search Profile
+ * Represents a user's generated job search profile based on selected resume experiences
+ */
+@Entity
+@Table(name = "job_search_profile")
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class JobSearchProfile {
+
+    @Id
+    @UuidGenerator
+    @Column(name = "id", length = 36)
+    private String id;
+
+    @Column(name = "resume_id", length = 36, nullable = false)
+    private String resumeId;
+
+    /**
+     * List of experience IDs from resume-api that were used to generate this profile
+     * Stored as JSON array
+     */
+    @Column(name = "source_experience_ids", columnDefinition = "JSON", nullable = false)
+    private String sourceExperienceIds;
+
+    /**
+     * LLM-generated job post text that represents the candidate's profile
+     */
+    @Column(name = "generated_job_post", columnDefinition = "TEXT", nullable = false)
+    private String generatedJobPost;
+
+    /**
+     * Target location for job search (e.g., "San Francisco, CA", "Remote", "New York")
+     * User can specify where they want to search for jobs
+     */
+    @Column(name = "location", length = 255)
+    private String location;
+
+    /**
+     * Target experience level (e.g., "Entry Level", "Mid Level", "Senior", "Lead/Principal")
+     * User can specify the seniority level they're targeting
+     */
+    @Column(name = "experience_level", length = 50)
+    private String experienceLevel;
+
+    /**
+     * Redis key for the vector embedding of this profile
+     * Format: "profile:vector:{id}"
+     * Nullable because it's populated after initial save
+     */
+    @Column(name = "redis_vector_key", length = 100)
+    private String redisVectorKey;
+
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @Column(name = "updated_at")
+    private LocalDateTime updatedAt;
+
+    @PreUpdate
+    protected void onUpdate() {
+        this.updatedAt = LocalDateTime.now();
+    }
+}

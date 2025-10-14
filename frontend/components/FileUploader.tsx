@@ -25,6 +25,12 @@ export default function FileUploader({ onFileSelect, disabled = false }: FileUpl
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
       'text/plain': ['.txt'],
+      'image/jpeg': ['.jpg', '.jpeg'],
+      'image/png': ['.png'],
+      'image/gif': ['.gif'],
+      'image/bmp': ['.bmp'],
+      'image/tiff': ['.tiff', '.tif'],
+      'image/webp': ['.webp'],
     },
     maxFiles: 1,
     disabled,
@@ -64,7 +70,7 @@ export default function FileUploader({ onFileSelect, disabled = false }: FileUpl
               Drag & drop your resume here, or click to select
             </p>
             <p className="text-sm text-gray-500">
-              Supports PDF, DOCX, and TXT files
+              Supports PDF, DOCX, TXT, and image files (JPG, PNG, GIF, BMP, TIFF, WebP)
             </p>
           </>
         )}

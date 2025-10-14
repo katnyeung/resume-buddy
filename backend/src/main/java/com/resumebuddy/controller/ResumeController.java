@@ -48,7 +48,7 @@ public class ResumeController {
     public ResponseEntity<Resume> uploadResume(
             @RequestParam("file")
             @io.swagger.v3.oas.annotations.Parameter(
-                description = "Resume file to upload (PDF, DOCX, TXT)",
+                description = "Resume file to upload (PDF, DOCX, TXT, or image files)",
                 content = @io.swagger.v3.oas.annotations.media.Content(
                     mediaType = "multipart/form-data"
                 )
@@ -65,7 +65,8 @@ public class ResumeController {
         String contentType = file.getContentType();
         if (contentType == null || (!contentType.equals("application/pdf")
                 && !contentType.equals("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-                && !contentType.equals("text/plain"))) {
+                && !contentType.equals("text/plain")
+                && !contentType.startsWith("image/"))) {
             log.warn("Unsupported file type: {}", contentType);
             return ResponseEntity.badRequest().build();
         }

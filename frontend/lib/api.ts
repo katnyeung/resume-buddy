@@ -143,7 +143,7 @@ export const analyzeJob = async (resumeId: string, experienceId: string): Promis
 
 export const getJobAnalysis = async (resumeId: string, experienceId: string): Promise<any> => {
   try {
-    const response = await apiClient.get(`/resumes/${resumeId}/experiences/${experienceId}/job-analysis`);
+    const response = await apiClient.get(`/resumes/${resumeId}/experiences/${experienceId}/analysis`);
     return response.data;
   } catch (error) {
     return null;
@@ -157,4 +157,82 @@ export const checkJobAnalysisExists = async (resumeId: string, experienceId: str
 
 export const deleteJobAnalysis = async (resumeId: string, experienceId: string): Promise<void> => {
   await apiClient.delete(`/resumes/${resumeId}/experiences/${experienceId}/job-analysis`);
+};
+
+// Job Search Service (port 8085)
+const JOB_SEARCH_API_URL = process.env.NEXT_PUBLIC_JOB_SEARCH_API_URL || 'http://localhost:8085/api';
+
+const jobSearchClient = axios.create({
+  baseURL: JOB_SEARCH_API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+export const createJobSearchProfile = async (resumeId: string, experienceIds: string[]): Promise<any> => {
+  const response = await jobSearchClient.post('/job-search/profiles', {
+    resumeId,
+    experienceIds
+  });
+  return response.data;
+};
+
+export const updateJobPost = async (profileId: string, editedJobPost: string): Promise<any> => {
+  const response = await jobSearchClient.put(`/job-search/profiles/${profileId}`, {
+    editedJobPost
+  });
+  return response.data;
+};
+
+export const getJobSearchProfilesByResume = async (resumeId: string): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/profiles?resumeId=${resumeId}`);
+  return response.data;
+};
+
+export const getJobSearchProfile = async (profileId: string): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}`);
+  return response.data;
+};
+
+export const searchMatchingJobs = async (profileId: string, topK: number = 20): Promise<any[]> => {
+  const response = await jobSearchClient.post(`/job-search/profiles/${profileId}/search?topK=${topK}`);
+  return response.data;
+};
+
+export const getJobSearchProfileLines = async (profileId: string): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/lines`);
+  return response.data;
+};
+
+export const getProfileSkills = async (profileId: string): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/skills`);
+  return response.data;
+};
+
+export const addProfileSkill = async (profileId: string, skillName: string, skillCategory: string = '', proficiencyScore: number = 50): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/profiles/${profileId}/skills`, {
+    skillName,
+    skillCategory,
+    proficiencyScore
+  });
+  return response.data;
+};
+
+export const updateSkillProficiency = async (profileId: string, skillId: string, proficiencyScore: number): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/profiles/${profileId}/skills/${skillId}/proficiency`, {
+    proficiencyScore
+  });
+  return response.data;
+};
+
+export const removeProfileSkill = async (profileId: string, skillId: string): Promise<void> => {
+  await jobSearchClient.delete(`/job-search/profiles/${profileId}/skills/${skillId}`);
+};
+
+export const updateProfileMetadata = async (profileId: string, location: string, experienceLevel: string): Promise<any> => {
+  const response = await jobSearchClient.put(`/job-search/profiles/${profileId}/metadata`, {
+    location,
+    experienceLevel
+  });
+  return response.data;
 };

@@ -16,7 +16,6 @@ import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPl
 import { TRANSFORMERS } from '@lexical/markdown';
 import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
-import AutoFocusPlugin from './plugins/AutoFocusPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
 import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume, getStructuredAnalysis, analyzeJob } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
@@ -102,19 +101,6 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
 
     loadResumeContent();
   }, [resumeId]);
-
-  // Ensure editor scrolls to top after loading
-  useEffect(() => {
-    if (!loading && initialEditorState) {
-      // Small delay to ensure editor is rendered
-      setTimeout(() => {
-        const editorInput = document.querySelector('.editor-input');
-        if (editorInput) {
-          editorInput.scrollTop = 0;
-        }
-      }, 100);
-    }
-  }, [loading, initialEditorState]);
 
   // Handle editor state changes
   const handleEditorChange = useCallback((newEditorState: EditorState) => {
@@ -365,7 +351,6 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
           <LinkPlugin />
           <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
           <OnChangePlugin onChange={handleEditorChange} />
-          <AutoFocusPlugin />
         </div>
       </LexicalComposer>
     </div>
