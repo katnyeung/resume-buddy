@@ -2,6 +2,7 @@ package com.resumebuddy.jobsearch.repository;
 
 import com.resumebuddy.jobsearch.domain.JobMatch;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -17,4 +18,18 @@ public interface JobMatchRepository extends JpaRepository<JobMatch, String> {
     List<JobMatch> findTopMatchesByProfileId(@Param("profileId") String profileId, @Param("minScore") double minScore);
 
     void deleteByProfileId(String profileId);
+
+    // Find saved matches for a profile
+    List<JobMatch> findByProfileIdAndIsSavedTrue(String profileId);
+
+    // Find applied matches for a profile
+    List<JobMatch> findByProfileIdAndIsAppliedTrue(String profileId);
+
+    // Delete only non-saved matches for a profile (for force refresh)
+    @Modifying
+    @Query("DELETE FROM JobMatch m WHERE m.profileId = :profileId AND m.isSaved = false")
+    void deleteNonSavedByProfileId(@Param("profileId") String profileId);
+
+    // Find existing match by profile and listing
+    JobMatch findByProfileIdAndListingId(String profileId, String listingId);
 }

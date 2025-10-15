@@ -179,13 +179,22 @@ public class JobMatchingApplicationService {
 
             log.info("Top {} listings selected for final processing", topKListings.size());
 
-            // Delete old matches for this profile
-            matchRepository.deleteByProfileId(profileId);
+            // Delete old non-saved matches for this profile (preserve bookmarked jobs)
+            matchRepository.deleteNonSavedByProfileId(profileId);
 
             // STAGE 2: Process top-K with skill validation
             List<JobMatch> matches = new ArrayList<>();
             for (ListingScore listingScore : topKListings) {
                 try {
+                    // Check if a match already exists for this profile+listing combination
+                    JobMatch existingMatch = matchRepository.findByProfileIdAndListingId(profileId, listingScore.listingId);
+                    if (existingMatch != null) {
+                        log.info("SKIPPING existing match for listing: {} (already exists, saved={})",
+                                listingScore.listingId, existingMatch.getIsSaved());
+                        matches.add(existingMatch);
+                        continue;
+                    }
+
                     // Fetch listing from MySQL
                     JobListing listing = listingRepository.findById(listingScore.listingId).orElse(null);
                     if (listing == null) {
@@ -369,5 +378,30 @@ public class JobMatchingApplicationService {
         public SkillGap getSkillGap() {
             return skillGap;
         }
+    }
+
+    /**
+     * Toggle saved status for a match
+     */
+    @Transactional
+    public JobMatch toggleSaved(String matchId, boolean saved) {
+        JobMatch match = matchRepository.findById(matchId)
+                .orElseThrow(() -> new RuntimeException("Match not found: " + matchId));
+
+        match.setIsSaved(saved);
+        return matchRepository.save(match);
+    }
+
+    /**
+     * Mark a match as applied (one-way action)
+     */
+    @Transactional
+    public JobMatch markApplied(String matchId) {
+        JobMatch match = matchRepository.findById(matchId)
+                .orElseThrow(() -> new RuntimeException("Match not found: " + matchId));
+
+        match.setIsApplied(true);
+        match.setAppliedAt(java.time.LocalDateTime.now());
+        return matchRepository.save(match);
     }
 }

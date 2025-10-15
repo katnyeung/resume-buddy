@@ -212,6 +212,8 @@ app:
       app-key: ${ADZUNA_APP_KEY}
     reed:
       api-key: ${REED_API_KEY}
+    jsearch:
+      api-key: ${JSEARCH_API_KEY}
 ```
 
 ### Frontend (.env.local)
@@ -281,6 +283,21 @@ Content-Type: application/json
 }
 ```
 
+### Manual Job Crawl (JSearch - RapidAPI)
+```bash
+POST http://localhost:8085/api/job-search/admin/crawl
+Content-Type: application/json
+
+{
+  "source": "JSEARCH",
+  "keywords": "java developer",
+  "location": "gb:London",
+  "maxResults": 50,
+  "page": 1,
+  "maxDaysOld": 7
+}
+```
+
 ## Key Implementation Files
 
 **Resume API (backend/)**:
@@ -295,9 +312,10 @@ Content-Type: application/json
 - `application/service/` - JobSearchApplicationService, JobMatchingApplicationService, JobCrawlingApplicationService
 - `infrastructure/redis/` - RedisVectorService
 - `infrastructure/external/` - ResumeApiClient, GrokLLMClient, VectorEmbeddingService, AdzunaApiClient, ReedApiClient
-- `infrastructure/external/jobsources/` - JobSourceApiClient (interface), AdzunaApiClient, ReedApiClient
+- `infrastructure/external/jobsources/` - JobSourceApiClient (interface), AdzunaApiClient, ReedApiClient, JSearchApiClient
 - `dto/adzuna/` - AdzunaJobDto, AdzunaSearchResponse (common format)
 - `dto/reed/` - ReedJobDto, ReedSearchResponse
+- `dto/jsearch/` - JSearchJobDto, JSearchSearchResponse
 - `api/controller/` - JobSearchController, AdminController
 
 **Frontend**:
@@ -348,14 +366,21 @@ Content-Type: application/json
 **Phase 8 (Oct 14, 2025)** - Automated Job Crawling (Updated Oct 15):
 - **Multi-source job crawling architecture**:
   - Adzuna API integration (gb, us, au, ca, de, fr, nl, in, nz, za, sg, ie supported)
-  - **Reed.co.uk API integration** (Oct 15 - IMPLEMENTED):
+  - **Reed.co.uk API integration** (Oct 15):
     - UK-focused job board (largest in UK)
     - Basic Auth with API key
     - Converts Reed DTOs to common Adzuna format
     - Supports keywords, location, salary filters
     - Distance-based search (10 miles default)
     - Full-time/part-time/permanent filters
-  - RapidAPI support (future)
+  - **JSearch (RapidAPI) integration** (Oct 15):
+    - Aggregates jobs from Google Jobs, Indeed, LinkedIn, Glassdoor, etc.
+    - RapidAPI headers (X-RapidAPI-Key, X-RapidAPI-Host)
+    - Natural language queries ("java developer in london")
+    - Smart date filtering (maps maxDaysOld to "today"/"3days"/"week"/"month")
+    - Converts JSearch DTOs to common Adzuna format
+    - Supports multiple countries via country code parameter
+    - Rich metadata: employer logos, multiple apply links, ONET codes
 - **LLM-powered keyword generation**:
   - Grok analyzes database state (job count, profile locations)
   - Generates 10 BASE role keywords → auto-expands to 30 (base, senior, lead)

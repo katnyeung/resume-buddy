@@ -12,7 +12,7 @@ import java.util.List;
 @Data
 public class JobCrawlRequest {
 
-    private String source = "ADZUNA"; // Default source
+    private String source = "ADZUNA"; // Default source (options: ADZUNA, REED, JSEARCH)
 
     private String keywords; // e.g., "java developer"
 

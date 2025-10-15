@@ -54,6 +54,25 @@ public class JobMatch {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    /**
+     * User bookmarked this job match
+     * Saved matches won't be deleted during force refresh
+     */
+    @Column(name = "is_saved", nullable = false)
+    private Boolean isSaved = false;
+
+    /**
+     * User applied to this job
+     */
+    @Column(name = "is_applied", nullable = false)
+    private Boolean isApplied = false;
+
+    /**
+     * When user marked as applied
+     */
+    @Column(name = "applied_at")
+    private LocalDateTime appliedAt;
+
     // Convenience methods for domain logic
     public boolean isStrongMatch() {
         return similarityScore.compareTo(new BigDecimal("0.85")) >= 0;

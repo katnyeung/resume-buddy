@@ -33,4 +33,9 @@ public class JobMatchResponse {
     private List<String> missingSkills;
     private double skillMatchPercentage; // Simple count-based: matched / total
     private double weightedSkillScore;   // Proficiency-weighted: sum(matched proficiencies) / sum(all)
+
+    // User actions
+    private Boolean isSaved;        // User bookmarked this match
+    private Boolean isApplied;      // User applied to this job
+    private LocalDateTime appliedAt; // When user marked as applied
 }

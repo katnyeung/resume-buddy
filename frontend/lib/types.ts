@@ -161,3 +161,33 @@ export interface WorkActivity {
   category: string;
   importance: number;
 }
+
+// Job Matching types
+export interface JobMatchResult {
+  matchId: string;
+  profileId: string;
+  listingId: string;
+  similarityScore: number;
+  matchLevel: 'STRONG' | 'GOOD' | 'MODERATE';
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  url: string;
+  salaryRange?: string;
+  postedDate: string;
+  matchedSkills: string[];
+  missingSkills: string[];
+  skillMatchPercentage: number;
+  weightedSkillScore: number;
+  isSaved: boolean;
+  isApplied: boolean;
+  appliedAt?: string;
+}
+
+export interface JobMatchingResultsResponse {
+  profileId: string;
+  totalMatches: number;
+  profileSummary: string;
+  matches: JobMatchResult[];
+}

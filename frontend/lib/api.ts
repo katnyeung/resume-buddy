@@ -242,3 +242,15 @@ export const getMatchingResults = async (profileId: string, topK: number = 20, r
   const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/matching-results?topK=${topK}&refresh=${refresh}`);
   return response.data;
 };
+
+export const toggleMatchSaved = async (matchId: string, saved: boolean): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/save`, {
+    saved
+  });
+  return response.data;
+};
+
+export const markMatchApplied = async (matchId: string): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/apply`);
+  return response.data;
+};

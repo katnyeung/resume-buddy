@@ -5,6 +5,7 @@ import com.resumebuddy.jobsearch.dto.crawl.JobCrawlRequest;
 import com.resumebuddy.jobsearch.dto.crawl.JobCrawlResponse;
 import com.resumebuddy.jobsearch.infrastructure.external.jobsources.AdzunaApiClient;
 import com.resumebuddy.jobsearch.infrastructure.external.jobsources.ReedApiClient;
+import com.resumebuddy.jobsearch.infrastructure.external.jobsources.JSearchApiClient;
 import com.resumebuddy.jobsearch.infrastructure.external.jobsources.JobSourceApiClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class JobCrawlingApplicationService {
     private final JobCrawlerService jobCrawlerService;
     private final AdzunaApiClient adzunaApiClient;
     private final ReedApiClient reedApiClient;
+    private final JSearchApiClient jSearchApiClient;
 
     /**
      * Execute job crawling operation
@@ -49,6 +51,7 @@ public class JobCrawlingApplicationService {
         params.put("location", request.getLocation());
         params.put("page", request.getPage());
         params.put("resultsPerPage", request.getMaxResults());
+        params.put("maxResults", request.getMaxResults()); // For JSearch
         params.put("fullTimeOnly", request.getFullTimeOnly());
         params.put("permanentOnly", request.getPermanentOnly());
         params.put("minSalary", request.getMinSalary());
@@ -90,7 +93,9 @@ public class JobCrawlingApplicationService {
         if ("REED".equalsIgnoreCase(source)) {
             return reedApiClient;
         }
-        // Add more sources here in the future (RAPIDAPI, etc.)
+        if ("JSEARCH".equalsIgnoreCase(source)) {
+            return jSearchApiClient;
+        }
         throw new IllegalArgumentException("Unsupported job source: " + source);
     }
 }

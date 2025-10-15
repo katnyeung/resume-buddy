@@ -1,5 +1,6 @@
 package com.resumebuddy.jobsearch.controller;
 
+import com.resumebuddy.jobsearch.domain.JobMatch;
 import com.resumebuddy.jobsearch.dto.CreateProfileRequest;
 import com.resumebuddy.jobsearch.dto.JobMatchResponse;
 import com.resumebuddy.jobsearch.dto.JobMatchingResultResponse;
@@ -403,6 +404,11 @@ public class JobSearchController {
             response.setSkillMatchPercentage(enriched.getSkillGap().getMatchPercentage());
             response.setWeightedSkillScore(enriched.getSkillGap().getWeightedScore());
 
+            // User actions
+            response.setIsSaved(enriched.getMatch().getIsSaved());
+            response.setIsApplied(enriched.getMatch().getIsApplied());
+            response.setAppliedAt(enriched.getMatch().getAppliedAt());
+
             responses.add(response);
         }
 
@@ -462,6 +468,11 @@ public class JobSearchController {
             response.setMissingSkills(enriched.getSkillGap().getMissingSkills());
             response.setSkillMatchPercentage(enriched.getSkillGap().getMatchPercentage());
             response.setWeightedSkillScore(enriched.getSkillGap().getWeightedScore());
+
+            // User actions
+            response.setIsSaved(enriched.getMatch().getIsSaved());
+            response.setIsApplied(enriched.getMatch().getIsApplied());
+            response.setAppliedAt(enriched.getMatch().getAppliedAt());
 
             responses.add(response);
         }
@@ -546,6 +557,11 @@ public class JobSearchController {
             response.setSkillMatchPercentage(enriched.getSkillGap().getMatchPercentage());
             response.setWeightedSkillScore(enriched.getSkillGap().getWeightedScore());
 
+            // User actions
+            response.setIsSaved(enriched.getMatch().getIsSaved());
+            response.setIsApplied(enriched.getMatch().getIsApplied());
+            response.setAppliedAt(enriched.getMatch().getAppliedAt());
+
             matchResponses.add(response);
         }
 
@@ -583,5 +599,61 @@ public class JobSearchController {
         );
 
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Toggle saved status for a match
+     * PATCH /api/job-search/matches/{matchId}/save
+     */
+    @Operation(
+            summary = "Toggle saved status",
+            description = "Toggles the saved/bookmarked status for a job match. Saved matches are preserved during force refresh."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Saved status updated successfully"),
+            @ApiResponse(responseCode = "404", description = "Match not found")
+    })
+    @PatchMapping("/matches/{matchId}/save")
+    public ResponseEntity<JobMatch> toggleSaved(
+            @Parameter(description = "Match ID") @PathVariable String matchId,
+            @RequestBody SaveMatchRequest request) {
+        log.info("Toggling saved status for match {}: {}", matchId, request.isSaved());
+
+        JobMatch match = jobMatchingService.toggleSaved(matchId, request.isSaved());
+        return ResponseEntity.ok(match);
+    }
+
+    /**
+     * Mark match as applied
+     * PATCH /api/job-search/matches/{matchId}/apply
+     */
+    @Operation(
+            summary = "Mark as applied",
+            description = "Marks a job match as applied. This action sets the applied timestamp and cannot be undone."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Match marked as applied successfully"),
+            @ApiResponse(responseCode = "404", description = "Match not found")
+    })
+    @PatchMapping("/matches/{matchId}/apply")
+    public ResponseEntity<JobMatch> markApplied(
+            @Parameter(description = "Match ID") @PathVariable String matchId) {
+        log.info("Marking match {} as applied", matchId);
+
+        JobMatch match = jobMatchingService.markApplied(matchId);
+        return ResponseEntity.ok(match);
+    }
+
+    // Request DTOs
+    public static class SaveMatchRequest {
+        private boolean saved;
+
+        public boolean isSaved() {
+            return saved;
+        }
+
+        public void setSaved(boolean saved) {
+            this.saved = saved;
+        }
     }
 }
