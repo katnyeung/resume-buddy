@@ -16,7 +16,12 @@ import { INSERT_UNORDERED_LIST_COMMAND, INSERT_ORDERED_LIST_COMMAND, $isListNode
 
 type BlockType = 'paragraph' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
 
-export default function ToolbarPlugin() {
+interface ToolbarPluginProps {
+  onSave?: () => void;
+  saving?: boolean;
+}
+
+export default function ToolbarPlugin({ onSave, saving }: ToolbarPluginProps) {
   const [editor] = useLexicalComposerContext();
   const [isBold, setIsBold] = useState(false);
   const [isItalic, setIsItalic] = useState(false);
@@ -127,65 +132,85 @@ export default function ToolbarPlugin() {
   };
 
   return (
-    <div className="flex items-center gap-2 p-2 border-b border-gray-200">
-      {/* Block Type Selector */}
-      <select
-        value={blockType}
-        onChange={(e) => formatBlockType(e.target.value as BlockType)}
-        className="px-3 py-1.5 rounded text-sm font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
-      >
-        {Object.entries(blockTypeLabels).map(([value, label]) => (
-          <option key={value} value={value}>
-            {label}
-          </option>
-        ))}
-      </select>
-      <div className="w-px h-6 bg-gray-300 mx-1" />
-      <button
-        onClick={formatBold}
-        className={buttonClass(isBold)}
-        title="Bold (Ctrl+B)"
-        type="button"
-      >
-        <strong>B</strong>
-      </button>
-      <button
-        onClick={formatItalic}
-        className={buttonClass(isItalic)}
-        title="Italic (Ctrl+I)"
-        type="button"
-      >
-        <em>I</em>
-      </button>
-      <button
-        onClick={formatUnderline}
-        className={buttonClass(isUnderline)}
-        title="Underline (Ctrl+U)"
-        type="button"
-      >
-        <u>U</u>
-      </button>
-      <div className="w-px h-6 bg-gray-300 mx-1" />
-      <button
-        onClick={insertBulletList}
-        className={buttonClass(false)}
-        title="Bullet List"
-        type="button"
-      >
-        • List
-      </button>
-      <button
-        onClick={insertNumberedList}
-        className={buttonClass(false)}
-        title="Numbered List"
-        type="button"
-      >
-        1. List
-      </button>
-      <div className="w-px h-6 bg-gray-300 mx-1" />
-      <div className="text-xs text-gray-500 ml-2">
-        Markdown shortcuts: **bold** *italic* # heading
+    <div className="flex items-center justify-between gap-2 p-2 border-b border-gray-200">
+      <div className="flex items-center gap-2">
+        {/* Block Type Selector */}
+        <select
+          value={blockType}
+          onChange={(e) => formatBlockType(e.target.value as BlockType)}
+          className="px-3 py-1.5 rounded text-sm font-medium bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          {Object.entries(blockTypeLabels).map(([value, label]) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <div className="w-px h-6 bg-gray-300 mx-1" />
+        <button
+          onClick={formatBold}
+          className={buttonClass(isBold)}
+          title="Bold (Ctrl+B)"
+          type="button"
+        >
+          <strong>B</strong>
+        </button>
+        <button
+          onClick={formatItalic}
+          className={buttonClass(isItalic)}
+          title="Italic (Ctrl+I)"
+          type="button"
+        >
+          <em>I</em>
+        </button>
+        <button
+          onClick={formatUnderline}
+          className={buttonClass(isUnderline)}
+          title="Underline (Ctrl+U)"
+          type="button"
+        >
+          <u>U</u>
+        </button>
+        <div className="w-px h-6 bg-gray-300 mx-1" />
+        <button
+          onClick={insertBulletList}
+          className={buttonClass(false)}
+          title="Bullet List"
+          type="button"
+        >
+          • List
+        </button>
+        <button
+          onClick={insertNumberedList}
+          className={buttonClass(false)}
+          title="Numbered List"
+          type="button"
+        >
+          1. List
+        </button>
+        <div className="w-px h-6 bg-gray-300 mx-1" />
+        <div className="text-xs text-gray-500 ml-2">
+          Markdown shortcuts: **bold** *italic* # heading
+        </div>
       </div>
+
+      {/* Save Button - Right Side */}
+      {onSave && (
+        <div className="flex flex-col items-end gap-0.5">
+          <button
+            onClick={onSave}
+            disabled={saving}
+            className="px-6 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+            title="Save if you need some small error or tweaking to your resume"
+            type="button"
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+          <span className="text-[10px] text-gray-500">
+            Save if you need some small tweaking
+          </span>
+        </div>
+      )}
     </div>
   );
 }

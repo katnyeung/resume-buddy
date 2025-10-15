@@ -14,6 +14,7 @@ import java.util.Map;
 @AllArgsConstructor
 public class GeneratedJobProfileDto {
     private String jobPost;
+    private String suggestedJobTitle; // LLM-generated job title suggestion
     private String location;
     private String experienceLevel;
     private Map<String, Integer> skillProficiencies; // skill name -> score (0-100)

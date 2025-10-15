@@ -63,20 +63,28 @@ public class JobSearchApplicationService {
             List<ExperienceDto> experiences = resumeApiClient.fetchExperiences(resumeId, experienceIds);
             log.info("Fetched {} experiences from resume-api", experiences.size());
 
-            // 2. Generate job post with metadata using LLM
+            // 2. Generate job post with metadata using LLM (includes suggested job title)
             GeneratedJobProfileDto generatedProfile = jobPostGenerator.generateJobPost(experiences);
-            log.info("Generated job profile - location: {}, level: {}, post length: {}",
-                    generatedProfile.getLocation(), generatedProfile.getExperienceLevel(), generatedProfile.getJobPost().length());
 
-            // 3. Generate vector embedding
+            // 3. Use LLM-suggested title, or fallback to latest job title
+            String suggestedTitle = generatedProfile.getSuggestedJobTitle();
+            if (suggestedTitle == null || suggestedTitle.trim().isEmpty()) {
+                suggestedTitle = experiences.get(0).getJobTitle(); // Use latest job title as fallback
+            }
+
+            log.info("Generated job profile - suggested title: '{}', location: {}, level: {}, post length: {}",
+                    suggestedTitle, generatedProfile.getLocation(), generatedProfile.getExperienceLevel(), generatedProfile.getJobPost().length());
+
+            // 4. Generate vector embedding
             float[] embedding = vectorEmbeddingService.generateEmbedding(generatedProfile.getJobPost());
             log.info("Generated vector embedding with dimension: {}", embedding.length);
 
-            // 4. Create profile entity with LLM-generated metadata
+            // 5. Create profile entity with LLM-generated metadata
             JobSearchProfile profile = new JobSearchProfile();
             profile.setResumeId(resumeId);
             profile.setSourceExperienceIds(serializeExperienceIds(experienceIds));
             profile.setGeneratedJobPost(generatedProfile.getJobPost());
+            profile.setDesiredJobTitle(suggestedTitle); // LLM-suggested or latest job title
             profile.setLocation(generatedProfile.getLocation());
             profile.setExperienceLevel(generatedProfile.getExperienceLevel());
 
@@ -84,15 +92,7 @@ public class JobSearchApplicationService {
             profile = profileRepository.save(profile);
             log.info("Saved profile to MySQL with ID: {}", profile.getId());
 
-            // 7. Store vector in Redis with the generated ID
-            String redisKey = "profile:vector:" + profile.getId();
-            redisVectorService.storeVector(redisKey, embedding);
-
-            // 8. Update profile with Redis key
-            profile.setRedisVectorKey(redisKey);
-            profile = profileRepository.save(profile);
-
-            // 9. Vectorize mock job post lines (NOT user resume lines)
+            // 7. Vectorize mock job post lines (NOT user resume lines)
             vectorizeJobPostLines(profile.getId(), generatedProfile.getJobPost());
 
             // 10. Save skills individually in separate table with LLM proficiency scores
@@ -121,11 +121,7 @@ public class JobSearchApplicationService {
             // 1. Delete old line vectors from Redis and MySQL
             deleteProfileLines(profileId);
 
-            // 2. Regenerate profile-level embedding (full post)
-            float[] embedding = vectorEmbeddingService.generateEmbedding(editedJobPost);
-            redisVectorService.storeVector(profile.getRedisVectorKey(), embedding);
-
-            // 3. Update profile with new job post
+            // 2. Update profile with new job post
             profile.setGeneratedJobPost(editedJobPost);
             profile = profileRepository.save(profile);
 
@@ -234,10 +230,10 @@ public class JobSearchApplicationService {
     }
 
     /**
-     * Update profile metadata (location and experience level together)
+     * Update profile metadata (location, experience level, and desired job title together)
      */
     @Transactional
-    public JobSearchProfile updateProfileMetadata(String profileId, String location, String experienceLevel) {
+    public JobSearchProfile updateProfileMetadata(String profileId, String location, String experienceLevel, String desiredJobTitle) {
         JobSearchProfile profile = profileRepository.findById(profileId)
                 .orElseThrow(() -> new RuntimeException("Profile not found: " + profileId));
 
@@ -246,6 +242,9 @@ public class JobSearchApplicationService {
         }
         if (experienceLevel != null) {
             profile.setExperienceLevel(experienceLevel);
+        }
+        if (desiredJobTitle != null) {
+            profile.setDesiredJobTitle(desiredJobTitle);
         }
         return profileRepository.save(profile);
     }
@@ -257,11 +256,6 @@ public class JobSearchApplicationService {
     public void deleteProfile(String profileId) {
         JobSearchProfile profile = profileRepository.findById(profileId)
                 .orElseThrow(() -> new RuntimeException("Profile not found: " + profileId));
-
-        // Delete profile-level Redis vector
-        if (profile.getRedisVectorKey() != null) {
-            redisVectorService.deleteVector(profile.getRedisVectorKey());
-        }
 
         // Delete line-level vectors (mock job post lines)
         deleteProfileLines(profileId);

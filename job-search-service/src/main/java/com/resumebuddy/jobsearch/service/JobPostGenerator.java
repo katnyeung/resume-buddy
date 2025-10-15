@@ -30,7 +30,8 @@ public class JobPostGenerator {
     private final ObjectMapper objectMapper;
 
     /**
-     * Generate job post with location and experience level from multiple experiences
+     * Generate job post with location, experience level, and suggested job title from multiple experiences
+     * @param experiences List of candidate's resume experiences
      */
     public GeneratedJobProfileDto generateJobPost(List<ExperienceDto> experiences) {
         try {
@@ -57,8 +58,8 @@ public class JobPostGenerator {
             // Parse JSON response
             GeneratedJobProfileDto result = parseJobProfileResponse(llmResponse);
 
-            log.info("Successfully generated job profile - location: {}, level: {}, requirements length: {}",
-                    result.getLocation(), result.getExperienceLevel(), result.getJobPost().length());
+            log.info("Successfully generated job profile - suggested title: '{}', location: {}, level: {}, requirements length: {}",
+                    result.getSuggestedJobTitle(), result.getLocation(), result.getExperienceLevel(), result.getJobPost().length());
             return result;
 
         } catch (Exception e) {
@@ -88,6 +89,7 @@ public class JobPostGenerator {
             // Parse JSON
             JsonNode jsonNode = objectMapper.readTree(cleanedResponse);
 
+            String suggestedTitle = jsonNode.has("suggestedJobTitle") ? jsonNode.get("suggestedJobTitle").asText() : "";
             String location = jsonNode.has("location") ? jsonNode.get("location").asText() : "Remote";
             String experienceLevel = jsonNode.has("experienceLevel") ? jsonNode.get("experienceLevel").asText() : "Mid Level";
             String requirements = jsonNode.has("requirements") ? jsonNode.get("requirements").asText() : "";
@@ -106,6 +108,7 @@ public class JobPostGenerator {
 
             GeneratedJobProfileDto result = new GeneratedJobProfileDto();
             result.setJobPost(requirements);
+            result.setSuggestedJobTitle(suggestedTitle);
             result.setLocation(location);
             result.setExperienceLevel(experienceLevel);
             result.setSkillProficiencies(skillProficiencies);

@@ -11,14 +11,24 @@ Given the following candidate information from {experienceCount} resume experien
 ## Your Task:
 
 Generate a structured job profile with:
-1. **Location** - Infer the most likely target location (city + country or "Remote")
-2. **Experience Level** - Choose one: "Entry Level", "Mid Level", "Senior", "Lead", or "Executive"
-3. **Requirements** - 8-12 bulleted job requirements
-4. **Skill Proficiency Scores** - Rate each technical skill (0-100) based on experience depth
+1. **Suggested Job Title** - Infer a concise, marketable job title based on the candidate's background
+2. **Location** - Infer the most likely target location (city + country or "Remote")
+3. **Experience Level** - Choose one: "Entry Level", "Mid Level", "Senior", "Lead", or "Executive"
+4. **Requirements** - 8-12 bulleted job requirements
+5. **Skill Proficiency Scores** - Rate each technical skill (0-100) based on experience depth
 
 ---
 
-## Part 1: Location
+## Part 1: Suggested Job Title
+
+Analyze the candidate's experiences and suggest a concise, marketable job title:
+- Look at their most recent role titles and responsibilities
+- Consider their experience level and skillset
+- Use standard industry job titles (e.g., "Senior Java Developer", "Data Scientist", "Full Stack Engineer")
+- Keep it concise (2-5 words max)
+- Examples: "Senior Software Engineer", "Java Developer", "DevOps Engineer", "Data Scientist"
+
+## Part 2: Location
 
 Analyze the candidate's work history to determine target location:
 - If most recent roles are in the same city → use that city
@@ -26,7 +36,7 @@ Analyze the candidate's work history to determine target location:
 - Format: "City, Country" or "Remote" or "City, State" (for US)
 - Examples: "San Francisco, CA", "London, UK", "Remote", "New York, NY"
 
-## Part 2: Experience Level
+## Part 3: Experience Level
 
 Based on:
 - Years of experience: {totalYearsExperience}+ years
@@ -40,7 +50,7 @@ Choose ONE:
 - **Lead** (10+ years, lead/principal/staff engineer)
 - **Executive** (director, VP, C-level)
 
-## Part 3: Requirements
+## Part 4: Requirements
 
 Generate a **bulleted list of 8-12 job requirements** that would appear in a real job posting. Each requirement should be:
 - **One concise line** (5-15 words max)
@@ -77,7 +87,7 @@ Generate a **bulleted list of 8-12 job requirements** that would appear in a rea
 
 ---
 
-## Part 4: Skill Proficiency Scores
+## Part 5: Skill Proficiency Scores
 
 For each technical skill mentioned in the experiences, assign a proficiency score (0-100):
 
@@ -97,6 +107,7 @@ Consider:
 ## Output Format (JSON):
 
 {
+  "suggestedJobTitle": "Senior Java Developer",
   "location": "San Francisco, CA",
   "experienceLevel": "Senior",
   "requirements": "• Strong experience with Java, Spring Boot, and microservices architecture\n• 5+ years of backend development in financial services or fintech\n• Proficiency with cloud platforms (AWS, GCP, or Azure)\n• Experience with CI/CD pipelines and DevOps practices\n• Work with relational and NoSQL databases at scale\n• Strong understanding of RESTful API design and implementation\n• Experience leading technical projects and mentoring junior developers\n• Familiarity with containerization (Docker, Kubernetes)",

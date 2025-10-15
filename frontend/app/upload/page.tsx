@@ -40,9 +40,9 @@ export default function UploadPage() {
       const parsedResume = await parseResume(uploadedResume.id);
       setUploadProgress('Resume parsed successfully');
 
-      // Redirect to editor
+      // Redirect to resume detail page
       setTimeout(() => {
-        router.push(`/edit/${parsedResume.id}`);
+        router.push(`/resume/${parsedResume.id}`);
       }, 500);
 
     } catch (err) {

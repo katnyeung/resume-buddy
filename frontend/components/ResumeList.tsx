@@ -104,11 +104,11 @@ export default function ResumeList({ resumes, onDelete }: ResumeListProps) {
           {/* Actions */}
           <div className="flex gap-2">
             <button
-              onClick={() => router.push(`/edit/${resume.id}`)}
+              onClick={() => router.push(`/resume/${resume.id}`)}
               disabled={resume.status.toLowerCase() !== 'parsed' && resume.status.toLowerCase() !== 'analyzed'}
               className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm font-medium"
             >
-              Edit
+              View
             </button>
             <button
               onClick={() => onDelete(resume.id)}

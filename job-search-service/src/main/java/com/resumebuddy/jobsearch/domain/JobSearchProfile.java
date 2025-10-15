@@ -46,6 +46,13 @@ public class JobSearchProfile {
     private String generatedJobPost;
 
     /**
+     * Desired job title (e.g., "Java Developer", "Senior Software Engineer", "Data Scientist")
+     * User-specified title used for job search and LLM context
+     */
+    @Column(name = "desired_job_title", length = 255)
+    private String desiredJobTitle;
+
+    /**
      * Target location for job search (e.g., "San Francisco, CA", "Remote", "New York")
      * User can specify where they want to search for jobs
      */
@@ -58,14 +65,6 @@ public class JobSearchProfile {
      */
     @Column(name = "experience_level", length = 50)
     private String experienceLevel;
-
-    /**
-     * Redis key for the vector embedding of this profile
-     * Format: "profile:vector:{id}"
-     * Nullable because it's populated after initial save
-     */
-    @Column(name = "redis_vector_key", length = 100)
-    private String redisVectorKey;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

@@ -5,6 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -25,9 +26,11 @@ public class JobMatchResponse {
     private String description;
     private String url;
     private String salaryRange;
+    private LocalDateTime postedDate; // Job posting date
 
     // Skill gap analysis
     private List<String> matchedSkills;
     private List<String> missingSkills;
-    private double skillMatchPercentage;
+    private double skillMatchPercentage; // Simple count-based: matched / total
+    private double weightedSkillScore;   // Proficiency-weighted: sum(matched proficiencies) / sum(all)
 }

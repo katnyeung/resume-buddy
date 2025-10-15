@@ -17,7 +17,8 @@ public class SkillGap {
 
     private List<String> matchedSkills;
     private List<String> missingSkills;
-    private double matchPercentage;
+    private double matchPercentage; // Simple count-based: matched / total
+    private double weightedScore;   // Proficiency-weighted: sum(matched proficiencies) / sum(all proficiencies)
 
     public boolean hasSignificantGaps() {
         return matchPercentage < 70.0;

@@ -11,5 +11,7 @@ public interface JobSearchProfileLineRepository extends JpaRepository<JobSearchP
 
     List<JobSearchProfileLine> findByProfileId(String profileId);
 
+    List<JobSearchProfileLine> findByProfileIdOrderByLineNumber(String profileId);
+
     void deleteByProfileId(String profileId);
 }

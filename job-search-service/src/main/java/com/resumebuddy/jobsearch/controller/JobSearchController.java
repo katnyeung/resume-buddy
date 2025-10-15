@@ -2,6 +2,7 @@ package com.resumebuddy.jobsearch.controller;
 
 import com.resumebuddy.jobsearch.dto.CreateProfileRequest;
 import com.resumebuddy.jobsearch.dto.JobMatchResponse;
+import com.resumebuddy.jobsearch.dto.JobMatchingResultResponse;
 import com.resumebuddy.jobsearch.dto.UpdateJobPostRequest;
 import com.resumebuddy.jobsearch.service.JobMatchingApplicationService;
 import com.resumebuddy.jobsearch.service.JobSearchApplicationService;
@@ -244,10 +245,10 @@ public class JobSearchController {
     public ResponseEntity<JobSearchProfile> updateMetadata(
             @Parameter(description = "Profile ID") @PathVariable String id,
             @RequestBody UpdateMetadataRequest request) {
-        log.info("Updating metadata for profile {}: location={}, experienceLevel={}",
-                id, request.getLocation(), request.getExperienceLevel());
+        log.info("Updating metadata for profile {}: location={}, experienceLevel={}, desiredJobTitle={}",
+                id, request.getLocation(), request.getExperienceLevel(), request.getDesiredJobTitle());
         JobSearchProfile profile = jobSearchService.updateProfileMetadata(
-                id, request.getLocation(), request.getExperienceLevel());
+                id, request.getLocation(), request.getExperienceLevel(), request.getDesiredJobTitle());
         return ResponseEntity.ok(profile);
     }
 
@@ -297,6 +298,7 @@ public class JobSearchController {
     public static class UpdateMetadataRequest {
         private String location;
         private String experienceLevel;
+        private String desiredJobTitle;
 
         public String getLocation() {
             return location;
@@ -312,6 +314,14 @@ public class JobSearchController {
 
         public void setExperienceLevel(String experienceLevel) {
             this.experienceLevel = experienceLevel;
+        }
+
+        public String getDesiredJobTitle() {
+            return desiredJobTitle;
+        }
+
+        public void setDesiredJobTitle(String desiredJobTitle) {
+            this.desiredJobTitle = desiredJobTitle;
         }
     }
 
@@ -385,14 +395,28 @@ public class JobSearchController {
             response.setDescription(enriched.getListing().getDescription());
             response.setUrl(enriched.getListing().getUrl());
             response.setSalaryRange(enriched.getListing().getSalaryRange());
+            response.setPostedDate(enriched.getListing().getPostedDate());
 
             // Skill gap
             response.setMatchedSkills(enriched.getSkillGap().getMatchedSkills());
             response.setMissingSkills(enriched.getSkillGap().getMissingSkills());
             response.setSkillMatchPercentage(enriched.getSkillGap().getMatchPercentage());
+            response.setWeightedSkillScore(enriched.getSkillGap().getWeightedScore());
 
             responses.add(response);
         }
+
+        // Sort by combined score (primary), then by posted date descending (secondary - newest first)
+        responses.sort((a, b) -> {
+            int scoreCompare = b.getSimilarityScore().compareTo(a.getSimilarityScore());
+            if (scoreCompare != 0) return scoreCompare;
+
+            // Secondary sort: newer jobs first (nulls last)
+            if (a.getPostedDate() == null && b.getPostedDate() == null) return 0;
+            if (a.getPostedDate() == null) return 1; // b is newer
+            if (b.getPostedDate() == null) return -1; // a is newer
+            return b.getPostedDate().compareTo(a.getPostedDate()); // Descending
+        });
 
         return ResponseEntity.ok(responses);
     }
@@ -432,13 +456,27 @@ public class JobSearchController {
             response.setDescription(enriched.getListing().getDescription());
             response.setUrl(enriched.getListing().getUrl());
             response.setSalaryRange(enriched.getListing().getSalaryRange());
+            response.setPostedDate(enriched.getListing().getPostedDate());
 
             response.setMatchedSkills(enriched.getSkillGap().getMatchedSkills());
             response.setMissingSkills(enriched.getSkillGap().getMissingSkills());
             response.setSkillMatchPercentage(enriched.getSkillGap().getMatchPercentage());
+            response.setWeightedSkillScore(enriched.getSkillGap().getWeightedScore());
 
             responses.add(response);
         }
+
+        // Sort by combined score (primary), then by posted date descending (secondary - newest first)
+        responses.sort((a, b) -> {
+            int scoreCompare = b.getSimilarityScore().compareTo(a.getSimilarityScore());
+            if (scoreCompare != 0) return scoreCompare;
+
+            // Secondary sort: newer jobs first (nulls last)
+            if (a.getPostedDate() == null && b.getPostedDate() == null) return 0;
+            if (a.getPostedDate() == null) return 1; // b is newer
+            if (b.getPostedDate() == null) return -1; // a is newer
+            return b.getPostedDate().compareTo(a.getPostedDate()); // Descending
+        });
 
         return ResponseEntity.ok(responses);
     }
@@ -451,5 +489,99 @@ public class JobSearchController {
         } else {
             return "MODERATE";
         }
+    }
+
+    /**
+     * Get job matching results for a profile
+     * GET /api/job-search/profiles/{id}/matching-results
+     */
+    @Operation(
+            summary = "Get job matching results",
+            description = "Retrieves comprehensive job matching results for a profile. Performs vector similarity search combined with skill matching analysis. Results are cached - if matches don't exist, they will be computed and saved. Use refresh=true to force re-computation (useful after re-vectorizing job listings)."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Matching results retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = JobMatchingResultResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Profile not found")
+    })
+    @GetMapping("/profiles/{id}/matching-results")
+    public ResponseEntity<JobMatchingResultResponse> getMatchingResults(
+            @Parameter(description = "Profile ID") @PathVariable String id,
+            @Parameter(description = "Number of top matches to return (default: 20)")
+            @RequestParam(defaultValue = "20") int topK,
+            @Parameter(description = "Force refresh of cached matches (default: false)")
+            @RequestParam(defaultValue = "false") boolean refresh) {
+
+        log.info("Getting matching results for profile: {} (topK: {}, refresh: {})", id, topK, refresh);
+
+        // Get profile
+        JobSearchProfile profile = jobSearchService.getProfile(id);
+
+        // Get or create matching results (with optional refresh)
+        List<JobMatchingApplicationService.JobMatchWithListing> enrichedMatches =
+                jobMatchingService.getOrCreateMatchingResults(id, topK, refresh);
+
+        // Build response
+        List<JobMatchResponse> matchResponses = new ArrayList<>();
+        for (JobMatchingApplicationService.JobMatchWithListing enriched : enrichedMatches) {
+            JobMatchResponse response = new JobMatchResponse();
+            response.setMatchId(enriched.getMatch().getId());
+            response.setProfileId(enriched.getMatch().getProfileId());
+            response.setListingId(enriched.getMatch().getListingId());
+            response.setSimilarityScore(enriched.getMatch().getSimilarityScore());
+            response.setMatchLevel(getMatchLevel(enriched.getMatch().getSimilarityScore()));
+
+            // Job listing details
+            response.setTitle(enriched.getListing().getTitle());
+            response.setCompany(enriched.getListing().getCompany());
+            response.setLocation(enriched.getListing().getLocation());
+            response.setDescription(enriched.getListing().getDescription());
+            response.setUrl(enriched.getListing().getUrl());
+            response.setSalaryRange(enriched.getListing().getSalaryRange());
+            response.setPostedDate(enriched.getListing().getPostedDate());
+
+            // Skill gap
+            response.setMatchedSkills(enriched.getSkillGap().getMatchedSkills());
+            response.setMissingSkills(enriched.getSkillGap().getMissingSkills());
+            response.setSkillMatchPercentage(enriched.getSkillGap().getMatchPercentage());
+            response.setWeightedSkillScore(enriched.getSkillGap().getWeightedScore());
+
+            matchResponses.add(response);
+        }
+
+        // Sort by combined score (primary), then by posted date descending (secondary - newest first)
+        matchResponses.sort((a, b) -> {
+            int scoreCompare = b.getSimilarityScore().compareTo(a.getSimilarityScore());
+            if (scoreCompare != 0) return scoreCompare;
+
+            // Secondary sort: newer jobs first (nulls last)
+            if (a.getPostedDate() == null && b.getPostedDate() == null) return 0;
+            if (a.getPostedDate() == null) return 1; // b is newer
+            if (b.getPostedDate() == null) return -1; // a is newer
+            return b.getPostedDate().compareTo(a.getPostedDate()); // Descending
+        });
+
+        // Create summary (first 150 chars of job post)
+        String profileSummary = profile.getGeneratedJobPost().length() > 150 ?
+                profile.getGeneratedJobPost().substring(0, 150) + "..." :
+                profile.getGeneratedJobPost();
+
+        // Create metadata
+        JobMatchingResultResponse.SearchMetadata metadata = new JobMatchingResultResponse.SearchMetadata(
+                topK,
+                matchResponses.size(),
+                "vector_similarity + skill_matching"
+        );
+
+        // Build final response
+        JobMatchingResultResponse result = new JobMatchingResultResponse(
+                id,
+                matchResponses.size(),
+                profileSummary,
+                matchResponses,
+                metadata
+        );
+
+        return ResponseEntity.ok(result);
     }
 }

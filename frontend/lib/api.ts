@@ -229,10 +229,16 @@ export const removeProfileSkill = async (profileId: string, skillId: string): Pr
   await jobSearchClient.delete(`/job-search/profiles/${profileId}/skills/${skillId}`);
 };
 
-export const updateProfileMetadata = async (profileId: string, location: string, experienceLevel: string): Promise<any> => {
+export const updateProfileMetadata = async (profileId: string, location: string, experienceLevel: string, desiredJobTitle?: string): Promise<any> => {
   const response = await jobSearchClient.put(`/job-search/profiles/${profileId}/metadata`, {
     location,
-    experienceLevel
+    experienceLevel,
+    desiredJobTitle
   });
+  return response.data;
+};
+
+export const getMatchingResults = async (profileId: string, topK: number = 20, refresh: boolean = false): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/matching-results?topK=${topK}&refresh=${refresh}`);
   return response.data;
 };

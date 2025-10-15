@@ -43,23 +43,35 @@ public class JobListing {
     @Column(name = "url", length = 500)
     private String url;
 
+    /**
+     * Content hash for duplicate detection (SHA-256 of company + title + location)
+     * Used to identify duplicate jobs even if URL changes
+     */
+    @Column(name = "content_hash", length = 64, unique = true)
+    private String contentHash;
+
     @Column(name = "salary_range", length = 100)
     private String salaryRange;
 
-    /**
-     * Redis key for the vector embedding of this job listing
-     * Format: "listing:vector:{id}"
-     */
-    @Column(name = "redis_vector_key", length = 100, nullable = false)
-    private String redisVectorKey;
+    @Column(name = "contract_type", length = 50)
+    private String contractType; // e.g., "permanent", "contract", "temporary", "full_time", "part_time"
+
+    @Column(name = "posted_date")
+    private LocalDateTime postedDate;
+
+    @Column(name = "expires_date")
+    private LocalDateTime expiresDate;
 
     /**
-     * Required skills extracted from job description (JSON array)
+     * Complete raw API response data (preserves all source fields)
      */
-    @Column(name = "required_skills", columnDefinition = "JSON")
-    private String requiredSkills;
+    @Column(name = "raw_data", columnDefinition = "JSON")
+    private String rawData;
 
     @CreationTimestamp
     @Column(name = "fetched_at", nullable = false, updatable = false)
     private LocalDateTime fetchedAt;
+
+    @Column(name = "last_seen_at")
+    private LocalDateTime lastSeenAt; // Track when we last saw this job (for updates)
 }
