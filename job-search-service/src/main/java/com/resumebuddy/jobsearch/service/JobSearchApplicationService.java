@@ -44,10 +44,10 @@ public class JobSearchApplicationService {
      * Cleans up any existing profile for this resume before creating new one
      */
     @Transactional
-    public JobSearchProfile createProfile(String resumeId, List<String> experienceIds) {
+    public JobSearchProfile createProfile(String userId, String resumeId, List<String> experienceIds) {
         try {
-            log.info("Creating job search profile for resume {} with {} experiences",
-                    resumeId, experienceIds.size());
+            log.info("Creating job search profile for user {} with resume {} and {} experiences",
+                    userId, resumeId, experienceIds.size());
 
             // 0. Clean up existing profiles for this resume (if any)
             List<JobSearchProfile> existingProfiles = profileRepository.findByResumeIdOrderByCreatedAtDesc(resumeId);
@@ -81,6 +81,7 @@ public class JobSearchApplicationService {
 
             // 5. Create profile entity with LLM-generated metadata
             JobSearchProfile profile = new JobSearchProfile();
+            profile.setUserId(userId); // Link to authenticated user
             profile.setResumeId(resumeId);
             profile.setSourceExperienceIds(serializeExperienceIds(experienceIds));
             profile.setGeneratedJobPost(generatedProfile.getJobPost());
@@ -146,10 +147,17 @@ public class JobSearchApplicationService {
     }
 
     /**
-     * Get all profiles for a resume
+     * Get all profiles for a resume (filtered by user)
      */
     public List<JobSearchProfile> getProfilesByResume(String resumeId) {
         return profileRepository.findByResumeIdOrderByCreatedAtDesc(resumeId);
+    }
+
+    /**
+     * Get all profiles for a resume and user (security filtered)
+     */
+    public List<JobSearchProfile> getProfilesByResumeAndUser(String resumeId, String userId) {
+        return profileRepository.findByResumeIdAndUserIdOrderByCreatedAtDesc(resumeId, userId);
     }
 
     /**
@@ -250,6 +258,20 @@ public class JobSearchApplicationService {
     }
 
     /**
+     * Record profile visit (updates last_visit_date to current timestamp)
+     * Called when user visits job-search page or clicks "Refresh Results"
+     * Used to determine active profiles for LLM keyword generation
+     */
+    @Transactional
+    public JobSearchProfile recordVisit(String profileId) {
+        JobSearchProfile profile = profileRepository.findById(profileId)
+                .orElseThrow(() -> new RuntimeException("Profile not found: " + profileId));
+
+        profile.setLastVisitDate(java.time.LocalDateTime.now());
+        return profileRepository.save(profile);
+    }
+
+    /**
      * Delete profile (including Redis vectors and line vectors)
      */
     @Transactional
@@ -295,16 +317,16 @@ public class JobSearchApplicationService {
             for (int i = 0; i < rawLines.length; i++) {
                 String line = rawLines[i].trim();
 
-                // Skip empty lines or very short lines (< 20 chars)
-                if (line.isEmpty() || line.length() < 20) {
+                // Skip only empty lines
+                if (line.isEmpty()) {
                     continue;
                 }
 
                 // Remove bullet point markers (•, -, *, etc.)
                 line = line.replaceAll("^[•\\-\\*]+\\s*", "").trim();
 
-                // Skip if still too short after cleanup
-                if (line.length() < 20) {
+                // Skip only empty lines after cleanup
+                if (line.isEmpty()) {
                     continue;
                 }
 

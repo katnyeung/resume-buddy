@@ -1,7 +1,10 @@
 package com.resumebuddy.jobsearch.domain.service;
 
+import com.resumebuddy.jobsearch.domain.JobSearchProfile;
+import com.resumebuddy.jobsearch.domain.JobSearchProfileSkill;
 import com.resumebuddy.jobsearch.repository.JobListingRepository;
 import com.resumebuddy.jobsearch.repository.JobSearchProfileRepository;
+import com.resumebuddy.jobsearch.repository.JobSearchProfileSkillRepository;
 import com.resumebuddy.jobsearch.service.GrokLLMClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,10 +13,9 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Domain Service: Keyword Generation
@@ -26,20 +28,21 @@ public class KeywordGenerationService {
 
     private final JobListingRepository jobListingRepository;
     private final JobSearchProfileRepository profileRepository;
+    private final JobSearchProfileSkillRepository profileSkillRepository;
     private final GrokLLMClient grokClient;
 
     /**
-     * Generate search keywords using LLM based on current database state
-     * Returns expanded keywords with experience level variations
+     * Generate search keywords using LLM based on active user profiles
+     * LLM generates COMPLETE job titles with appropriate seniority levels
      *
-     * @param count Number of base keyword groups to generate (will be expanded to 3x)
-     * @return List of keyword/exclude pairs for crawling (3x the count due to level variations)
+     * @param count Number of complete job title keywords to generate
+     * @return List of keyword/exclude pairs for crawling (no expansion needed)
      */
     public List<KeywordPair> generateSearchKeywords(int count) {
         try {
-            log.info("Generating {} base keyword groups using LLM (will expand with level variations)", count);
+            log.info("Generating {} complete job title keywords using LLM based on active user profiles", count);
 
-            // 1. Analyze current database state
+            // 1. Analyze current database state (active profiles, desired titles, top skills)
             Map<String, Object> dbStats = analyzeDatabaseState();
 
             // 2. Build prompt for Grok
@@ -48,53 +51,95 @@ public class KeywordGenerationService {
             // 3. Call Grok LLM
             String response = grokClient.callLLM(prompt);
 
-            // 4. Parse response into keyword pairs
-            List<KeywordPair> baseKeywords = parseKeywordResponse(response);
+            // 4. Parse response into keyword pairs (already complete job titles)
+            List<KeywordPair> keywords = parseKeywordResponse(response);
 
-            // 5. Expand each keyword with experience level variations
-            List<KeywordPair> expandedKeywords = expandWithExperienceLevels(baseKeywords);
-
-            log.info("Generated {} base keywords, expanded to {} total keywords with level variations",
-                    baseKeywords.size(), expandedKeywords.size());
-            return expandedKeywords;
+            log.info("Generated {} complete job title keywords", keywords.size());
+            return keywords;
 
         } catch (Exception e) {
             log.error("Failed to generate keywords using LLM, falling back to defaults", e);
-            return expandWithExperienceLevels(getDefaultKeywords());
+            return getDefaultKeywords();
         }
     }
 
     /**
-     * Analyze database to understand what we have and what we need
+     * Analyze database to understand what users actually want
+     * Focuses on ACTIVE profiles (visited in last 7 days) and their desired job titles + high-proficiency skills
      */
     private Map<String, Object> analyzeDatabaseState() {
         Map<String, Object> stats = new HashMap<>();
 
-        // Total job listings
-        long totalJobs = jobListingRepository.count();
-        stats.put("totalJobs", totalJobs);
+        // 1. Find active profiles (visited in last 7 days)
+        LocalDateTime sevenDaysAgo = LocalDateTime.now().minusDays(7);
+        List<JobSearchProfile> activeProfiles = profileRepository.findByLastVisitDateAfter(sevenDaysAgo);
 
-        // Total user profiles
-        long totalProfiles = profileRepository.count();
-        stats.put("totalProfiles", totalProfiles);
+        stats.put("activeProfileCount", activeProfiles.size());
+        log.debug("Found {} active profiles (last 7 days)", activeProfiles.size());
 
-        // Get profile locations for LLM analysis
-        List<String> profileLocations = new ArrayList<>();
-        profileRepository.findAll().forEach(profile -> {
-            if (profile.getLocation() != null && !profile.getLocation().isEmpty()) {
-                profileLocations.add(profile.getLocation());
+        if (activeProfiles.isEmpty()) {
+            log.warn("No active profiles found in last 7 days - using fallback defaults");
+            stats.put("desiredJobTitles", new ArrayList<>());
+            stats.put("topSkillsByProficiency", new ArrayList<>());
+            stats.put("profileLocations", new ArrayList<>());
+            return stats;
+        }
+
+        // 2. Group profiles by desired_job_title and count
+        Map<String, Long> jobTitleCounts = activeProfiles.stream()
+                .filter(p -> p.getDesiredJobTitle() != null && !p.getDesiredJobTitle().isEmpty())
+                .collect(Collectors.groupingBy(JobSearchProfile::getDesiredJobTitle, Collectors.counting()));
+
+        List<String> desiredJobTitles = jobTitleCounts.entrySet().stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .map(e -> String.format("\"%s\" (%d users)", e.getKey(), e.getValue()))
+                .collect(Collectors.toList());
+        stats.put("desiredJobTitles", desiredJobTitles);
+        log.debug("Desired job titles: {}", desiredJobTitles);
+
+        // 3. Get all skills from active profiles
+        List<String> activeProfileIds = activeProfiles.stream()
+                .map(JobSearchProfile::getId)
+                .collect(Collectors.toList());
+
+        List<JobSearchProfileSkill> allSkills = profileSkillRepository.findByProfileIdIn(activeProfileIds);
+        log.debug("Found {} total skills across {} active profiles", allSkills.size(), activeProfileIds.size());
+
+        // 4. Calculate top 5 skills by HIGHEST proficiency score (not frequency)
+        Map<String, Integer> skillMaxProficiency = new HashMap<>();
+        for (JobSearchProfileSkill skill : allSkills) {
+            if (skill.getProficiencyScore() != null) {
+                skillMaxProficiency.merge(
+                        skill.getSkillName(),
+                        skill.getProficiencyScore(),
+                        Math::max  // Keep highest proficiency score
+                );
             }
-        });
+        }
+
+        List<String> topSkillsByProficiency = skillMaxProficiency.entrySet().stream()
+                .sorted(Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(5)
+                .map(e -> String.format("\"%s\" (proficiency: %d)", e.getKey(), e.getValue()))
+                .collect(Collectors.toList());
+        stats.put("topSkillsByProficiency", topSkillsByProficiency);
+        log.debug("Top 5 skills by proficiency: {}", topSkillsByProficiency);
+
+        // 5. Get profile locations for LLM analysis
+        List<String> profileLocations = activeProfiles.stream()
+                .filter(p -> p.getLocation() != null && !p.getLocation().isEmpty())
+                .map(JobSearchProfile::getLocation)
+                .distinct()
+                .collect(Collectors.toList());
         stats.put("profileLocations", profileLocations);
+        log.debug("Profile locations: {}", profileLocations);
 
-        stats.put("hasJobs", totalJobs > 0);
-
-        log.debug("Database stats: {} jobs, {} profiles, {} locations", totalJobs, totalProfiles, profileLocations.size());
         return stats;
     }
 
     /**
      * Build LLM prompt for keyword generation from template file
+     * Now uses active profiles, desired job titles, and top skills by proficiency
      */
     private String buildKeywordGenerationPrompt(Map<String, Object> dbStats, int count) {
         try {
@@ -103,22 +148,32 @@ public class KeywordGenerationService {
             String template = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
             // Extract values from dbStats
-            long totalJobs = (Long) dbStats.get("totalJobs");
-            long totalProfiles = (Long) dbStats.get("totalProfiles");
+            int activeProfileCount = (Integer) dbStats.get("activeProfileCount");
+            @SuppressWarnings("unchecked")
+            List<String> desiredJobTitles = (List<String>) dbStats.get("desiredJobTitles");
+            @SuppressWarnings("unchecked")
+            List<String> topSkillsByProficiency = (List<String>) dbStats.get("topSkillsByProficiency");
             @SuppressWarnings("unchecked")
             List<String> profileLocations = (List<String>) dbStats.get("profileLocations");
 
-            // Build location context
-            String locationContext = "";
-            if (!profileLocations.isEmpty()) {
-                locationContext = String.format("- User profile locations: %s",
-                        String.join(", ", profileLocations.subList(0, Math.min(5, profileLocations.size()))));
-            }
+            // Build context strings
+            String jobTitlesContext = desiredJobTitles.isEmpty() ?
+                    "No desired job titles specified yet" :
+                    String.join(", ", desiredJobTitles);
+
+            String skillsContext = topSkillsByProficiency.isEmpty() ?
+                    "No skills specified yet" :
+                    String.join(", ", topSkillsByProficiency);
+
+            String locationContext = profileLocations.isEmpty() ?
+                    "No locations specified yet" :
+                    String.join(", ", profileLocations.subList(0, Math.min(5, profileLocations.size())));
 
             // Replace placeholders in template
             return template
-                    .replace("{totalJobs}", String.valueOf(totalJobs))
-                    .replace("{totalProfiles}", String.valueOf(totalProfiles))
+                    .replace("{activeProfileCount}", String.valueOf(activeProfileCount))
+                    .replace("{desiredJobTitles}", jobTitlesContext)
+                    .replace("{topSkillsByProficiency}", skillsContext)
                     .replace("{locationContext}", locationContext)
                     .replace("{count}", String.valueOf(count));
 
@@ -180,54 +235,21 @@ public class KeywordGenerationService {
     }
 
     /**
-     * Expand base keywords with experience level variations
-     * Each base keyword generates 3 variations: base, senior, lead
-     *
-     * Example: "software engineer" → ["software engineer", "senior software engineer", "lead software engineer"]
-     */
-    private List<KeywordPair> expandWithExperienceLevels(List<KeywordPair> baseKeywords) {
-        List<KeywordPair> expanded = new ArrayList<>();
-
-        for (KeywordPair base : baseKeywords) {
-            String keyword = base.getKeyword().toLowerCase().trim();
-
-            // Skip if already has level prefix
-            if (keyword.startsWith("senior ") || keyword.startsWith("lead ") ||
-                keyword.startsWith("principal ") || keyword.startsWith("junior ")) {
-                expanded.add(base);
-                continue;
-            }
-
-            // 1. Base level (mid-level/general)
-            expanded.add(new KeywordPair(keyword, base.getExclude(), base.getTargetCountryCode(), base.getTargetCityRegion()));
-
-            // 2. Senior level
-            expanded.add(new KeywordPair("senior " + keyword, base.getExclude(), base.getTargetCountryCode(), base.getTargetCityRegion()));
-
-            // 3. Lead level
-            expanded.add(new KeywordPair("lead " + keyword, base.getExclude(), base.getTargetCountryCode(), base.getTargetCityRegion()));
-        }
-
-        log.info("Expanded {} base keywords to {} total keywords", baseKeywords.size(), expanded.size());
-        return expanded;
-    }
-
-    /**
-     * Fallback BASE keywords if LLM fails (will be expanded to 30 total)
+     * Fallback COMPLETE keywords if LLM fails
      * Using empty exclude lists to maximize results
      */
     private List<KeywordPair> getDefaultKeywords() {
         List<KeywordPair> defaults = new ArrayList<>();
-        defaults.add(new KeywordPair("software engineer", List.of()));
-        defaults.add(new KeywordPair("java developer", List.of()));
-        defaults.add(new KeywordPair("python developer", List.of()));
-        defaults.add(new KeywordPair("data engineer", List.of()));
-        defaults.add(new KeywordPair("devops engineer", List.of()));
-        defaults.add(new KeywordPair("full stack developer", List.of()));
-        defaults.add(new KeywordPair("react developer", List.of()));
-        defaults.add(new KeywordPair("cloud engineer", List.of()));
-        defaults.add(new KeywordPair("backend developer", List.of()));
-        defaults.add(new KeywordPair("frontend developer", List.of()));
+        defaults.add(new KeywordPair("Software Engineer", List.of()));
+        defaults.add(new KeywordPair("Senior Java Developer", List.of()));
+        defaults.add(new KeywordPair("Python Engineer", List.of()));
+        defaults.add(new KeywordPair("Data Engineer", List.of()));
+        defaults.add(new KeywordPair("DevOps Engineer", List.of()));
+        defaults.add(new KeywordPair("Full Stack Developer", List.of()));
+        defaults.add(new KeywordPair("Senior React Developer", List.of()));
+        defaults.add(new KeywordPair("Cloud Solutions Architect", List.of()));
+        defaults.add(new KeywordPair("Backend Developer", List.of()));
+        defaults.add(new KeywordPair("Frontend Developer", List.of()));
         return defaults;
     }
 

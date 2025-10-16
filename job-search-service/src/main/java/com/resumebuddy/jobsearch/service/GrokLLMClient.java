@@ -38,6 +38,7 @@ public class GrokLLMClient {
 
     /**
      * Call Grok LLM with prompt
+     * Using temperature 0.5 for more consistent, generic outputs
      */
     public String callLLM(String prompt) {
         try {
@@ -48,7 +49,7 @@ public class GrokLLMClient {
                     "messages", List.of(
                             Map.of("role", "user", "content", prompt)
                     ),
-                    "temperature", 0.7
+                    "temperature", 0.5
             );
 
             HttpHeaders headers = new HttpHeaders();

@@ -68,10 +68,17 @@ public class JobMatch {
     private Boolean isApplied = false;
 
     /**
-     * When user marked as applied
+     * User marked as not interested / expired
      */
-    @Column(name = "applied_at")
-    private LocalDateTime appliedAt;
+    @Column(name = "is_redflag", nullable = false)
+    private Boolean isRedflag = false;
+
+    /**
+     * Multi-purpose timestamp: when user took action (saved/applied/redflagged)
+     * Used for retention policy enforcement (7/14/20 day retention)
+     */
+    @Column(name = "flagged_at")
+    private LocalDateTime flaggedAt;
 
     // Convenience methods for domain logic
     public boolean isStrongMatch() {

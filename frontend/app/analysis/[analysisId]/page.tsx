@@ -14,8 +14,18 @@ export default function AnalysisPage() {
   useEffect(() => {
     const fetchAnalysis = async () => {
       try {
+        const token = localStorage.getItem('authToken');
+        const headers: HeadersInit = {
+          'Content-Type': 'application/json'
+        };
+
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
         const response = await fetch(
-          `http://localhost:8080/api/resumes/analysis/${params.analysisId}`
+          `http://localhost:8080/api/resumes/analysis/${params.analysisId}`,
+          { headers }
         );
 
         if (!response.ok) {

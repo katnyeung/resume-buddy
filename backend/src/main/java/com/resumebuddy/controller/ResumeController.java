@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -52,8 +53,10 @@ public class ResumeController {
                 content = @io.swagger.v3.oas.annotations.media.Content(
                     mediaType = "multipart/form-data"
                 )
-            ) MultipartFile file) {
-        log.info("Received file upload request: {} ({})", file.getOriginalFilename(), file.getContentType());
+            ) MultipartFile file,
+            Authentication authentication) {
+        String userId = (String) authentication.getPrincipal();
+        log.info("User {} uploading file: {} ({})", userId, file.getOriginalFilename(), file.getContentType());
 
         // Validate file
         if (file.isEmpty()) {
@@ -85,6 +88,7 @@ public class ResumeController {
             resume.setFileSize(file.getSize());
             resume.setFilePath(filePath);
             resume.setStatus(ResumeStatus.UPLOADED.name());
+            resume.setUserId(userId); // Link to authenticated user
             // createdAt and updatedAt will be set automatically by JPA
 
             // Save resume with file path
@@ -232,11 +236,12 @@ public class ResumeController {
     }
 
     @GetMapping
-    @Operation(summary = "List resumes", description = "Get all resumes")
-    public ResponseEntity<List<Resume>> listResumes() {
-        log.info("Listing all resumes");
+    @Operation(summary = "List resumes", description = "Get all resumes for authenticated user")
+    public ResponseEntity<List<Resume>> listResumes(Authentication authentication) {
+        String userId = (String) authentication.getPrincipal();
+        log.info("Listing resumes for user: {}", userId);
 
-        List<Resume> resumes = resumeRepository.findAll();
+        List<Resume> resumes = resumeRepository.findByUserId(userId);
         return ResponseEntity.ok(resumes);
     }
 

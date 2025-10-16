@@ -80,6 +80,7 @@ public class JobMatchingApplicationService {
             log.info("STAGE 1: Line-by-line vector search across all job listings");
             java.util.Map<String, java.util.List<Double>> listingScores = new java.util.HashMap<>();
             java.util.Map<String, String> bestMatchContext = new java.util.HashMap<>(); // Track best match per listing
+            java.util.Map<String, java.util.Set<String>> listingToMatchedProfileLines = new java.util.HashMap<>(); // Track coverage
 
             // For each profile line, search for best matching job lines
             for (JobSearchProfileLine profileLine : profileLines) {
@@ -119,6 +120,13 @@ public class JobMatchingApplicationService {
                             listingScores.computeIfAbsent(listingId, k -> new ArrayList<>())
                                     .add(score);
 
+                            // Track coverage: If this is a good match (>0.6), mark profile line as matched
+                            if (score > 0.6) {
+                                listingToMatchedProfileLines
+                                        .computeIfAbsent(listingId, k -> new java.util.HashSet<>())
+                                        .add(profileLine.getId());
+                            }
+
                             // Track best matching line text for this listing
                             String currentBestKey = listingId + ":best";
                             if (!bestMatchContext.containsKey(currentBestKey)) {
@@ -151,19 +159,26 @@ public class JobMatchingApplicationService {
                 String listingId = entry.getKey();
                 List<Double> scores = entry.getValue();
 
-                // Aggregate: Use max score (best matching line)
+                // Calculate multiple metrics
                 double maxScore = scores.stream().mapToDouble(Double::doubleValue).max().orElse(0.0);
 
-                // Alternative: Average of top-3 scores
-                double avgScore = scores.stream()
+                // Average of top-3 scores (filter out weak matches < 0.5)
+                double avgTop3 = scores.stream()
+                        .filter(s -> s > 0.5)
                         .sorted(java.util.Comparator.reverseOrder())
                         .limit(3)
                         .mapToDouble(Double::doubleValue)
                         .average()
-                        .orElse(0.0);
+                        .orElse(maxScore); // Fallback to maxScore if < 3 good matches
 
-                // Use max score as primary, with match count as tiebreaker
-                rankedListings.add(new ListingScore(listingId, maxScore, scores.size()));
+                // Coverage: % of profile lines that found at least one good match (>0.6)
+                int matchedLineCount = listingToMatchedProfileLines.getOrDefault(listingId, java.util.Collections.emptySet()).size();
+                double coverage = profileLines.isEmpty() ? 0.0 : (double) matchedLineCount / profileLines.size();
+
+                // HYBRID SCORE: 30% max + 40% avg + 30% coverage
+                double hybridScore = (maxScore * 0.3) + (avgTop3 * 0.4) + (coverage * 0.3);
+
+                rankedListings.add(new ListingScore(listingId, hybridScore, scores.size(), coverage, maxScore, avgTop3));
             }
 
             // Sort by score descending, take top-K
@@ -213,14 +228,15 @@ public class JobMatchingApplicationService {
                     double weightedSkillScore = skillGap.getWeightedScore();
                     double combinedScore = (vectorScore * 0.6) + (weightedSkillScore / 100.0 * 0.4);
 
-                    log.info("MATCH - {}: VectorScore={} (60%), WeightedSkillScore={}% (40%), CombinedScore={}, LineMatches={}, Skills={}/{}",
+                    log.info("MATCH - {}: HybridVector={} (MAX={}, AVG={}, COV={}%), Skill={}%, Combined={}, Matches={}",
                             listing.getTitle(),
                             String.format("%.3f", vectorScore),
+                            String.format("%.3f", listingScore.maxScore),
+                            String.format("%.3f", listingScore.avgTop3),
+                            String.format("%.1f", listingScore.coverage * 100),
                             String.format("%.1f", weightedSkillScore),
                             String.format("%.3f", combinedScore),
-                            listingScore.matchCount,
-                            skillGap.getMatchedSkills().size(),
-                            candidateSkills.size());
+                            listingScore.matchCount);
 
                     // Create JobMatch
                     JobMatch match = new JobMatch();
@@ -274,13 +290,19 @@ public class JobMatchingApplicationService {
      */
     private static class ListingScore {
         final String listingId;
-        final double score;
-        final int matchCount;
+        final double score;        // Hybrid score (used for ranking)
+        final int matchCount;      // Total number of line matches
+        final double coverage;     // % of profile lines matched (0.0-1.0)
+        final double maxScore;     // Best single match score
+        final double avgTop3;      // Average of top 3 matches
 
-        ListingScore(String listingId, double score, int matchCount) {
+        ListingScore(String listingId, double score, int matchCount, double coverage, double maxScore, double avgTop3) {
             this.listingId = listingId;
             this.score = score;
             this.matchCount = matchCount;
+            this.coverage = coverage;
+            this.maxScore = maxScore;
+            this.avgTop3 = avgTop3;
         }
     }
 
@@ -324,10 +346,16 @@ public class JobMatchingApplicationService {
             log.info("Getting or creating matching results for profile: {} (topK: {}, forceRefresh: {})",
                     profileId, topK, forceRefresh);
 
-            // Check if matches already exist
+            // STEP 1: Clean up expired matches based on retention policy (7/14/20 days)
+            int deletedCount = cleanupExpiredMatches(profileId);
+            if (deletedCount > 0) {
+                log.info("Removed {} expired matches before search", deletedCount);
+            }
+
+            // STEP 2: Check if matches already exist
             List<JobMatch> existingMatches = matchRepository.findByProfileIdOrderBySimilarityScoreDesc(profileId);
 
-            // Force refresh OR no matches exist OR topK changed significantly
+            // STEP 3: Force refresh OR no matches exist OR topK changed significantly
             if (forceRefresh || existingMatches.isEmpty() || Math.abs(existingMatches.size() - topK) > 5) {
                 log.info("Performing FRESH search (forceRefresh={}, existing={}, topK={})",
                         forceRefresh, existingMatches.size(), topK);
@@ -336,7 +364,7 @@ public class JobMatchingApplicationService {
                 log.info("Using cached matches: {} results", existingMatches.size());
             }
 
-            // Return enriched matches
+            // STEP 4: Return enriched matches (includes redflagged for collapsible section)
             return getMatchesWithListings(profileId);
 
         } catch (Exception e) {
@@ -382,6 +410,7 @@ public class JobMatchingApplicationService {
 
     /**
      * Toggle saved status for a match
+     * Sets flaggedAt timestamp for retention policy enforcement
      */
     @Transactional
     public JobMatch toggleSaved(String matchId, boolean saved) {
@@ -389,11 +418,15 @@ public class JobMatchingApplicationService {
                 .orElseThrow(() -> new RuntimeException("Match not found: " + matchId));
 
         match.setIsSaved(saved);
+        if (saved) {
+            match.setFlaggedAt(java.time.LocalDateTime.now());
+        }
         return matchRepository.save(match);
     }
 
     /**
      * Mark a match as applied (one-way action)
+     * Sets flaggedAt timestamp for retention policy enforcement
      */
     @Transactional
     public JobMatch markApplied(String matchId) {
@@ -401,7 +434,60 @@ public class JobMatchingApplicationService {
                 .orElseThrow(() -> new RuntimeException("Match not found: " + matchId));
 
         match.setIsApplied(true);
-        match.setAppliedAt(java.time.LocalDateTime.now());
+        match.setFlaggedAt(java.time.LocalDateTime.now());
         return matchRepository.save(match);
+    }
+
+    /**
+     * Toggle redflag status for a match
+     * User can flag/unflag jobs as not interested
+     */
+    @Transactional
+    public JobMatch toggleRedflag(String matchId, boolean redflag) {
+        JobMatch match = matchRepository.findById(matchId)
+                .orElseThrow(() -> new RuntimeException("Match not found: " + matchId));
+
+        match.setIsRedflag(redflag);
+        if (redflag) {
+            match.setFlaggedAt(java.time.LocalDateTime.now());
+            log.info("Marked match {} as redflag", matchId);
+        } else {
+            log.info("Removed redflag from match {}", matchId);
+        }
+
+        return matchRepository.save(match);
+    }
+
+    /**
+     * Clean up expired matches based on retention policy
+     * - Saved: 14 days
+     * - Applied: 20 days
+     * - Redflag: 7 days
+     *
+     * Called automatically when user clicks "Refresh Results"
+     */
+    @Transactional
+    public int cleanupExpiredMatches(String profileId) {
+        java.time.LocalDateTime now = java.time.LocalDateTime.now();
+
+        // Retention policies
+        java.time.LocalDateTime savedCutoff = now.minusDays(14);    // 14 days for saved
+        java.time.LocalDateTime appliedCutoff = now.minusDays(20);  // 20 days for applied
+        java.time.LocalDateTime redflagCutoff = now.minusDays(7);   // 7 days for redflag
+
+        // Get count before deletion
+        int countBefore = matchRepository.findByProfileIdOrderBySimilarityScoreDesc(profileId).size();
+
+        // Delete expired matches
+        matchRepository.deleteExpiredMatches(profileId, savedCutoff, appliedCutoff, redflagCutoff);
+
+        // Get count after deletion
+        int countAfter = matchRepository.findByProfileIdOrderBySimilarityScoreDesc(profileId).size();
+        int deleted = countBefore - countAfter;
+
+        if (deleted > 0) {
+            log.info("Cleaned up {} expired matches for profile {}", deleted, profileId);
+        }
+        return deleted;
     }
 }

@@ -32,4 +32,15 @@ public interface JobMatchRepository extends JpaRepository<JobMatch, String> {
 
     // Find existing match by profile and listing
     JobMatch findByProfileIdAndListingId(String profileId, String listingId);
+
+    // Delete expired matches based on retention policy (7/14/20 days)
+    @Modifying
+    @Query("DELETE FROM JobMatch m WHERE m.profileId = :profileId AND " +
+           "((m.isSaved = true AND m.flaggedAt < :savedCutoff) OR " +
+           "(m.isApplied = true AND m.flaggedAt < :appliedCutoff) OR " +
+           "(m.isRedflag = true AND m.flaggedAt < :redflagCutoff))")
+    void deleteExpiredMatches(@Param("profileId") String profileId,
+                              @Param("savedCutoff") java.time.LocalDateTime savedCutoff,
+                              @Param("appliedCutoff") java.time.LocalDateTime appliedCutoff,
+                              @Param("redflagCutoff") java.time.LocalDateTime redflagCutoff);
 }

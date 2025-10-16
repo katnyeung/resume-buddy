@@ -15,9 +15,10 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * Scheduler: Automated Job Crawling with LLM-Generated Keywords + Experience Level Expansion
- * Uses Grok LLM to generate BASE roles, then expands to 3 experience levels
- * Example: "software engineer" → ["software engineer", "senior software engineer", "lead software engineer"]
+ * Scheduler: Automated Job Crawling with User-Driven LLM Keywords
+ * Uses Grok LLM to generate COMPLETE job titles based on active user profiles (last 7 days)
+ * Analyzes desired job titles + high-proficiency skills to determine appropriate keywords
+ * Example: If users want "Java Developer" with high Java proficiency → "Senior Java Developer"
  * Disabled by default (enable via app.job-crawling.enabled=true)
  */
 @Component
@@ -34,21 +35,21 @@ public class JobCrawlScheduler {
     private int maxDaysOld;
 
     /**
-     * Scheduled crawl with LLM-generated keywords + experience level expansion
+     * Scheduled crawl with user-driven LLM keywords
      * Default: Daily at 2 AM (0 0 2 * * *)
-     * Generates 10 BASE roles → Expands to 30 total (base, senior, lead for each)
+     * Generates 30 COMPLETE job titles based on active user profiles
      */
     @Scheduled(cron = "${app.job-crawling.schedule:0 0 2 * * *}")
     public void scheduledCrawl() {
-        log.info("=== Scheduled Job Crawl Started (LLM-Powered with Level Expansion) ===");
+        log.info("=== Scheduled Job Crawl Started (User-Driven LLM Keywords) ===");
 
         try {
-            // 1. Generate optimal keywords using Grok LLM (will be expanded to 3x with level variations)
-            log.info("Generating 10 BASE roles using LLM (will expand to 30 total with level variations)...");
+            // 1. Generate optimal keywords using Grok LLM based on active user profiles
+            log.info("Generating 30 complete job title keywords using LLM (based on active user profiles)...");
             List<KeywordGenerationService.KeywordPair> keywordPairs =
-                    keywordGenerationService.generateSearchKeywords(10); // 10 base → 30 total
+                    keywordGenerationService.generateSearchKeywords(30); // 30 complete job titles
 
-            log.info("Generated {} total keyword pairs for crawling (with level variations)", keywordPairs.size());
+            log.info("Generated {} complete job title keywords for crawling", keywordPairs.size());
 
             int totalFetched = 0;
             int totalSaved = 0;

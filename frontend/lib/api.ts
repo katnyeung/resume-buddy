@@ -10,6 +10,15 @@ const apiClient = axios.create({
   },
 });
 
+// Add request interceptor to include auth token
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 // Resume Management
 export const uploadResume = async (file: File): Promise<Resume> => {
   const formData = new FormData();
@@ -169,6 +178,15 @@ const jobSearchClient = axios.create({
   },
 });
 
+// Add request interceptor to include auth token
+jobSearchClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export const createJobSearchProfile = async (resumeId: string, experienceIds: string[]): Promise<any> => {
   const response = await jobSearchClient.post('/job-search/profiles', {
     resumeId,
@@ -252,5 +270,17 @@ export const toggleMatchSaved = async (matchId: string, saved: boolean): Promise
 
 export const markMatchApplied = async (matchId: string): Promise<any> => {
   const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/apply`);
+  return response.data;
+};
+
+export const toggleMatchRedflag = async (matchId: string, redflag: boolean): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/redflag`, {
+    redflag
+  });
+  return response.data;
+};
+
+export const recordProfileVisit = async (profileId: string): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/profiles/${profileId}/visit`);
   return response.data;
 };

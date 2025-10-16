@@ -8,6 +8,12 @@ import com.resumebuddy.jobsearch.dto.SkillDto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
@@ -30,6 +36,21 @@ public class ResumeApiClient {
     private String resumeApiBaseUrl;
 
     /**
+     * Get Authorization header with current user's JWT token
+     */
+    private HttpHeaders getAuthHeaders() {
+        HttpHeaders headers = new HttpHeaders();
+        // Get the JWT token from the current security context
+        // This assumes the job-search-service received the same token from the user
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication != null && authentication.getCredentials() != null) {
+            String token = authentication.getCredentials().toString();
+            headers.set("Authorization", "Bearer " + token);
+        }
+        return headers;
+    }
+
+    /**
      * Fetch experience details including skills from job analysis
      */
     public ExperienceDto fetchExperience(String resumeId, String experienceId) {
@@ -38,7 +59,14 @@ public class ResumeApiClient {
 
             // First get experience basic data
             String experienceUrl = String.format("%s/resumes/%s/structured-analysis", resumeApiBaseUrl, resumeId);
-            String response = restTemplate.getForObject(experienceUrl, String.class);
+            HttpEntity<Void> requestEntity = new HttpEntity<>(getAuthHeaders());
+            ResponseEntity<String> responseEntity = restTemplate.exchange(
+                experienceUrl,
+                HttpMethod.GET,
+                requestEntity,
+                String.class
+            );
+            String response = responseEntity.getBody();
 
             JsonNode root = objectMapper.readTree(response);
             JsonNode experiences = root.path("experiences");
@@ -84,7 +112,14 @@ public class ResumeApiClient {
             String jobAnalysisUrl = String.format("%s/resumes/%s/experiences/%s/analysis",
                     resumeApiBaseUrl, resumeId, experienceId);
 
-            String response = restTemplate.getForObject(jobAnalysisUrl, String.class);
+            HttpEntity<Void> requestEntity = new HttpEntity<>(getAuthHeaders());
+            ResponseEntity<String> responseEntity = restTemplate.exchange(
+                jobAnalysisUrl,
+                HttpMethod.GET,
+                requestEntity,
+                String.class
+            );
+            String response = responseEntity.getBody();
             JsonNode root = objectMapper.readTree(response);
             JsonNode skillsNode = root.path("extractedSkills");
 

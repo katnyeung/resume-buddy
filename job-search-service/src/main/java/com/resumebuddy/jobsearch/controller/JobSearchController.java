@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
@@ -55,11 +56,15 @@ public class JobSearchController {
             @ApiResponse(responseCode = "500", description = "Internal server error")
     })
     @PostMapping("/profiles")
-    public ResponseEntity<JobSearchProfile> createProfile(@Valid @RequestBody CreateProfileRequest request) {
-        log.info("Creating profile for resume {} with {} experiences",
-                request.getResumeId(), request.getExperienceIds().size());
+    public ResponseEntity<JobSearchProfile> createProfile(
+            @Valid @RequestBody CreateProfileRequest request,
+            Authentication authentication) {
+        String userId = (String) authentication.getPrincipal();
+        log.info("Creating profile for user {} with resume {} and {} experiences",
+                userId, request.getResumeId(), request.getExperienceIds().size());
 
         JobSearchProfile profile = jobSearchService.createProfile(
+                userId,
                 request.getResumeId(),
                 request.getExperienceIds()
         );
@@ -118,8 +123,10 @@ public class JobSearchController {
     })
     @GetMapping("/profiles")
     public ResponseEntity<List<JobSearchProfile>> getProfilesByResume(
-            @Parameter(description = "Resume ID") @RequestParam String resumeId) {
-        List<JobSearchProfile> profiles = jobSearchService.getProfilesByResume(resumeId);
+            @Parameter(description = "Resume ID") @RequestParam String resumeId,
+            Authentication authentication) {
+        String userId = (String) authentication.getPrincipal();
+        List<JobSearchProfile> profiles = jobSearchService.getProfilesByResumeAndUser(resumeId, userId);
         return ResponseEntity.ok(profiles);
     }
 
@@ -250,6 +257,26 @@ public class JobSearchController {
                 id, request.getLocation(), request.getExperienceLevel(), request.getDesiredJobTitle());
         JobSearchProfile profile = jobSearchService.updateProfileMetadata(
                 id, request.getLocation(), request.getExperienceLevel(), request.getDesiredJobTitle());
+        return ResponseEntity.ok(profile);
+    }
+
+    /**
+     * Update last visit date for a profile
+     * PATCH /api/job-search/profiles/{id}/visit
+     */
+    @Operation(
+            summary = "Record profile visit",
+            description = "Updates the last_visit_date timestamp for a profile. Called when user visits job-search page or clicks 'Refresh Results'. Used to determine active profiles for LLM keyword generation."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Visit recorded successfully"),
+            @ApiResponse(responseCode = "404", description = "Profile not found")
+    })
+    @PatchMapping("/profiles/{id}/visit")
+    public ResponseEntity<JobSearchProfile> recordVisit(
+            @Parameter(description = "Profile ID") @PathVariable String id) {
+        log.info("Recording visit for profile: {}", id);
+        JobSearchProfile profile = jobSearchService.recordVisit(id);
         return ResponseEntity.ok(profile);
     }
 
@@ -407,7 +434,8 @@ public class JobSearchController {
             // User actions
             response.setIsSaved(enriched.getMatch().getIsSaved());
             response.setIsApplied(enriched.getMatch().getIsApplied());
-            response.setAppliedAt(enriched.getMatch().getAppliedAt());
+            response.setIsRedflag(enriched.getMatch().getIsRedflag());
+            response.setFlaggedAt(enriched.getMatch().getFlaggedAt());
 
             responses.add(response);
         }
@@ -472,7 +500,8 @@ public class JobSearchController {
             // User actions
             response.setIsSaved(enriched.getMatch().getIsSaved());
             response.setIsApplied(enriched.getMatch().getIsApplied());
-            response.setAppliedAt(enriched.getMatch().getAppliedAt());
+            response.setIsRedflag(enriched.getMatch().getIsRedflag());
+            response.setFlaggedAt(enriched.getMatch().getFlaggedAt());
 
             responses.add(response);
         }
@@ -525,6 +554,9 @@ public class JobSearchController {
 
         log.info("Getting matching results for profile: {} (topK: {}, refresh: {})", id, topK, refresh);
 
+        // Record visit (updates last_visit_date for keyword generation tracking)
+        jobSearchService.recordVisit(id);
+
         // Get profile
         JobSearchProfile profile = jobSearchService.getProfile(id);
 
@@ -560,7 +592,8 @@ public class JobSearchController {
             // User actions
             response.setIsSaved(enriched.getMatch().getIsSaved());
             response.setIsApplied(enriched.getMatch().getIsApplied());
-            response.setAppliedAt(enriched.getMatch().getAppliedAt());
+            response.setIsRedflag(enriched.getMatch().getIsRedflag());
+            response.setFlaggedAt(enriched.getMatch().getFlaggedAt());
 
             matchResponses.add(response);
         }
@@ -644,6 +677,28 @@ public class JobSearchController {
         return ResponseEntity.ok(match);
     }
 
+    /**
+     * Toggle redflag status for a match
+     * PATCH /api/job-search/matches/{matchId}/redflag
+     */
+    @Operation(
+            summary = "Toggle redflag status",
+            description = "Toggles the redflag (not interested/expired) status for a job match. Redflagged matches are shown in a collapsible section and automatically deleted after 7 days."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Redflag status updated successfully"),
+            @ApiResponse(responseCode = "404", description = "Match not found")
+    })
+    @PatchMapping("/matches/{matchId}/redflag")
+    public ResponseEntity<JobMatch> toggleRedflag(
+            @Parameter(description = "Match ID") @PathVariable String matchId,
+            @RequestBody RedflagRequest request) {
+        log.info("Toggling redflag status for match {}: {}", matchId, request.isRedflag());
+
+        JobMatch match = jobMatchingService.toggleRedflag(matchId, request.isRedflag());
+        return ResponseEntity.ok(match);
+    }
+
     // Request DTOs
     public static class SaveMatchRequest {
         private boolean saved;
@@ -654,6 +709,18 @@ public class JobSearchController {
 
         public void setSaved(boolean saved) {
             this.saved = saved;
+        }
+    }
+
+    public static class RedflagRequest {
+        private boolean redflag;
+
+        public boolean isRedflag() {
+            return redflag;
+        }
+
+        public void setRedflag(boolean redflag) {
+            this.redflag = redflag;
         }
     }
 }

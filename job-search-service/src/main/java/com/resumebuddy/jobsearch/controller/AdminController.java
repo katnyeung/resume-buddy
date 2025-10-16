@@ -88,11 +88,11 @@ public class AdminController {
      * POST /api/job-search/admin/crawl/scheduled-simulation
      */
     @Operation(
-            summary = "Simulate scheduled crawl (LLM-powered with location intelligence)",
+            summary = "Simulate scheduled crawl (User-driven LLM keywords)",
             description = "Simulates the automated scheduled crawl flow: " +
-                    "1) Analyzes user profile locations from database. " +
-                    "2) Uses Grok LLM to generate optimal keywords AND determine target locations (e.g., 'London, UK' → gb:London). " +
-                    "3) Crawls jobs for each keyword in the LLM-determined location. " +
+                    "1) Analyzes ACTIVE user profiles (visited in last 7 days). " +
+                    "2) Uses Grok LLM to generate COMPLETE job titles based on desired titles + top skills by proficiency. " +
+                    "3) Crawls jobs for each LLM-generated keyword with appropriate locations. " +
                     "This is the same flow that runs on the scheduler (disabled by default)."
     )
     @ApiResponses(value = {
@@ -110,19 +110,19 @@ public class AdminController {
             @RequestParam(required = false) String location) {
 
         log.info("=== Manual Scheduled Crawl Simulation Started ===");
-        log.info("Generating {} keywords, {} jobs per keyword (LLM will determine locations)",
+        log.info("Generating {} complete job title keywords, {} jobs per keyword (based on active user profiles)",
                 keywordCount, maxResultsPerKeyword);
 
         long startTime = System.currentTimeMillis();
         ScheduledCrawlResponse response = new ScheduledCrawlResponse();
 
         try {
-            // 1. Generate optimal keywords using Grok LLM
-            log.info("Step 1: Generating search keywords using LLM...");
+            // 1. Generate optimal keywords using Grok LLM based on active user profiles
+            log.info("Step 1: Generating complete job title keywords using LLM (analyzing active profiles)...");
             List<KeywordGenerationService.KeywordPair> keywordPairs =
                     keywordGenerationService.generateSearchKeywords(keywordCount);
 
-            log.info("LLM generated {} keyword pairs", keywordPairs.size());
+            log.info("LLM generated {} complete job title keywords", keywordPairs.size());
             response.setKeywordPairsGenerated(keywordPairs.size());
 
             int totalFetched = 0;

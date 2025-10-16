@@ -1,37 +1,51 @@
-You are a job board keyword optimization expert. Your task is to generate diverse BASE job search keywords for crawling job listings.
+You are a job board keyword optimization expert. Your task is to generate GENERIC, BROAD job search keywords based on ACTUAL USER DEMAND.
 
-**Current Database State:**
-- Total job listings: {totalJobs}
-- Total user profiles: {totalProfiles}
-{locationContext}
+**Active User Profiles (Last 7 Days):**
+- Active profiles: {activeProfileCount}
+- Desired job titles: {desiredJobTitles}
+- Top 5 skills: {topSkillsByProficiency}
+- User locations: {locationContext}
 
 **Objective:**
-Generate {count} diverse BASE job roles that will be automatically expanded with experience level variations.
+Generate {count} GENERIC, BROAD job titles that maximize job board search results. Keep titles simple and universally recognized.
 
-**What Happens Next:**
-Each keyword you provide will be automatically expanded to 3 variations:
-- Base role (e.g., "software engineer")
-- Senior level (e.g., "senior software engineer")
-- Lead level (e.g., "lead software engineer")
+**CRITICAL RULES - Generic Job Titles:**
+- Generate SIMPLE, BROAD job titles (2-4 words maximum)
+- Use GENERIC industry-standard terms that recruiters commonly use
+- Avoid overly specific combinations (NO "Senior Backend Java Microservices Engineer")
+- Avoid seniority levels unless explicitly mentioned in desired job titles
+- Prefer single-technology focus over multi-technology combinations
 
-So if you generate "software engineer", the system will crawl for:
-1. "software engineer" (mid-level/general)
-2. "senior software engineer" (senior level)
-3. "lead software engineer" (lead/principal level)
+**Examples of GOOD (Generic) outputs:**
+  ✓ "Java Developer"
+  ✓ "Software Engineer"
+  ✓ "Cloud Engineer"
+  ✓ "Python Developer"
+  ✓ "DevOps Engineer"
+  ✓ "Full Stack Developer"
+
+**Examples of BAD (Too Specific) outputs:**
+  ✗ "Senior Backend Engineer Java Microservices"
+  ✗ "Full Stack React Node Developer"
+  ✗ "Cloud Solutions Architect AWS Kubernetes"
+  ✗ "Principal Software Engineer Java Spring"
 
 **Your Task:**
-Generate {count} BASE roles covering:
-1. Wide range of tech domains (software, data, devops, product, design, QA, security)
-2. Different specializations (backend, frontend, full-stack, ML, cloud, mobile)
-3. Specific technologies (Java, Python, React, AWS, Kubernetes, etc.)
-4. Emerging roles (AI engineer, ML ops, platform engineer)
+Analyze user demand and generate {count} GENERIC job titles that:
+1. Match users' desired job titles but keep them BROAD and GENERIC
+2. Focus on ONE primary technology per title (e.g., "Java Developer", not "Java Spring Developer")
+3. Avoid seniority levels (Senior/Lead/Junior) unless users explicitly requested them
+4. Use industry-standard role names that appear frequently on job boards
+5. Maximize search result volume by being LESS specific
 
 **Format (JSON array with location analysis):**
 Output ONLY valid JSON, no markdown, no explanations:
 [
-  {"keyword": "software engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "London"},
-  {"keyword": "data engineer", "exclude": [], "targetCountryCode": "us", "targetCityRegion": "New York"},
-  {"keyword": "react developer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "Manchester"}
+  {"keyword": "Java Developer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "London"},
+  {"keyword": "Software Engineer", "exclude": [], "targetCountryCode": "us", "targetCityRegion": "New York"},
+  {"keyword": "Cloud Engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "London"},
+  {"keyword": "Python Developer", "exclude": [], "targetCountryCode": "us", "targetCityRegion": "San Francisco"},
+  {"keyword": "DevOps Engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "Manchester"}
 ]
 
 **Location Mapping Rules:**
@@ -46,12 +60,14 @@ Output ONLY valid JSON, no markdown, no explanations:
 - Distribute keywords across different cities if profiles show multiple locations
 
 **Requirements:**
-- Each keyword should be 2-3 words max (e.g., "python developer", "devops engineer")
-- DO NOT include "senior" or "lead" prefixes - we'll add those automatically
+- Generate GENERIC job titles (2-4 words max): "Java Developer", "Software Engineer", "Cloud Engineer"
+- Avoid seniority levels unless explicitly in user's desired job titles
 - Use EMPTY exclude arrays - we handle filtering in post-processing
-- Focus on technical job titles that recruiters use
-- Use specific technologies when possible (Java, Python, React, AWS, etc.)
-- Prioritize high-demand tech roles
+- Focus on BROAD technical job titles that maximize search results
+- Use SINGLE technology per title (Java, Python, React, AWS, etc.) - NO combinations
+- Prioritize GENERIC versions of users' desired job titles
 - Analyze profile locations to determine appropriate country codes and cities
+- If no active profiles exist, generate diverse generic tech roles as fallback
+- Think like a job board search optimizer: BROADER = MORE RESULTS
 
-Generate {count} BASE keyword combinations with location analysis now:
+Generate {count} GENERIC job title keywords with location analysis now:

@@ -182,7 +182,8 @@ export interface JobMatchResult {
   weightedSkillScore: number;
   isSaved: boolean;
   isApplied: boolean;
-  appliedAt?: string;
+  isRedflag: boolean;
+  flaggedAt?: string;
 }
 
 export interface JobMatchingResultsResponse {

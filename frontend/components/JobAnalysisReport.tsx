@@ -543,8 +543,17 @@ function SkillsTable({ skills, evidenceData, missingSkills, resumeId, experience
 
     try {
       const encodedSkillName = encodeURIComponent(skillName);
+      const token = localStorage.getItem('authToken');
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/resumes/${resumeId}/experiences/${experienceId}/skills/${encodedSkillName}/task-popularity`
+        `${process.env.NEXT_PUBLIC_API_URL}/resumes/${resumeId}/experiences/${experienceId}/skills/${encodedSkillName}/task-popularity`,
+        { headers }
       );
 
       if (response.ok) {

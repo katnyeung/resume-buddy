@@ -29,6 +29,9 @@ public class JobSearchProfile {
     @Column(name = "id", length = 36)
     private String id;
 
+    @Column(name = "user_id", length = 36, nullable = false)
+    private String userId; // Foreign key to users table in resume-buddy-api
+
     @Column(name = "resume_id", length = 36, nullable = false)
     private String resumeId;
 
@@ -72,6 +75,13 @@ public class JobSearchProfile {
 
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
+
+    /**
+     * Last visit date - tracks when user visited job-search page or clicked "Refresh Results"
+     * Used to determine active profiles for LLM keyword generation (filter by last 7 days)
+     */
+    @Column(name = "last_visit_date")
+    private LocalDateTime lastVisitDate;
 
     @PreUpdate
     protected void onUpdate() {

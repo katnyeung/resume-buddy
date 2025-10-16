@@ -37,5 +37,6 @@ public class JobMatchResponse {
     // User actions
     private Boolean isSaved;        // User bookmarked this match
     private Boolean isApplied;      // User applied to this job
-    private LocalDateTime appliedAt; // When user marked as applied
+    private Boolean isRedflag;      // User marked as not interested/expired
+    private LocalDateTime flaggedAt; // When user took any action (saved/applied/redflag)
 }

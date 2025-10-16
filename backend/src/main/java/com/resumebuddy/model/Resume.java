@@ -56,6 +56,9 @@ public class Resume {
     @Column(name = "ats_analyzed_at")
     private LocalDateTime atsAnalyzedAt; // Timestamp when ATS analysis was performed
 
+    @Column(name = "user_id", length = 36)
+    private String userId; // Foreign key to users table (nullable for backward compatibility)
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
