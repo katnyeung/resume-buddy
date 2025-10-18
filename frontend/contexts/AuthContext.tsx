@@ -28,10 +28,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // Load token from localStorage on mount
+  // Load token and user from localStorage on mount
   useEffect(() => {
     const storedToken = localStorage.getItem('authToken');
-    if (storedToken) {
+    const storedUser = localStorage.getItem('user');
+
+    if (storedToken && storedUser) {
+      setToken(storedToken);
+      try {
+        const userData = JSON.parse(storedUser);
+        setUser(userData);
+        setLoading(false);
+      } catch (error) {
+        console.error('Failed to parse stored user data:', error);
+        localStorage.removeItem('user');
+        fetchCurrentUser(storedToken);
+      }
+    } else if (storedToken) {
       setToken(storedToken);
       fetchCurrentUser(storedToken);
     } else {
@@ -50,14 +63,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (response.ok) {
         const userData = await response.json();
         setUser(userData);
+        // Store user data in localStorage for future use
+        localStorage.setItem('user', JSON.stringify(userData));
       } else {
         // Token invalid, clear it
         localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
         setToken(null);
       }
     } catch (error) {
       console.error('Failed to fetch current user:', error);
       localStorage.removeItem('authToken');
+      localStorage.removeItem('user');
       setToken(null);
     } finally {
       setLoading(false);
@@ -79,14 +96,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const data = await response.json();
-    localStorage.setItem('authToken', data.token);
-    setToken(data.token);
-    setUser({
+    const userData = {
       id: data.userId,
       email: data.email,
       fullName: data.fullName,
       authProvider: 'EMAIL'
-    });
+    };
+
+    localStorage.setItem('authToken', data.token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setToken(data.token);
+    setUser(userData);
   };
 
   const login = async (email: string, password: string) => {
@@ -104,18 +124,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     const data = await response.json();
-    localStorage.setItem('authToken', data.token);
-    setToken(data.token);
-    setUser({
+    const userData = {
       id: data.userId,
       email: data.email,
       fullName: data.fullName,
       authProvider: 'EMAIL'
-    });
+    };
+
+    localStorage.setItem('authToken', data.token);
+    localStorage.setItem('user', JSON.stringify(userData));
+    setToken(data.token);
+    setUser(userData);
   };
 
   const logout = () => {
     localStorage.removeItem('authToken');
+    localStorage.removeItem('user');
     setToken(null);
     setUser(null);
     router.push('/login');
@@ -123,6 +147,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const setAuthData = (authToken: string, userData: User) => {
     localStorage.setItem('authToken', authToken);
+    localStorage.setItem('user', JSON.stringify(userData));
     setToken(authToken);
     setUser(userData);
   };

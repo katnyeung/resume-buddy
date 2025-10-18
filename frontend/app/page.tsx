@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import ResumeList from '@/components/ResumeList';
+import CreditBalance from '@/components/CreditBalance';
 import { listResumes, deleteResume } from '@/lib/api';
+import { getCurrentUserId } from '@/lib/userUtils';
 import { Resume } from '@/lib/types';
 import Link from 'next/link';
 
@@ -28,7 +30,13 @@ export default function HomePage() {
       setLoading(true);
       setError(null);
       const data = await listResumes();
-      setResumes(data);
+      // Sort by most recent first (using updatedAt or createdAt)
+      const sortedData = data.sort((a, b) => {
+        const dateA = new Date(a.updatedAt || a.createdAt).getTime();
+        const dateB = new Date(b.updatedAt || b.createdAt).getTime();
+        return dateB - dateA; // Descending order (newest first)
+      });
+      setResumes(sortedData);
     } catch (err) {
       console.error('Failed to load resumes:', err);
       setError('Failed to load resumes');
@@ -142,12 +150,15 @@ export default function HomePage() {
               Welcome back, {user?.fullName}
             </p>
           </div>
-          <button
-            onClick={logout}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-          >
-            Sign Out
-          </button>
+          <div className="flex items-center gap-4">
+            <CreditBalance userId={getCurrentUserId()} compact={true} />
+            <button
+              onClick={logout}
+              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
 
         {/* Actions */}

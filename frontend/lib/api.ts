@@ -119,9 +119,20 @@ export const getEditorState = async (id: string): Promise<string | null> => {
   return response.data;
 };
 
-// AI Analysis
+// AI Analysis (Synchronous - Legacy)
 export const analyzeResume = async (id: string): Promise<any> => {
   const response = await apiClient.post(`/resumes/${id}/analyze`);
+  return response.data;
+};
+
+// AI Analysis (Async with Job Queue)
+export const analyzeResumeAsync = async (id: string, userId: string = 'default_user', priority?: number): Promise<any> => {
+  const response = await apiClient.post(`/jobs/resumes/${id}/analyze/async`, null, {
+    params: { priority },
+    headers: {
+      'X-User-Id': userId
+    }
+  });
   return response.data;
 };
 
@@ -144,9 +155,20 @@ export const checkAnalysisExists = async (id: string): Promise<boolean> => {
   return response.data;
 };
 
-// Job Analysis
+// Job Analysis (Synchronous - Legacy)
 export const analyzeJob = async (resumeId: string, experienceId: string): Promise<any> => {
   const response = await apiClient.post(`/resumes/${resumeId}/experiences/${experienceId}/analyze`);
+  return response.data;
+};
+
+// Job Analysis (Async with Job Queue)
+export const analyzeJobAsync = async (resumeId: string, experienceId: string, userId: string = 'default_user', priority?: number): Promise<any> => {
+  const response = await apiClient.post(`/jobs/resumes/${resumeId}/experiences/${experienceId}/analyze/async`, null, {
+    params: { priority },
+    headers: {
+      'X-User-Id': userId
+    }
+  });
   return response.data;
 };
 
@@ -256,8 +278,8 @@ export const updateProfileMetadata = async (profileId: string, location: string,
   return response.data;
 };
 
-export const getMatchingResults = async (profileId: string, topK: number = 20, refresh: boolean = false): Promise<any> => {
-  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/matching-results?topK=${topK}&refresh=${refresh}`);
+export const getMatchingResults = async (profileId: string, topK: number = 20, refresh: boolean = false, maxDaysOld: number = 30): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/matching-results?topK=${topK}&refresh=${refresh}&maxDaysOld=${maxDaysOld}`);
   return response.data;
 };
 
@@ -282,5 +304,74 @@ export const toggleMatchRedflag = async (matchId: string, redflag: boolean): Pro
 
 export const recordProfileVisit = async (profileId: string): Promise<any> => {
   const response = await jobSearchClient.patch(`/job-search/profiles/${profileId}/visit`);
+  return response.data;
+};
+
+// Job Queue Management
+export const getJobStatus = async (jobId: string): Promise<any> => {
+  const response = await apiClient.get(`/jobs/${jobId}/status`);
+  return response.data;
+};
+
+export const pollJobUntilComplete = async (
+  jobId: string,
+  onProgress?: (status: any) => void,
+  pollIntervalMs: number = 3000,
+  maxWaitMs: number = 300000 // 5 minutes
+): Promise<any> => {
+  const startTime = Date.now();
+
+  while (true) {
+    const status = await getJobStatus(jobId);
+
+    if (onProgress) {
+      onProgress(status);
+    }
+
+    if (status.status === 'COMPLETED') {
+      return status;
+    }
+
+    if (status.status === 'FAILED') {
+      throw new Error(status.errorMessage || 'Job failed');
+    }
+
+    if (status.status === 'CANCELLED') {
+      throw new Error('Job was cancelled');
+    }
+
+    // Check timeout
+    if (Date.now() - startTime > maxWaitMs) {
+      throw new Error('Job polling timeout exceeded');
+    }
+
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+};
+
+// User Credit Management
+export const getUserCredits = async (userId: string = 'default_user'): Promise<any> => {
+  const response = await apiClient.get(`/users/${userId}/credits`);
+  return response.data;
+};
+
+export const getCreditTransactions = async (userId: string = 'default_user'): Promise<any[]> => {
+  const response = await apiClient.get(`/users/${userId}/credits/transactions`);
+  return response.data;
+};
+
+export const grantCredits = async (userId: string, amount: number, reason: string): Promise<any> => {
+  const response = await apiClient.post(`/users/admin/credits/grant`, {
+    userId,
+    amount,
+    reason
+  });
+  return response.data;
+};
+
+// Job Crawl Activity History
+export const getCrawlActivityHistory = async (limit: number = 5): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/admin/crawl/history?limit=${limit}`);
   return response.data;
 };

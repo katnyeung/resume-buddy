@@ -141,11 +141,13 @@ public class RedisVectorService {
                 return Collections.emptyList();
             }
 
-            // Build KNN query
+            // Build KNN query with explicit LIMIT
+            // Redis default LIMIT is 10, so we must explicitly set it to topK
             Query query = new Query("*=>[KNN " + topK + " @vector $vector AS score]")
                     .addParam("vector", vectorBytes)
                     .returnFields("key", "score")
                     .setSortBy("score", true)
+                    .limit(0, topK)  // CRITICAL: Set explicit LIMIT to override Redis default of 10
                     .dialect(2);
 
             SearchResult result = jedis.ftSearch(VECTOR_INDEX, query);
@@ -157,6 +159,7 @@ public class RedisVectorService {
                 results.add(new VectorSearchResult(key, score));
             }
 
+            log.debug("Vector search returned {} results (requested: {})", results.size(), topK);
             return results;
 
         } catch (Exception e) {

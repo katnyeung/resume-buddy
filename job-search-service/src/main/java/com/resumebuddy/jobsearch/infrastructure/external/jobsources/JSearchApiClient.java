@@ -48,6 +48,10 @@ public class JSearchApiClient implements JobSourceApiClient {
             Integer page = (Integer) params.getOrDefault("page", 1);
             Integer maxResults = (Integer) params.getOrDefault("maxResults", 50);
             Integer maxDaysOld = (Integer) params.getOrDefault("maxDaysOld", 7);
+            Boolean remoteJobsOnly = (Boolean) params.get("remoteJobsOnly");
+            String employmentTypes = (String) params.get("employmentTypes");
+            String jobRequirements = (String) params.get("jobRequirements");
+            Integer radius = (Integer) params.get("radius");
 
             // Build query string: JSearch uses natural language queries
             // "java developer in london" vs separate keywords + location
@@ -59,8 +63,8 @@ public class JSearchApiClient implements JobSourceApiClient {
             // Map maxDaysOld to JSearch date_posted parameter
             String datePosted = mapMaxDaysOldToDatePosted(maxDaysOld);
 
-            log.info("Fetching jobs from JSearch - query: {}, country: {}, page: {}, date_posted: {}",
-                    query, country, page, datePosted);
+            log.info("Fetching jobs from JSearch - query: {}, country: {}, page: {}, date_posted: {}, remote: {}, types: {}",
+                    query, country, page, datePosted, remoteJobsOnly, employmentTypes);
 
             // Build URL: https://jsearch.p.rapidapi.com/search
             UriComponentsBuilder urlBuilder = UriComponentsBuilder.fromHttpUrl(baseUrl)
@@ -74,6 +78,27 @@ public class JSearchApiClient implements JobSourceApiClient {
             }
 
             urlBuilder.queryParam("date_posted", datePosted);
+
+            // Enrichment parameters for better search results
+            if (remoteJobsOnly != null && remoteJobsOnly) {
+                urlBuilder.queryParam("remote_jobs_only", true);
+                log.debug("Filtering for remote jobs only");
+            }
+
+            if (employmentTypes != null && !employmentTypes.isEmpty()) {
+                urlBuilder.queryParam("employment_types", employmentTypes);
+                log.debug("Filtering employment types: {}", employmentTypes);
+            }
+
+            if (jobRequirements != null && !jobRequirements.isEmpty()) {
+                urlBuilder.queryParam("job_requirements", jobRequirements);
+                log.debug("Filtering job requirements: {}", jobRequirements);
+            }
+
+            if (radius != null && radius > 0) {
+                urlBuilder.queryParam("radius", radius);
+                log.debug("Search radius: {} km", radius);
+            }
 
             String finalUrl = urlBuilder.build().toUriString();
             log.debug("JSearch API URL: {}", finalUrl);

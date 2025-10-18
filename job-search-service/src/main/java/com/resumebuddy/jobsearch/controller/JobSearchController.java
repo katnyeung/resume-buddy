@@ -398,10 +398,12 @@ public class JobSearchController {
     public ResponseEntity<List<JobMatchResponse>> searchMatchingJobs(
             @Parameter(description = "Profile ID") @PathVariable String id,
             @Parameter(description = "Number of top matches to return (default: 20)")
-            @RequestParam(defaultValue = "20") int topK) {
+            @RequestParam(defaultValue = "20") int topK,
+            @Parameter(description = "Only include jobs posted within last N days (0 = no limit, default: 30)")
+            @RequestParam(defaultValue = "30") int maxDaysOld) {
 
-        log.info("Searching for top {} matching jobs for profile: {}", topK, id);
-        jobMatchingService.searchMatchingJobs(id, topK);
+        log.info("Searching for top {} matching jobs for profile: {} (maxDaysOld: {})", topK, id, maxDaysOld);
+        jobMatchingService.searchMatchingJobs(id, topK, maxDaysOld);
 
         // Return enriched matches
         List<JobMatchingApplicationService.JobMatchWithListing> enrichedMatches =
@@ -551,9 +553,12 @@ public class JobSearchController {
             @Parameter(description = "Number of top matches to return (default: 20)")
             @RequestParam(defaultValue = "20") int topK,
             @Parameter(description = "Force refresh of cached matches (default: false)")
-            @RequestParam(defaultValue = "false") boolean refresh) {
+            @RequestParam(defaultValue = "false") boolean refresh,
+            @Parameter(description = "Only include jobs posted within last N days (0 = no limit, default: 30)")
+            @RequestParam(defaultValue = "30") int maxDaysOld) {
 
-        log.info("Getting matching results for profile: {} (topK: {}, refresh: {})", id, topK, refresh);
+        log.info("Getting matching results for profile: {} (topK: {}, refresh: {}, maxDaysOld: {})",
+                id, topK, refresh, maxDaysOld);
 
         // Record visit (updates last_visit_date for keyword generation tracking)
         jobSearchService.recordVisit(id);
@@ -561,9 +566,9 @@ public class JobSearchController {
         // Get profile
         JobSearchProfile profile = jobSearchService.getProfile(id);
 
-        // Get or create matching results (with optional refresh)
+        // Get or create matching results (with optional refresh and date filter)
         List<JobMatchingApplicationService.JobMatchWithListing> enrichedMatches =
-                jobMatchingService.getOrCreateMatchingResults(id, topK, refresh);
+                jobMatchingService.getOrCreateMatchingResults(id, topK, refresh, maxDaysOld);
 
         // Build response
         List<JobMatchResponse> matchResponses = new ArrayList<>();

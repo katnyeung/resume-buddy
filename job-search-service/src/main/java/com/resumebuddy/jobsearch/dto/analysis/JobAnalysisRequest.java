@@ -42,10 +42,11 @@ public class JobAnalysisRequest {
     private Integer maxDaysOld;
 
     @Schema(
-            description = "Maximum total number of jobs to analyze (useful for testing, optional)",
-            example = "10"
+            description = "Maximum total number of jobs to analyze (default: 1000)",
+            example = "100",
+            defaultValue = "1000"
     )
     @Min(1)
     @Max(10000)
-    private Integer maxJobs;
+    private Integer maxJobs = 1000;
 }

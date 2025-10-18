@@ -23,6 +23,15 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Collapse state with localStorage persistence
+  const [isExpanded, setIsExpanded] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('jobSearchProfile_expanded');
+      return saved !== null ? JSON.parse(saved) : true; // Default to expanded
+    }
+    return true;
+  });
+
   // Form fields
   const [desiredJobTitle, setDesiredJobTitle] = useState<string>('');
   const [location, setLocation] = useState<string>('');
@@ -30,6 +39,15 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
   const [skills, setSkills] = useState<any[]>([]);
   const [newSkillName, setNewSkillName] = useState<string>('');
   const [isAddingSkill, setIsAddingSkill] = useState(false);
+
+  // Save collapse state to localStorage
+  const toggleExpanded = () => {
+    const newState = !isExpanded;
+    setIsExpanded(newState);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('jobSearchProfile_expanded', JSON.stringify(newState));
+    }
+  };
 
   // Load profile on mount
   useEffect(() => {
@@ -131,21 +149,42 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
   }
 
   return (
-    <div className="bg-gradient-to-r from-green-50 to-teal-50 border border-green-300 rounded-lg p-6 shadow-lg">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+    <div className="bg-gradient-to-r from-green-50 to-teal-50 border border-green-300 rounded-lg shadow-lg">
+      {/* Collapsible Header */}
+      <button
+        onClick={toggleExpanded}
+        className="w-full p-6 flex items-center justify-between hover:bg-green-100/50 transition-colors rounded-t-lg"
+      >
         <div className="flex items-center gap-2">
           <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
           </svg>
           <h3 className="text-xl font-bold text-gray-800">Job Search Profile</h3>
+          {!isExpanded && desiredJobTitle && (
+            <span className="text-sm text-gray-600 ml-2">
+              - {desiredJobTitle} {location && `in ${location}`}
+            </span>
+          )}
         </div>
-        <span className="text-xs bg-green-200 text-green-800 px-3 py-1 rounded-full">
-          ID: {currentProfile.id}
-        </span>
-      </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs bg-green-200 text-green-800 px-3 py-1 rounded-full">
+            ID: {currentProfile.id}
+          </span>
+          <svg
+            className={`h-5 w-5 text-gray-600 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+          </svg>
+        </div>
+      </button>
 
-      {/* Row 1: Desired Job Title (Full Width) */}
+      {/* Collapsible Content */}
+      {isExpanded && (
+        <div className="px-6 pb-6">
+          {/* Row 1: Desired Job Title (Full Width) */}
       <div className="mb-6">
         <label className="block text-sm font-semibold text-gray-700 mb-2">
           <svg className="inline h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -456,6 +495,8 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
           </button>
         </div>
       </div>
+        </div>
+      )}
     </div>
   );
 }

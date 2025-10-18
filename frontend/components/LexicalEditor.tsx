@@ -17,12 +17,14 @@ import { TRANSFORMERS } from '@lexical/markdown';
 import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import { getResumeLines, saveEditorState, getEditorState, analyzeResume, getResume, getStructuredAnalysis, analyzeJob } from '@/lib/api';
+import { getResumeLines, saveEditorState, getEditorState, analyzeResume, analyzeResumeAsync, getResume, getStructuredAnalysis, analyzeJob, analyzeJobAsync } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
+import { getCurrentUserId } from '@/lib/userUtils';
 import { ResumeLine, ResumeAnalysisDto, ATSReport } from '@/lib/types';
 import AnalysisOverlay from './AnalysisOverlay';
 import AnalysisSummary from './AnalysisSummary';
 import ATSQualityReport from './ATSQualityReport';
+import JobStatusIndicator from './JobStatusIndicator';
 
 interface LexicalEditorProps {
   resumeId: string;
@@ -41,6 +43,8 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
   const [structuredAnalysis, setStructuredAnalysis] = useState<ResumeAnalysisDto | null>(null);
   const [analyzingJob, setAnalyzingJob] = useState(false);
   const [atsReport, setATSReport] = useState<ATSReport | null>(null);
+  const [resumeAnalysisJobId, setResumeAnalysisJobId] = useState<string | null>(null);
+  const [jobAnalysisJobId, setJobAnalysisJobId] = useState<string | null>(null);
 
   // Load editor state or resume lines on mount
   useEffect(() => {
@@ -155,36 +159,23 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
 
     try {
       setAnalyzing(true);
-      setAnalysisStatus('Analyzing with AI...');
+      setAnalysisStatus('Queueing analysis job...');
 
-      // Call analysis endpoint
-      const result = await analyzeResume(resumeId);
+      // Call async analysis endpoint (uses job queue)
+      const response = await analyzeResumeAsync(resumeId, getCurrentUserId());
+      setResumeAnalysisJobId(response.jobId);
+      setAnalysisStatus(`Analysis queued (Position: ${response.queuePosition})`);
 
-      setAnalysisStatus(`Analysis complete! Analyzed ${result.analyzedLines} lines`);
+      console.log('Analysis job queued:', response);
 
-      // Reload lines to get updated analysis data
-      const updatedLines = await getResumeLines(resumeId);
-      console.log('Analysis result:', result);
-      console.log('Updated lines with analysis:', updatedLines);
-
-      // Store analyzed lines for overlay display
-      setAnalyzedLines(updatedLines);
-
-      // Load structured analysis summary
-      const analysis = await getStructuredAnalysis(resumeId);
-      setStructuredAnalysis(analysis);
-
-      // Store ATS report
-      if (result.atsReport) {
-        setATSReport(result.atsReport);
-      }
-
-      setTimeout(() => setAnalysisStatus(''), 5000);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Analysis error:', error);
-      setAnalysisStatus('Error during analysis');
-      setTimeout(() => setAnalysisStatus(''), 3000);
-    } finally {
+      if (error.response?.status === 402) {
+        setAnalysisStatus('Insufficient credits! Need 100 credits for resume analysis.');
+      } else {
+        setAnalysisStatus('Error queueing analysis: ' + (error.message || 'Unknown error'));
+      }
+      setTimeout(() => setAnalysisStatus(''), 5000);
       setAnalyzing(false);
     }
   };
@@ -195,21 +186,23 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
 
     try {
       setAnalyzingJob(true);
-      setSaveStatus('Analyzing job experience...');
+      setSaveStatus('Queueing job analysis...');
 
-      await analyzeJob(resumeId, experienceId);
-      setSaveStatus('Job analysis completed!');
-      setTimeout(() => setSaveStatus(''), 3000);
+      // Call async job analysis endpoint (uses job queue)
+      const response = await analyzeJobAsync(resumeId, experienceId, getCurrentUserId());
+      setJobAnalysisJobId(response.jobId);
+      setSaveStatus(`Job analysis queued (Job ID: ${response.jobId})`);
 
-      // Reload structured analysis to update isAnalyzed flags
-      const updatedAnalysis = await getStructuredAnalysis(resumeId);
-      setStructuredAnalysis(updatedAnalysis);
+      console.log('Job analysis queued:', response);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Job analysis error:', error);
-      setSaveStatus('Error analyzing job');
-      setTimeout(() => setSaveStatus(''), 3000);
-    } finally {
+      if (error.response?.status === 402) {
+        setSaveStatus('Insufficient credits! Need 50 credits for job analysis.');
+      } else {
+        setSaveStatus('Error queueing job analysis');
+      }
+      setTimeout(() => setSaveStatus(''), 5000);
       setAnalyzingJob(false);
     }
   };
@@ -271,6 +264,74 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
 
   return (
     <div className="w-full max-w-5xl mx-auto">
+      {/* Resume Analysis Job Status Indicator */}
+      {resumeAnalysisJobId && (
+        <div className="mb-4">
+          <JobStatusIndicator
+            jobId={resumeAnalysisJobId}
+            onComplete={async () => {
+              console.log('Resume analysis complete!');
+              setResumeAnalysisJobId(null);
+              setAnalyzing(false);
+              setAnalysisStatus('');
+
+              // Reload analysis data
+              const updatedLines = await getResumeLines(resumeId);
+              setAnalyzedLines(updatedLines);
+
+              const analysis = await getStructuredAnalysis(resumeId);
+              setStructuredAnalysis(analysis);
+
+              // Reload resume to get ATS report
+              const resume = await getResume(resumeId);
+              if (resume.atsReport) {
+                try {
+                  const parsedReport = JSON.parse(resume.atsReport);
+                  setATSReport(parsedReport);
+                } catch (e) {
+                  console.error('Failed to parse ATS report', e);
+                }
+              }
+            }}
+            onError={(error) => {
+              console.error('Resume analysis failed:', error);
+              setResumeAnalysisJobId(null);
+              setAnalyzing(false);
+              setAnalysisStatus('');
+              alert('Analysis failed: ' + error);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Job Analysis Job Status Indicator */}
+      {jobAnalysisJobId && (
+        <div className="mb-4">
+          <JobStatusIndicator
+            jobId={jobAnalysisJobId}
+            onComplete={async () => {
+              console.log('Job analysis complete!');
+              setJobAnalysisJobId(null);
+              setAnalyzingJob(false);
+              setSaveStatus('Job analysis completed!');
+
+              // Reload structured analysis to update isAnalyzed flags
+              const updatedAnalysis = await getStructuredAnalysis(resumeId);
+              setStructuredAnalysis(updatedAnalysis);
+
+              setTimeout(() => setSaveStatus(''), 3000);
+            }}
+            onError={(error) => {
+              console.error('Job analysis failed:', error);
+              setJobAnalysisJobId(null);
+              setAnalyzingJob(false);
+              setSaveStatus('');
+              alert('Job analysis failed: ' + error);
+            }}
+          />
+        </div>
+      )}
+
       {/* ATS Analysis Summary - displayed at the very top when available */}
       {structuredAnalysis && (
         <div className="mb-4">

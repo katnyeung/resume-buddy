@@ -55,14 +55,14 @@ public class JobCrawlScheduler {
             int totalSaved = 0;
 
             // 2. Crawl jobs for each keyword pair (with LLM-generated locations)
-            // NOTE: Any Adzuna API error will throw and stop the entire crawl
+            // NOTE: Any Reed API error will throw and stop the entire crawl
             for (KeywordGenerationService.KeywordPair pair : keywordPairs) {
                 log.info("Crawling jobs for: '{}' in {}/{} (excluding: {})",
                         pair.getKeyword(), pair.getTargetCountryCode(),
                         pair.getTargetCityRegion(), pair.getExclude());
 
                 JobCrawlRequest request = new JobCrawlRequest();
-                request.setSource("ADZUNA");
+                request.setSource("REED");
                 request.setKeywords(pair.getKeyword());
                 request.setLocation(pair.getTargetCountryCode() + ":" + pair.getTargetCityRegion()); // Format: "gb:London"
                 request.setMaxResults(50); // 50 jobs per keyword
@@ -70,7 +70,7 @@ public class JobCrawlScheduler {
                 request.setExcludeKeywords(pair.getExclude());
                 request.setMaxDaysOld(maxDaysOld); // Configured in application.yml
 
-                // This will throw immediately on any Adzuna API error, stopping the crawl
+                // This will throw immediately on any Reed API error, stopping the crawl
                 JobCrawlResponse response = jobCrawlingService.crawlJobs(request);
 
                 totalFetched += response.getTotalFetched();

@@ -1,6 +1,7 @@
 package com.resumebuddy.jobsearch.controller;
 
 import com.resumebuddy.jobsearch.application.service.JobCrawlingApplicationService;
+import com.resumebuddy.jobsearch.domain.CrawlActivityLog;
 import com.resumebuddy.jobsearch.domain.JobListing;
 import com.resumebuddy.jobsearch.domain.JobListingLine;
 import com.resumebuddy.jobsearch.domain.JobSearchProfile;
@@ -10,6 +11,7 @@ import com.resumebuddy.jobsearch.dto.analysis.JobAnalysisRequest;
 import com.resumebuddy.jobsearch.dto.analysis.JobAnalysisResponse;
 import com.resumebuddy.jobsearch.dto.crawl.JobCrawlRequest;
 import com.resumebuddy.jobsearch.dto.crawl.JobCrawlResponse;
+import com.resumebuddy.jobsearch.repository.CrawlActivityLogRepository;
 import com.resumebuddy.jobsearch.repository.JobListingLineRepository;
 import com.resumebuddy.jobsearch.repository.JobListingRepository;
 import com.resumebuddy.jobsearch.repository.JobSearchProfileRepository;
@@ -30,6 +32,7 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -58,6 +61,7 @@ public class AdminController {
     private final VectorEmbeddingService vectorEmbeddingService;
     private final JobDescriptionParser jobDescriptionParser;
     private final JobAnalysisService jobAnalysisService;
+    private final CrawlActivityLogRepository crawlActivityLogRepository;
 
     @Value("${app.job-crawling.max-days-old:7}")
     private int maxDaysOld;
@@ -84,6 +88,173 @@ public class AdminController {
 
         JobCrawlResponse response = jobCrawlingService.crawlJobs(request);
 
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Crawl Reed.co.uk jobs with sensible defaults
+     * POST /api/job-search/admin/crawl/reed
+     */
+    @Operation(
+            summary = "Crawl Reed.co.uk jobs (UK, full descriptions)",
+            description = "Fetches UK tech jobs from Reed.co.uk with full descriptions via details API. " +
+                    "Default parameters optimized for UK job search. Full descriptions take ~30-40 seconds for 50 jobs."
+    )
+    @PostMapping("/crawl/reed")
+    public ResponseEntity<JobCrawlResponse> crawlReed(
+            @Parameter(description = "Job keywords/title") @RequestParam(defaultValue = "software engineer") String keywords,
+            @Parameter(description = "UK location") @RequestParam(defaultValue = "London") String location,
+            @Parameter(description = "Max jobs to fetch") @RequestParam(defaultValue = "50") Integer maxResults,
+            @Parameter(description = "Jobs from last N days") @RequestParam(defaultValue = "7") Integer maxDaysOld) {
+
+        log.info("Reed crawl triggered - keywords: {}, location: {}, maxResults: {}", keywords, location, maxResults);
+
+        JobCrawlRequest request = new JobCrawlRequest();
+        request.setSource("REED");
+        request.setKeywords(keywords);
+        request.setLocation(location);
+        request.setMaxResults(maxResults);
+        request.setMaxDaysOld(maxDaysOld);
+        request.setPage(1);
+
+        JobCrawlResponse response = jobCrawlingService.crawlJobs(request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Crawl DevITJobs.uk RSS feed
+     * POST /api/job-search/admin/crawl/devitjobs
+     */
+    @Operation(
+            summary = "Crawl DevITJobs.uk RSS feed (UK tech, fast)",
+            description = "Fetches UK tech jobs from DevITJobs.uk RSS feed. " +
+                    "Fast crawl (~3 seconds for 50 jobs). Filters by date to avoid old jobs. No API key required."
+    )
+    @PostMapping("/crawl/devitjobs")
+    public ResponseEntity<JobCrawlResponse> crawlDevITJobs(
+            @Parameter(description = "Job keywords (optional)") @RequestParam(required = false) String keywords,
+            @Parameter(description = "Max jobs to fetch") @RequestParam(defaultValue = "50") Integer maxResults,
+            @Parameter(description = "Jobs from last N days") @RequestParam(defaultValue = "30") Integer maxDaysOld) {
+
+        log.info("DevITJobs crawl triggered - keywords: {}, maxResults: {}, maxDaysOld: {}",
+                keywords, maxResults, maxDaysOld);
+
+        JobCrawlRequest request = new JobCrawlRequest();
+        request.setSource("DEVITJOBS");
+        request.setKeywords(keywords);
+        request.setMaxResults(maxResults);
+        request.setMaxDaysOld(maxDaysOld);
+
+        JobCrawlResponse response = jobCrawlingService.crawlJobs(request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Crawl JSearch API (global multi-source)
+     * POST /api/job-search/admin/crawl/jsearch
+     */
+    @Operation(
+            summary = "Crawl JSearch API (global, multi-source aggregator)",
+            description = "Fetches jobs from JSearch (aggregates Google Jobs, Indeed, LinkedIn, etc.). " +
+                    "Global coverage with advanced filters: remote, employment type, experience level. " +
+                    "Fast (~10-15 seconds for 50 jobs)."
+    )
+    @PostMapping("/crawl/jsearch")
+    public ResponseEntity<JobCrawlResponse> crawlJSearch(
+            @Parameter(description = "Job keywords/title") @RequestParam(defaultValue = "software engineer") String keywords,
+            @Parameter(description = "Location (city or country code)") @RequestParam(defaultValue = "London") String location,
+            @Parameter(description = "Max jobs to fetch") @RequestParam(defaultValue = "50") Integer maxResults,
+            @Parameter(description = "Jobs from last N days") @RequestParam(defaultValue = "7") Integer maxDaysOld,
+            @Parameter(description = "Remote jobs only") @RequestParam(required = false) Boolean remoteJobsOnly,
+            @Parameter(description = "Employment types (FULLTIME,PARTTIME,CONTRACTOR,INTERN)") @RequestParam(required = false) String employmentTypes,
+            @Parameter(description = "Job requirements (under_3_years_experience,no_degree,etc)") @RequestParam(required = false) String jobRequirements) {
+
+        log.info("JSearch crawl triggered - keywords: {}, location: {}, remote: {}, types: {}",
+                keywords, location, remoteJobsOnly, employmentTypes);
+
+        JobCrawlRequest request = new JobCrawlRequest();
+        request.setSource("JSEARCH");
+        request.setKeywords(keywords);
+        request.setLocation(location);
+        request.setMaxResults(maxResults);
+        request.setMaxDaysOld(maxDaysOld);
+        request.setPage(1);
+
+        // Add to params map for JSearch-specific parameters
+        java.util.Map<String, Object> params = new java.util.HashMap<>();
+        params.put("keywords", keywords);
+        params.put("location", location);
+        params.put("maxResults", maxResults);
+        params.put("maxDaysOld", maxDaysOld);
+        params.put("page", 1);
+
+        if (remoteJobsOnly != null) {
+            params.put("remoteJobsOnly", remoteJobsOnly);
+        }
+        if (employmentTypes != null) {
+            params.put("employmentTypes", employmentTypes);
+        }
+        if (jobRequirements != null) {
+            params.put("jobRequirements", jobRequirements);
+        }
+
+        // Use service directly with params map for enrichment
+        JobCrawlResponse response = jobCrawlingService.crawlJobsWithParams(request.getSource(), params);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Crawl Fantastic Jobs LinkedIn API
+     * POST /api/job-search/admin/crawl/fantasticjobs
+     */
+    @Operation(
+            summary = "Crawl Fantastic Jobs LinkedIn API (LinkedIn data, verified)",
+            description = "Fetches jobs from LinkedIn via Fantastic Jobs API. " +
+                    "Rich company data (followers, industry, specialties). " +
+                    "Global coverage with seniority level filters. (~2-4 seconds for 50 jobs). " +
+                    "Requires RapidAPI key."
+    )
+    @PostMapping("/crawl/fantasticjobs")
+    public ResponseEntity<JobCrawlResponse> crawlFantasticJobs(
+            @Parameter(description = "Job keywords/title") @RequestParam(defaultValue = "software engineer") String keywords,
+            @Parameter(description = "Location (city or country)") @RequestParam(defaultValue = "London") String location,
+            @Parameter(description = "Max jobs to fetch") @RequestParam(defaultValue = "50") Integer maxResults,
+            @Parameter(description = "Jobs from last N days") @RequestParam(defaultValue = "7") Integer maxDaysOld,
+            @Parameter(description = "Remote jobs only") @RequestParam(required = false) Boolean remoteJobsOnly,
+            @Parameter(description = "Employment types (FULLTIME,PARTTIME,CONTRACTOR,INTERN)") @RequestParam(required = false) String employmentTypes,
+            @Parameter(description = "Experience level (Entry,Mid,Senior)") @RequestParam(required = false) String experienceLevel) {
+
+        log.info("Fantastic Jobs crawl triggered - keywords: {}, location: {}, remote: {}, exp: {}",
+                keywords, location, remoteJobsOnly, experienceLevel);
+
+        JobCrawlRequest request = new JobCrawlRequest();
+        request.setSource("FANTASTICJOBS");
+        request.setKeywords(keywords);
+        request.setLocation(location);
+        request.setMaxResults(maxResults);
+        request.setMaxDaysOld(maxDaysOld);
+        request.setPage(1);
+
+        // Add to params map for FantasticJobs-specific parameters
+        java.util.Map<String, Object> params = new java.util.HashMap<>();
+        params.put("keywords", keywords);
+        params.put("location", location);
+        params.put("maxResults", maxResults);
+        params.put("maxDaysOld", maxDaysOld);
+        params.put("page", 1);
+
+        if (remoteJobsOnly != null) {
+            params.put("remoteJobsOnly", remoteJobsOnly);
+        }
+        if (employmentTypes != null) {
+            params.put("employmentTypes", employmentTypes);
+        }
+        if (experienceLevel != null) {
+            params.put("experienceLevel", experienceLevel);
+        }
+
+        // Use service directly with params map for enrichment
+        JobCrawlResponse response = jobCrawlingService.crawlJobsWithParams(request.getSource(), params);
         return ResponseEntity.ok(response);
     }
 
@@ -137,7 +308,7 @@ public class AdminController {
             List<KeywordCrawlResult> results = new ArrayList<>();
 
             // 2. Crawl jobs for each keyword pair (using LLM-generated locations)
-            // NOTE: Any Adzuna API error will throw and stop the entire crawl
+            // NOTE: Any Reed API error will throw and stop the entire crawl
             for (KeywordGenerationService.KeywordPair pair : keywordPairs) {
                 log.info("Step 2.{}: Crawling jobs for '{}' in {}/{} (excluding: {})",
                         results.size() + 1, pair.getKeyword(),
@@ -145,7 +316,7 @@ public class AdminController {
                         pair.getExclude());
 
                 JobCrawlRequest request = new JobCrawlRequest();
-                request.setSource("ADZUNA");
+                request.setSource("REED");
                 request.setKeywords(pair.getKeyword());
                 // Use LLM-generated location instead of parameter
                 request.setLocation(pair.getTargetCountryCode() + ":" + pair.getTargetCityRegion());
@@ -154,7 +325,7 @@ public class AdminController {
                 request.setExcludeKeywords(pair.getExclude());
                 request.setMaxDaysOld(maxDaysOld); // Configured in application.yml (same as scheduler)
 
-                // This will throw immediately on any Adzuna API error, stopping the crawl
+                // This will throw immediately on any Reed API error, stopping the crawl
                 JobCrawlResponse crawlResponse = jobCrawlingService.crawlJobs(request);
 
                 totalFetched += crawlResponse.getTotalFetched();
@@ -570,6 +741,39 @@ public class AdminController {
     }
 
     /**
+     * Get recent crawl activity history
+     * GET /api/job-search/admin/crawl/history
+     */
+    @Operation(
+            summary = "Get recent crawl activity history",
+            description = "Returns the most recent job crawling activities for user visibility. " +
+                    "Shows when job boards were last updated and how many jobs were fetched/saved."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "History retrieved successfully"),
+            @ApiResponse(responseCode = "500", description = "Failed to retrieve history")
+    })
+    @GetMapping("/crawl/history")
+    public ResponseEntity<List<CrawlActivityLog>> getCrawlHistory(
+            @Parameter(description = "Number of recent activities to return (default: 5)")
+            @RequestParam(defaultValue = "5") int limit) {
+
+        log.info("Fetching crawl activity history (limit: {})", limit);
+
+        try {
+            // Use Pageable to control the limit
+            List<CrawlActivityLog> history = crawlActivityLogRepository.findAllByOrderByCrawledAtDesc(
+                    PageRequest.of(0, limit)
+            );
+            log.info("Retrieved {} crawl activity records", history.size());
+            return ResponseEntity.ok(history);
+        } catch (Exception e) {
+            log.error("Failed to fetch crawl activity history", e);
+            return ResponseEntity.status(500).body(new ArrayList<>());
+        }
+    }
+
+    /**
      * Health check endpoint
      * GET /api/job-search/admin/health
      */
@@ -665,5 +869,116 @@ public class AdminController {
         private String status;
         private String message;
         private Long processingTimeMs;
+    }
+
+    /**
+     * TEMPORARY: Strip HTML from existing job_listing_line records
+     * POST /api/job-search/admin/strip-html-from-lines
+     */
+    @Operation(
+            summary = "Strip HTML from existing job listing lines (TEMPORARY)",
+            description = "Updates all existing job_listing_line records to remove HTML tags. " +
+                    "Uses the same stripHtml() logic as JobDescriptionParser. " +
+                    "NOTE: This is a one-time cleanup operation."
+    )
+    @PostMapping("/strip-html-from-lines")
+    public ResponseEntity<StripHtmlResponse> stripHtmlFromLines() {
+        long startTime = System.currentTimeMillis();
+
+        log.info("Starting HTML stripping for all job_listing_line records");
+
+        // Fetch ALL job listing lines
+        List<JobListingLine> allLines = jobListingLineRepository.findAll();
+        log.info("Found {} job listing lines to process", allLines.size());
+
+        int updatedCount = 0;
+        int unchangedCount = 0;
+
+        for (JobListingLine line : allLines) {
+            String originalContent = line.getLineContent();
+            if (originalContent == null || originalContent.isEmpty()) {
+                unchangedCount++;
+                continue;
+            }
+
+            // Strip HTML using the parser's method
+            String cleanedContent = stripHtml(originalContent);
+
+            // Only update if content changed
+            if (!cleanedContent.equals(originalContent)) {
+                line.setLineContent(cleanedContent);
+                jobListingLineRepository.save(line);
+                updatedCount++;
+
+                if (updatedCount % 100 == 0) {
+                    log.info("Processed {} lines...", updatedCount);
+                }
+            } else {
+                unchangedCount++;
+            }
+        }
+
+        long processingTime = System.currentTimeMillis() - startTime;
+
+        log.info("HTML stripping complete - Updated: {}, Unchanged: {}, Total: {}, Time: {}ms",
+                updatedCount, unchangedCount, allLines.size(), processingTime);
+
+        return ResponseEntity.ok(new StripHtmlResponse(
+                allLines.size(),
+                updatedCount,
+                unchangedCount,
+                processingTime,
+                "HTML stripping completed successfully"
+        ));
+    }
+
+    /**
+     * Helper method: Strip HTML tags (same logic as JobDescriptionParser)
+     */
+    private String stripHtml(String html) {
+        if (html == null) {
+            return "";
+        }
+
+        // Replace block-level HTML tags with newlines
+        html = html.replaceAll("</p>", "\n");
+        html = html.replaceAll("</div>", "\n");
+        html = html.replaceAll("</li>", "\n");
+        html = html.replaceAll("<br\\s*/?>", "\n");
+        html = html.replaceAll("</h[1-6]>", "\n");
+
+        // Remove ALL remaining HTML tags
+        html = html.replaceAll("<[^>]+>", " ");
+
+        // Decode common HTML entities
+        html = html.replace("&nbsp;", " ")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&apos;", "'")
+                .replace("&mdash;", "—")
+                .replace("&ndash;", "–")
+                .replace("&bull;", "•")
+                .replace("&middot;", "·")
+                .replace("&hellip;", "…");
+
+        // Normalize whitespace
+        html = html.replaceAll("[ \\t]+", " ");
+        html = html.replaceAll("\\n{3,}", "\n\n");
+
+        return html.trim();
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class StripHtmlResponse {
+        private Integer totalLines;
+        private Integer updatedLines;
+        private Integer unchangedLines;
+        private Long processingTimeMs;
+        private String message;
     }
 }

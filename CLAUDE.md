@@ -1,8 +1,8 @@
 # Resume Buddy - AI-Powered Resume Enhancement Platform
 
-## 📌 Current State: Phase 9 - Job Matching Feature
-**Last Updated**: October 14, 2025
-**Status**: MVP + Job search microservice with automated job crawling and intelligent job matching (vector similarity + skill gap analysis)
+## 📌 Current State: Phase 11.1 - Reed API Full Description + Job Analysis Optimization
+**Last Updated**: October 18, 2025 (Evening)
+**Status**: MVP + Job search microservice + Token credit system + Crawl activity logging + Reed API full job descriptions + **Optimized job analysis endpoint**
 
 ## Project Overview
 AI-powered resume analysis platform with Lexical editor, Neo4j graph database for job/skill relationships, O*NET occupation mapping, and **NEW: Job search/matching service using vector similarity**.
@@ -43,9 +43,9 @@ AI-powered resume analysis platform with Lexical editor, Neo4j graph database fo
 ```
 
 ### Database Layers
-1. **MySQL (resumebuddy)**: Raw resumes, line-by-line content, structured ATS analysis
+1. **MySQL (resumebuddy)**: Raw resumes, line-by-line content, structured ATS analysis, **user credits, job queue**
 2. **Neo4j**: Job/occupation/skill graph with O*NET taxonomy
-3. **MySQL (jobsearch)**: Job search profiles, job listings, matches
+3. **MySQL (jobsearch)**: Job search profiles, job listings, matches, **crawl activity logs**
 4. **Redis**: Vector embeddings (1536-dim) with HNSW indexing
 
 ### Core Services (Resume API - :8080)
@@ -55,6 +55,10 @@ AI-powered resume analysis platform with Lexical editor, Neo4j graph database fo
 - `JobAnalysisService` - Job normalization + O*NET integration
 - `ONetIntegrationService` - O*NET API client
 - `Neo4jGraphService` - Graph operations + skill mapping
+- **`UserCreditService`** - Token credit management with ACID transactions (NEW)
+- **`JobQueueService`** - Async job queue with optimistic locking (NEW)
+- **`JobQueueWorker`** - Scheduled worker (@Scheduled every 2s) (NEW)
+- **`JobExecutor`** - Job execution wrapper for existing services (NEW)
 
 ### Core Services (Job Search - :8081)
 **Domain**:
@@ -172,6 +176,16 @@ AI-powered resume analysis platform with Lexical editor, Neo4j graph database fo
 **Editor** (:8080):
 - `PUT /api/resumes/{id}/editor-state` - Save Lexical state
 - `GET /api/resumes/{id}/editor-state` - Load state
+
+**Async Job Queue** (:8080 - NEW Phase 10):
+- `POST /api/jobs/resumes/{id}/analyze/async` - Queue resume analysis (async)
+- `POST /api/jobs/resumes/{resumeId}/experiences/{expId}/analyze/async` - Queue job experience analysis (async)
+- `GET /api/jobs/{jobId}/status` - Poll job status (returns QUEUED/PROCESSING/COMPLETED/FAILED)
+
+**User Credits** (:8080 - NEW Phase 10):
+- `GET /api/users/{userId}/credits` - Get credit balance
+- `GET /api/users/{userId}/credits/transactions` - Get transaction history
+- `POST /api/users/admin/credits/grant` - Admin: Grant credits to user
 
 **Job Search** (:8085 - NEW):
 - `POST /api/job-search/profiles` - Create profile from experiences
@@ -405,8 +419,9 @@ Content-Type: application/json
   - Removes non-technical roles (sales, marketing, recruitment, etc.)
   - Empty `what_exclude` arrays (filtering done after fetch)
 - **Scheduler + Manual endpoints**:
-  - `POST /api/job-search/admin/crawl` - Manual single crawl
-  - `POST /api/job-search/admin/crawl/scheduled-simulation` - Test full LLM flow
+  - `POST /api/job-search/admin/crawl` - Manual single crawl (logs activity)
+  - `POST /api/job-search/admin/crawl/scheduled-simulation` - Test full LLM flow (logs activity)
+  - `GET /api/job-search/admin/crawl/history?limit=5` - Get recent crawl activity logs
   - `@Scheduled` cron job (disabled by default, enable via `app.job-crawling.enabled=true`)
   - Default: Daily at 2 AM, crawls 30 keyword variations (10 base × 3 levels)
 - **Rate limiting**: 2-second delay between API requests
@@ -429,6 +444,45 @@ Content-Type: application/json
   - **Performance**: Processes 100+ jobs/second (vs 2-3 jobs/sec with LLM)
   - **Cost**: $0 (vs ~$0.001 per job with GPT-4o-mini)
   - Enables market insights: skill demand analysis, co-occurrence patterns
+- **Job analysis endpoint optimization** (Oct 18 - Database-level limiting):
+  - **Pageable-based queries**: Uses Spring Data `Pageable` to limit at database level instead of in-memory
+  - **Default limit**: 1000 jobs per request (configurable via `maxJobs` parameter)
+  - **Performance**: Avoids loading thousands of records into memory when only analyzing a subset
+  - **Use case**: Process jobs in controlled batches (e.g., 100 jobs/request) for gradual market insights
+  - **Parameters**: `batchSize` (processing batch), `maxJobs` (database limit), `maxDaysOld` (filter), `forceReanalyze` (re-analyze analyzed jobs)
+  - **Database optimization**: `LIMIT` clause added to SQL queries via JPA repository methods
+  - Endpoint: `POST /api/job-search/admin/analyze-jobs`
+
+**Phase 9 (Oct 14, 2025)** - Line-by-Line Job Matching with Proficiency Weighting (Enhanced Parser):
+
+**Phase 10 (Oct 18, 2025)** - Token Credit System + Async Job Queue ✅:
+- **Prepaid token credit system**:
+  - New tables: `user_credits` (balance tracking), `credit_transactions` (audit trail)
+  - Default: 1000 free credits per new user
+  - Costs: Resume upload=50, Resume analysis=100, Job experience=50, Profile=25 credits
+  - ACID transactions: Credits deducted on job start, refunded on failure
+  - **Upload page secured**: Requires authentication, shows credit balance, blocks upload if insufficient credits (402 Payment Required)
+- **MySQL-based async job queue**:
+  - New table: `job_queue` with optimistic locking (prevents race conditions)
+  - Status flow: QUEUED → PROCESSING → COMPLETED/FAILED
+  - Retry logic: Max 3 attempts with exponential backoff
+  - Rate limiting: Max 3 concurrent jobs globally, 2 per user
+- **Scheduled worker**:
+  - `@Scheduled` polling every 2 seconds
+  - Parallel processing (up to 3 workers)
+  - Auto-refund credits on job failure
+- **New async API endpoints**:
+  - `POST /api/jobs/resumes/{id}/analyze/async` - Queue resume analysis
+  - `POST /api/jobs/resumes/{resumeId}/experiences/{expId}/analyze/async` - Queue job experience analysis
+  - `GET /api/jobs/{jobId}/status` - Poll job status with queue position
+  - `GET /api/users/{userId}/credits` - Get credit balance
+  - `POST /api/users/admin/credits/grant` - Admin credit management
+- **Why MySQL queue over Kafka/SQS**:
+  - Zero additional infrastructure (<100 users)
+  - ACID transactions (credit deduction atomic with job status)
+  - Easy debugging (plain SQL queries)
+  - $0/month vs $40-100/month for SQS+Lambda or Kafka
+- **Cloud-ready design**: Designed for AWS Lightsail + Aurora MySQL + Redis Cloud migration (Phase 11)
 
 **Phase 9 (Oct 14, 2025)** - Line-by-Line Job Matching with Proficiency Weighting (Enhanced Parser):
 - **Pure line-by-line matching** (removed full-doc vectors):
@@ -518,6 +572,120 @@ Content-Type: application/json
 - `GET /api/job-search/profiles/{id}/matching-results?refresh=true&topK=20`
 - Forces fresh vector search instead of returning cached results
 - Useful after running `/admin/revectorize/listing-lines` with improved parser
+
+**Phase 11 (Oct 18, 2025)** - Job Crawl Activity Logging + Complete Job Analysis + UX Improvements ✅:
+- **Audit trail for all crawl operations**:
+  - New table: `crawl_activity_log` with source, keywords, location, result counts, status, timestamps
+  - Columns: id, source (ADZUNA/REED/JSEARCH), keywords, location, totalFetched, totalSaved, duplicatesUpdated, duplicatesSkipped, failedToProcess, status (SUCCESS/FAILED), errorMessage, processingTimeMs, crawledAt
+  - Indexes: crawled_at DESC, source, status for fast queries
+- **Automatic logging in JobCrawlingApplicationService**:
+  - Logs captured on EVERY crawl operation (manual + scheduled)
+  - Try-catch wrapper: Logs success OR failure with error message
+  - Preserves existing error handling behavior (re-throws exceptions)
+- **New API endpoint**:
+  - `GET /api/job-search/admin/crawl/history?limit=5` - Returns recent crawl activities
+  - Returns top 5 by default, ordered by most recent first
+- **Frontend visibility on job search page**:
+  - **CrawlActivityHistory.tsx** component displays last 5 crawl activities
+  - Shows: timestamp ("2h ago"), source badge (color-coded), keywords/location, records updated/saved, status badge
+  - Auto-refreshes every 30 seconds
+  - Manual refresh button with loading spinner
+  - Success entries: Show fetched/new/updated counts with icons
+  - Failed entries: Red border, displays error message (truncated to 100 chars)
+  - Positioned above JobSearchProfile section
+- **User benefits**:
+  - Transparency: Users see when job boards were last updated
+  - Trust: Visual confirmation that crawling is working
+  - Debugging: Failed crawls show error messages immediately
+- **Complete job analysis mode** (Oct 18):
+  - **topK selector**: Dropdown in UI (50/100/200/300/500/ALL)
+  - **ALL mode**: Setting topK=9999 analyzes EVERY job listing in database (no limit)
+  - **Use case**: Market analysis - see all 1773 jobs scored against your profile
+  - **Vector search optimization**: topK * 10 multiplier (increased from * 2) for broader coverage
+  - **Performance**: ALL mode searches 50,000 results per profile line (covers all job lines)
+  - **Benefits**: Find hidden gems, statistical analysis, complete market coverage
+- **Date range filter** (Oct 18):
+  - **maxDaysOld parameter**: Filter jobs by posted/fetched date
+  - **UI dropdown**: "from last" - 7 days / 2 weeks / 1 month / 2 months / 3 months / All time
+  - **Default**: 1 month (30 days) - only show recent job postings
+  - **Logic**: Uses `postedDate` if available, falls back to `fetchedAt`
+  - **Applied post-search**: Filters cached matches + new searches
+  - **Benefits**: Avoid old/expired listings, focus on fresh opportunities
+- **Smart caching & performance** (Oct 18):
+  - **Page load behavior**: Auto-loads existing results from `job_match` table (instant!)
+  - **Cache-first approach**: Shows cached matches immediately, no vector search on page load
+  - **Preference persistence**: topK and maxDaysOld saved to localStorage (remembers across sessions)
+  - **Refresh logic**: Backend checks cache → returns if exists → only searches if Force Refresh checked
+  - **Force Refresh**: Explicitly triggers fresh vector search + updates cache
+  - **Empty state**: Only shown if no cached results exist (first-time user or after cache expiry)
+  - **Redis LIMIT fix**: Added `.limit(0, topK)` to override Redis default LIMIT of 10
+  - **Performance**: Page load <1s (cached from job_match), Force Refresh ~10-15s (ALL mode)
+- **Star rating UX improvement** (Oct 18):
+  - **Direct star selection**: Click any star (1/2/3) to set rating directly
+  - **Toggle behavior**: Click same star again to remove rating (set to 0)
+  - **Visual feedback**: Filled stars (yellow) vs empty stars (gray), hover effects
+  - **Smart tooltips**: "Set 3-star rating", "Change to 2-star", "Remove 1-star rating"
+  - **No more cycling**: Replaced old click-to-cycle (0→1→2→3→0) with direct selection
+  - **Better UX**: Users can instantly set priority without multiple clicks
+- **Logging improvements** (Oct 18):
+  - **Reduced verbosity**: Disabled per-job match logging (was generating 1000+ log lines)
+  - **Skill gap analysis**: Changed from INFO to DEBUG level
+  - **Vector search details**: Changed from INFO to DEBUG level
+  - **Per-match scoring**: Commented out (easily re-enabled for debugging)
+  - **Summary logs kept**: High-level progress logs remain (STAGE 1/2 complete, total matches)
+  - **Result**: Clean, readable logs showing only important milestones
+- **Preserve user actions on refresh** (Oct 18):
+  - **Problem**: Force Refresh was deleting ALL old matches, losing red flags/saved/applied status
+  - **Solution**: Only delete matches without user actions (`isSaved=0 AND isApplied=false AND isRedflag=false`)
+  - **Preserved data**: Saved ratings (1-3 stars), applied status, red flags
+  - **Updated scores**: Recalculates similarity + skill gap while preserving user actions
+  - **Result**: Users never lose their flags/ratings when refreshing matches
+
+**Phase 11.1 (Oct 18, 2025 Evening)** - Reed API Full Description + HTML Stripping + UI Fixes ✅:
+- **Problem 1**: Both Adzuna and Reed `/search` endpoints return truncated descriptions with "…" suffix
+  - Example: "Through our behaviours of telli..." (truncated at ~500 chars)
+  - Only captured 1-2 skills per job instead of 10-20+
+  - Skill extraction severely limited by incomplete data
+- **Solution 1**: Implemented two-stage Reed API fetching
+  - **Stage 1**: `/search` endpoint - get list of jobs (fast)
+  - **Stage 2**: `/jobs/{jobId}` endpoint - fetch FULL description for each job (complete)
+  - New DTO: `ReedJobDetailsDto` for details endpoint
+  - 500ms rate limiting between detail fetches to avoid overwhelming API
+- **Performance impact**:
+  - 50 jobs now takes ~30-40 seconds (vs 5-10 seconds with truncated)
+  - Trade-off: Slower crawl but COMPLETE job data for accurate skill extraction
+- **Problem 2**: Reed and DevITJobs return HTML-formatted descriptions
+  - Example: `Do:</strong></p> <ul> <li> <p>Build, test, and deploy new features`
+  - HTML tags interfere with skill extraction and readability
+- **Solution 2**: Added HTML stripping to `JobDescriptionParser`
+  - Strips ALL HTML tags: `<p>`, `<strong>`, `<ul>`, `<li>`, etc.
+  - Preserves structure: Block tags (`</p>`, `</li>`, `<br>`) → newlines
+  - Decodes HTML entities: `&nbsp;` → space, `&amp;` → &, `&bull;` → •
+  - Normalizes whitespace: Multiple spaces/newlines collapsed
+  - Applied BEFORE line splitting for clean parsing
+- **Benefits**:
+  - ✅ Full job descriptions (no truncation)
+  - ✅ 10-20+ skills per job instead of 1-2
+  - ✅ Clean, readable text without HTML noise
+  - ✅ Better matching accuracy
+  - ✅ Users see complete job requirements
+- **Scheduler updated**: Both `JobCrawlScheduler` and `/admin/crawl/scheduled-simulation` now use REED instead of ADZUNA
+- **Adzuna deprecated**: No longer used for scheduled crawls (infrastructure preserved for manual use if needed)
+- **DevITJobs fixed**: Parser now handles custom XML format (`<job>` tags, `dd.MM.yyyy` dates)
+- **Frontend error handling**: Added retry logic for 500 errors (1-second delay, auto-retry once)
+- **UI Fix - Refresh button stuck**: Fixed "Refresh Results" button staying in "Refreshing..." state after completion
+  - **Root cause**: `finally` block had incorrect conditional logic that skipped state reset on manual button clicks
+  - **Solution**: Always reset `loading` and `isManualRefresh` states in `finally` block, use early `return` for retry case
+  - **Result**: Button properly returns to normal state after successful/failed requests
+- **Files modified**:
+  - Created: `ReedJobDetailsDto.java`
+  - Updated: `ReedApiClient.java` (added `fetchJobDetails()`, updated `convertToAdzunaFormat()`)
+  - Updated: `JobCrawlScheduler.java` (ADZUNA → REED)
+  - Updated: `AdminController.java` (ADZUNA → REED in simulation endpoint)
+  - Updated: `JobDescriptionParser.java` (added `stripHtml()` method, called at start of `parseDescription()`)
+  - Updated: `DevITJobsApiClient.java` (fixed XML parsing for custom format)
+  - Updated: `JobMatchingResults.tsx` (added retry logic for 500 errors + fixed button stuck bug)
+  - Updated: `job-search/[profileId]/page.tsx` (added retry logic for profile fetch)
 
 ## Future Enhancements 📋
 1. AI-generated suggestions for adding missing tasks

@@ -5,8 +5,12 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   createJobSearchProfile,
-  getJobSearchProfilesByResume
+  getJobSearchProfilesByResume,
+  getStructuredAnalysis,
+  analyzeJobAsync
 } from '@/lib/api';
+import { getCurrentUserId } from '@/lib/userUtils';
+import JobStatusIndicator from './JobStatusIndicator';
 
 interface AnalysisSummaryProps {
   analysis: ResumeAnalysisDto;
@@ -21,10 +25,17 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
   const [generatingProfile, setGeneratingProfile] = useState(false);
   const [selectedExperiences, setSelectedExperiences] = useState<Set<string>>(new Set());
   const [currentProfile, setCurrentProfile] = useState<any>(null);
+  const [jobAnalysisJobIds, setJobAnalysisJobIds] = useState<Record<string, string>>({}); // experienceId -> jobQueueId
+  const [localAnalysis, setLocalAnalysis] = useState<ResumeAnalysisDto>(analysis);
+
+  // Update local analysis when prop changes
+  useEffect(() => {
+    setLocalAnalysis(analysis);
+  }, [analysis]);
 
   // Build analyzed experiences map from the isAnalyzed flag in each experience
   const analyzedExperiences: Record<string, boolean> = {};
-  analysis.experiences.forEach(exp => {
+  localAnalysis.experiences.forEach(exp => {
     analyzedExperiences[exp.id] = exp.isAnalyzed || false;
   });
 
@@ -48,12 +59,56 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
   };
 
   const handleAnalyzeJobClick = async (experienceId: string) => {
-    setAnalyzingJobId(experienceId);
     try {
-      await onAnalyzeJob?.(experienceId);
-    } finally {
-      setAnalyzingJobId(null);
+      // Queue the job analysis
+      const response = await analyzeJobAsync(resumeId, experienceId, getCurrentUserId());
+
+      // Store the job queue ID for this experience
+      setJobAnalysisJobIds(prev => ({ ...prev, [experienceId]: response.jobId }));
+
+      console.log('Job analysis queued:', response);
+    } catch (error: any) {
+      console.error('Failed to queue job analysis:', error);
+      if (error.response?.status === 402) {
+        alert('Insufficient credits! Need 50 credits for job analysis.');
+      } else {
+        alert('Failed to queue job analysis: ' + (error.message || 'Unknown error'));
+      }
     }
+  };
+
+  const handleJobAnalysisComplete = async (experienceId: string) => {
+    console.log('Job analysis complete for experience:', experienceId);
+
+    // Wait a moment for backend to finish saving
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Reload analysis to get updated isAnalyzed flag and analysisId
+    try {
+      const updatedAnalysis = await getStructuredAnalysis(resumeId);
+      if (updatedAnalysis) {
+        console.log('Reloaded analysis:', updatedAnalysis);
+        setLocalAnalysis(updatedAnalysis);
+      }
+    } catch (error) {
+      console.error('Failed to reload analysis:', error);
+    }
+
+    // Remove job queue ID after reload completes
+    setJobAnalysisJobIds(prev => {
+      const newIds = { ...prev };
+      delete newIds[experienceId];
+      return newIds;
+    });
+  };
+
+  const handleJobAnalysisError = (experienceId: string) => {
+    // Remove job queue ID on error
+    setJobAnalysisJobIds(prev => {
+      const newIds = { ...prev };
+      delete newIds[experienceId];
+      return newIds;
+    });
   };
 
   const toggleExperienceSelection = (experienceId: string) => {
@@ -89,21 +144,28 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
 
   return (
     <>
-      {/* Job Search Profile Navigation */}
-      {currentProfile && (
-        <div className="bg-gradient-to-r from-green-50 to-teal-50 border border-green-300 rounded-lg p-6 mb-6 shadow-lg">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-                <h3 className="text-xl font-bold text-gray-800">Job Search Profile</h3>
-              </div>
-              <p className="text-sm text-gray-600">
-                Your job search profile has been created. View and edit it on the dedicated Job Search page.
-              </p>
+      {/* Job Search Profile - Always visible, compact version */}
+      <div className="bg-gradient-to-r from-green-50 to-teal-50 border border-green-200 rounded-lg p-4 mb-4 shadow-sm">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-1">
+              <svg className="h-4 w-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <h3 className="text-sm font-bold text-gray-800">Job Search Profile</h3>
+              <span className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">ALPHA</span>
             </div>
+            {currentProfile ? (
+              <p className="text-xs text-gray-600">
+                Profile created! View and edit on the Job Search page to find matching jobs.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-600">
+                💡 <span className="font-medium">Tip:</span> Select work experiences below and click <span className="font-semibold">"Generate Mock Job Post"</span> to create a job search profile and find matching opportunities.
+              </p>
+            )}
+          </div>
+          {currentProfile && (
             <button
               onClick={() => router.push(`/job-search/${currentProfile.id}`)}
               className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors flex items-center gap-2 shadow-md"
@@ -113,9 +175,9 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
               </svg>
               Go to Job Search
             </button>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 mb-4">
         <div className="flex items-center gap-2 mb-4">
@@ -281,86 +343,74 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
                         </div>
                       )}
 
-                      {/* Action Buttons */}
-                      <div className="flex gap-2 mt-3 pt-2 border-t border-blue-200 flex-wrap">
-                        {analyzedExperiences[exp.id] ? (
-                          <>
-                            {/* View Detail Report Button (Primary) */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (exp.analysisId) {
-                                  handleViewAnalysis(exp.analysisId);
-                                }
-                              }}
-                              className="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
-                              title="View detail analysis report"
-                              disabled={!exp.analysisId}
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                              View Detail Report
-                            </button>
-
-                            {/* Re-analyze Button (Secondary) */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                if (confirm('This job has already been analyzed. Re-analyze? This will overwrite the existing analysis.')) {
-                                  handleAnalyzeJobClick(exp.id);
-                                }
-                              }}
-                              disabled={analyzingJobId === exp.id}
-                              className="px-3 py-1.5 bg-purple-50 text-purple-600 border border-purple-200 rounded-md text-xs font-medium hover:bg-purple-100 disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
-                              title="Re-analyze this job (will overwrite existing analysis)"
-                            >
-                              {analyzingJobId === exp.id ? (
-                                <>
-                                  <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      {/* Action Buttons or Job Status */}
+                      <div className="mt-3 pt-2 border-t border-blue-200">
+                        {/* Show JobStatusIndicator if this job is queued */}
+                        {jobAnalysisJobIds[exp.id] ? (
+                          <JobStatusIndicator
+                            jobId={jobAnalysisJobIds[exp.id]}
+                            onComplete={() => handleJobAnalysisComplete(exp.id)}
+                            onError={() => handleJobAnalysisError(exp.id)}
+                          />
+                        ) : (
+                          <div className="flex gap-2 flex-wrap">
+                            {(() => {
+                              const localExp = localAnalysis.experiences.find(e => e.id === exp.id);
+                              return localExp?.isAnalyzed ? (
+                              <>
+                                {/* View Detail Report Button (Primary) */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (localExp.analysisId) {
+                                      handleViewAnalysis(localExp.analysisId);
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
+                                  title="View detail analysis report"
+                                  disabled={!localExp.analysisId}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                   </svg>
-                                  Analyzing...
-                                </>
-                              ) : (
-                                <>
+                                  View generated detail experience report
+                                </button>
+
+                                {/* Re-analyze Button (Secondary) */}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (confirm('This job has already been analyzed. Re-analyze? This will overwrite the existing analysis.')) {
+                                      handleAnalyzeJobClick(exp.id);
+                                    }
+                                  }}
+                                  className="px-3 py-1.5 bg-purple-50 text-purple-600 border border-purple-200 rounded-md text-xs font-medium hover:bg-purple-100 transition-colors flex items-center gap-1"
+                                  title="Re-analyze this job (will overwrite existing analysis, costs 50 credits)"
+                                >
                                   <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                                   </svg>
-                                  Re-analyze
-                                </>
-                              )}
-                            </button>
-                          </>
-                        ) : (
-                          /* Analyze Job Button (Primary - First time) */
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAnalyzeJobClick(exp.id);
-                            }}
-                            disabled={analyzingJobId === exp.id}
-                            className="px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-1 shadow-sm"
-                            title="Analyze this job experience with AI"
-                          >
-                            {analyzingJobId === exp.id ? (
-                              <>
-                                <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                Analyzing...
+                                  Re-analyze (50 credits)
+                                </button>
                               </>
                             ) : (
-                              <>
+                              /* Analyze Job Button (Primary - First time) */
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAnalyzeJobClick(exp.id);
+                                }}
+                                className="px-3 py-1.5 bg-purple-600 text-white rounded-md text-xs font-medium hover:bg-purple-700 transition-colors flex items-center gap-1 shadow-sm"
+                                title="Analyze this job experience with AI (50 credits)"
+                              >
                                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                                 </svg>
-                                Analyze Job
-                              </>
-                            )}
-                          </button>
+                                Generate detail experience analysis report (50 credits)
+                              </button>
+                            );
+                            })()}
+                          </div>
                         )}
                       </div>
                     </div>

@@ -9,10 +9,12 @@ import com.resumebuddy.service.DoclingHttpService;
 import com.resumebuddy.service.FileStorageService;
 import com.resumebuddy.service.Neo4jGraphService;
 import com.resumebuddy.service.ResumeLineService;
+import com.resumebuddy.service.UserCreditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -20,6 +22,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -37,6 +40,10 @@ public class ResumeController {
     private final FileStorageService fileStorageService;
     private final ResumeLineService resumeLineService;
     private final Neo4jGraphService neo4jGraphService;
+    private final UserCreditService userCreditService;
+
+    @Value("${app.token-costs.resume-upload}")
+    private int resumeUploadCost;
 
     @GetMapping("/health")
     @Operation(summary = "Health check", description = "Check if the service is running")
@@ -45,8 +52,8 @@ public class ResumeController {
     }
 
     @PostMapping(value = "/upload", consumes = "multipart/form-data")
-    @Operation(summary = "Upload resume", description = "Upload and parse a resume file")
-    public ResponseEntity<Resume> uploadResume(
+    @Operation(summary = "Upload resume", description = "Upload and parse a resume file (costs 50 credits)")
+    public ResponseEntity<?> uploadResume(
             @RequestParam("file")
             @io.swagger.v3.oas.annotations.Parameter(
                 description = "Resume file to upload (PDF, DOCX, TXT, or image files)",
@@ -58,10 +65,29 @@ public class ResumeController {
         String userId = (String) authentication.getPrincipal();
         log.info("User {} uploading file: {} ({})", userId, file.getOriginalFilename(), file.getContentType());
 
+        // Check if user has enough credits
+        try {
+            var userCredit = userCreditService.getUserCredit(userId);
+            if (userCredit.getAvailableCredits().compareTo(BigDecimal.valueOf(resumeUploadCost)) < 0) {
+                log.warn("User {} has insufficient credits: {} < {}", userId, userCredit.getAvailableCredits(), resumeUploadCost);
+                return ResponseEntity.status(402) // Payment Required
+                        .body(java.util.Map.of(
+                                "error", "Insufficient credits",
+                                "message", "You need " + resumeUploadCost + " credits to upload a resume. Available: " + userCredit.getAvailableCredits().intValue(),
+                                "required", resumeUploadCost,
+                                "available", userCredit.getAvailableCredits().intValue()
+                        ));
+            }
+        } catch (Exception e) {
+            log.error("Error checking user credits for user {}: ", userId, e);
+            return ResponseEntity.status(500)
+                    .body(java.util.Map.of("error", "Failed to check credits"));
+        }
+
         // Validate file
         if (file.isEmpty()) {
             log.warn("Empty file received");
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "Empty file"));
         }
 
         // Validate file type
@@ -71,12 +97,16 @@ public class ResumeController {
                 && !contentType.equals("text/plain")
                 && !contentType.startsWith("image/"))) {
             log.warn("Unsupported file type: {}", contentType);
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.badRequest().body(java.util.Map.of("error", "Unsupported file type"));
         }
 
         try {
             // Generate temporary ID for file storage
             String tempId = java.util.UUID.randomUUID().toString();
+
+            // Deduct credits BEFORE processing (jobId, userId, amount, description)
+            userCreditService.deductCredits(userId, BigDecimal.valueOf(resumeUploadCost), "upload-" + tempId, "Resume upload: " + file.getOriginalFilename());
+            log.info("Deducted {} credits from user {} for resume upload", resumeUploadCost, userId);
 
             // Store file first using temp ID
             String filePath = fileStorageService.storeFile(file, tempId);

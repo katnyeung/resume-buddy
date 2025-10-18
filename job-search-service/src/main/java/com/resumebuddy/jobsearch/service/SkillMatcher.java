@@ -36,8 +36,7 @@ public class SkillMatcher {
             java.util.Map<String, Integer> skillProficiencies,
             String jobDescription) {
 
-        log.debug("Analyzing skill gap with proficiency: {} skills with proficiency scores",
-                skillProficiencies.size());
+        // Removed verbose debug log - too noisy when analyzing 1000+ jobs
 
         if (jobDescription == null || jobDescription.isEmpty()) {
             log.warn("Job description is empty, cannot match skills");
@@ -89,7 +88,8 @@ public class SkillMatcher {
                 weightedScore
         );
 
-        log.info("Skill gap analysis with proficiency: {}/{} skills matched ({}%), weighted score: {}%",
+        // Changed to DEBUG - too noisy at INFO level when processing 1000+ jobs
+        log.debug("Skill gap analysis with proficiency: {}/{} skills matched ({}%), weighted score: {}%",
                 matchedSkills.size(), skillProficiencies.size(),
                 String.format("%.1f", matchPercentage),
                 String.format("%.1f", weightedScore));

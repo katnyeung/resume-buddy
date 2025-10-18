@@ -2,6 +2,7 @@ package com.resumebuddy.jobsearch.infrastructure.external.jobsources;
 
 import com.resumebuddy.jobsearch.dto.adzuna.AdzunaJobDto;
 import com.resumebuddy.jobsearch.dto.reed.ReedJobDto;
+import com.resumebuddy.jobsearch.dto.reed.ReedJobDetailsDto;
 import com.resumebuddy.jobsearch.dto.reed.ReedSearchResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -11,6 +12,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -103,9 +105,34 @@ public class ReedApiClient implements JobSourceApiClient {
                     response.getResults().size(), response.getTotalResults());
 
             // Convert Reed jobs to Adzuna format (common DTO)
-            return response.getResults().stream()
-                    .map(this::convertToAdzunaFormat)
-                    .collect(Collectors.toList());
+            // This now fetches full job details for each job to get complete descriptions
+            List<AdzunaJobDto> jobs = new ArrayList<>();
+            int jobCount = 0;
+            for (ReedJobDto searchResult : response.getResults()) {
+                try {
+                    jobCount++;
+                    log.debug("Fetching full details for job {}/{}: {} (ID: {})",
+                            jobCount, response.getResults().size(),
+                            searchResult.getJobTitle(), searchResult.getJobId());
+
+                    AdzunaJobDto job = convertToAdzunaFormat(searchResult);
+                    jobs.add(job);
+
+                    // Rate limiting: 500ms delay between detail fetches to avoid overwhelming API
+                    if (jobCount < response.getResults().size()) {
+                        Thread.sleep(500);
+                    }
+                } catch (Exception e) {
+                    log.error("Failed to fetch details for job ID {}: {}",
+                            searchResult.getJobId(), e.getMessage());
+                    // Continue with next job instead of failing entire batch
+                }
+            }
+
+            log.info("Successfully fetched full details for {}/{} jobs",
+                    jobs.size(), response.getResults().size());
+
+            return jobs;
 
         } catch (Exception e) {
             log.error("CRITICAL: Reed API request failed - stopping job search process. Error: {}", e.getMessage(), e);
@@ -120,16 +147,63 @@ public class ReedApiClient implements JobSourceApiClient {
     }
 
     /**
+     * Fetch full job details from Reed API
+     * Endpoint: GET /api/1.0/jobs/{jobId}
+     * Returns complete job description (not truncated)
+     *
+     * @param jobId Reed job ID
+     * @return Full job details with complete description
+     */
+    private ReedJobDetailsDto fetchJobDetails(Long jobId) {
+        try {
+            String detailsUrl = baseUrl + "/jobs/" + jobId;
+            log.debug("Fetching job details from: {}", detailsUrl);
+
+            ReedJobDetailsDto details = restClient.get()
+                    .uri(detailsUrl)
+                    .header(HttpHeaders.AUTHORIZATION, "Basic " +
+                            java.util.Base64.getEncoder().encodeToString((apiKey + ":").getBytes()))
+                    .retrieve()
+                    .body(ReedJobDetailsDto.class);
+
+            if (details != null && details.getJobDescription() != null) {
+                log.debug("Fetched full description ({} chars) for job ID {}",
+                        details.getJobDescription().length(), jobId);
+            }
+
+            return details;
+
+        } catch (Exception e) {
+            log.error("Failed to fetch job details for ID {}: {}", jobId, e.getMessage());
+            throw new RuntimeException("Reed job details fetch failed for ID " + jobId, e);
+        }
+    }
+
+    /**
      * Convert Reed job DTO to Adzuna job DTO (common format)
      * This allows the rest of the system to work with a single DTO type
+     * Now fetches full job details to get complete description
      */
     private AdzunaJobDto convertToAdzunaFormat(ReedJobDto reedJob) {
         AdzunaJobDto adzunaJob = new AdzunaJobDto();
 
+        // Fetch full job details to get complete description (not truncated)
+        ReedJobDetailsDto fullDetails = fetchJobDetails(reedJob.getJobId());
+
         // Basic fields
         adzunaJob.setId(String.valueOf(reedJob.getJobId()));
         adzunaJob.setTitle(reedJob.getJobTitle());
-        adzunaJob.setDescription(reedJob.getJobDescription());
+
+        // Use FULL description from details endpoint (key fix for truncation issue)
+        if (fullDetails != null && fullDetails.getJobDescription() != null) {
+            adzunaJob.setDescription(fullDetails.getJobDescription());
+            log.debug("Using full description ({} chars) for job: {}",
+                    fullDetails.getJobDescription().length(), reedJob.getJobTitle());
+        } else {
+            // Fallback to search result description if details fetch failed
+            adzunaJob.setDescription(reedJob.getJobDescription());
+            log.warn("Using truncated description for job: {}", reedJob.getJobTitle());
+        }
 
         // Convert Reed date string (dd/MM/yyyy) to ZonedDateTime
         if (reedJob.getDate() != null) {

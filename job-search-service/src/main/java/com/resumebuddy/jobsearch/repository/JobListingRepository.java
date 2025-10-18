@@ -1,6 +1,7 @@
 package com.resumebuddy.jobsearch.repository;
 
 import com.resumebuddy.jobsearch.domain.JobListing;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -35,4 +36,13 @@ public interface JobListingRepository extends JpaRepository<JobListing, String> 
 
     // Market Insights: Count analyzed jobs
     long countByAnalyzedAtIsNotNull();
+
+    // OPTIMIZED: Pageable-based queries (limit at database level)
+    List<JobListing> findByAnalyzedAtIsNullAndFetchedAtAfterOrderByFetchedAtDesc(LocalDateTime cutoff, Pageable pageable);
+
+    List<JobListing> findByAnalyzedAtIsNullOrderByFetchedAtDesc(Pageable pageable);
+
+    List<JobListing> findByFetchedAtAfterOrderByFetchedAtDesc(LocalDateTime cutoff, Pageable pageable);
+
+    List<JobListing> findAllByOrderByFetchedAtDesc(Pageable pageable);
 }

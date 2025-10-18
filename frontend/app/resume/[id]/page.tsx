@@ -1,30 +1,18 @@
 'use client';
 
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import LexicalEditor from '@/components/LexicalEditor';
+import AppHeader from '@/components/AppHeader';
 
 export default function ResumePage() {
   const params = useParams();
-  const router = useRouter();
   const resumeId = params.id as string;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">Resume Detail</h1>
-            <p className="text-gray-600">View and edit your resume using the editor below</p>
-          </div>
-          <button
-            onClick={() => router.push('/')}
-            className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-          >
-            Back to List
-          </button>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <AppHeader title="Resume Editor" showBackButton={true} />
 
+      <div className="max-w-7xl mx-auto py-8 px-4">
         {/* Editor */}
         <LexicalEditor resumeId={resumeId} />
       </div>

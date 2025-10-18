@@ -33,12 +33,13 @@ public class JobDescriptionParser {
      * Parse job description into meaningful lines
      *
      * Strategy:
+     * 0. Strip HTML tags and decode HTML entities
      * 1. Split on bullet points (•, -, *, numbered lists)
      * 2. Split on double newlines (paragraphs)
      * 3. Split long paragraphs on sentence boundaries
      * 4. Clean and filter lines
      *
-     * @param description Raw job description text
+     * @param description Raw job description text (may contain HTML)
      * @return List of parsed lines
      */
     public List<String> parseDescription(String description) {
@@ -48,6 +49,11 @@ public class JobDescriptionParser {
         }
 
         log.debug("Parsing job description ({} chars)", description.length());
+
+        // Step 0: Strip HTML tags and decode entities FIRST
+        description = stripHtml(description);
+        log.debug("After HTML stripping: {} chars", description.length());
+
         List<String> lines = new ArrayList<>();
 
         // Step 1: First, split by ANY newline (single or double)
@@ -274,6 +280,52 @@ public class JobDescriptionParser {
         }
 
         return numbered;
+    }
+
+    /**
+     * Strip HTML tags and decode common HTML entities
+     *
+     * Examples:
+     * - <p>Text</p> → Text
+     * - <strong>Bold</strong> → Bold
+     * - <ul><li>Item</li></ul> → Item
+     * - &nbsp; → (space)
+     * - &amp; → &
+     */
+    private String stripHtml(String html) {
+        if (html == null) {
+            return "";
+        }
+
+        // Replace common block-level HTML tags with newlines (preserve structure)
+        html = html.replaceAll("</p>", "\n");
+        html = html.replaceAll("</div>", "\n");
+        html = html.replaceAll("</li>", "\n");
+        html = html.replaceAll("<br\\s*/?>", "\n");
+        html = html.replaceAll("</h[1-6]>", "\n");
+
+        // Remove ALL remaining HTML tags (opening and closing)
+        html = html.replaceAll("<[^>]+>", " ");
+
+        // Decode common HTML entities
+        html = html.replace("&nbsp;", " ")
+                   .replace("&amp;", "&")
+                   .replace("&lt;", "<")
+                   .replace("&gt;", ">")
+                   .replace("&quot;", "\"")
+                   .replace("&#39;", "'")
+                   .replace("&apos;", "'")
+                   .replace("&mdash;", "—")
+                   .replace("&ndash;", "–")
+                   .replace("&bull;", "•")
+                   .replace("&middot;", "·")
+                   .replace("&hellip;", "…");
+
+        // Normalize whitespace (collapse multiple spaces/newlines)
+        html = html.replaceAll("[ \\t]+", " "); // Multiple spaces → single space
+        html = html.replaceAll("\\n{3,}", "\n\n"); // 3+ newlines → 2 newlines
+
+        return html.trim();
     }
 
     /**

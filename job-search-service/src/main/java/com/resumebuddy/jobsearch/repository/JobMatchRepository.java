@@ -26,9 +26,10 @@ public interface JobMatchRepository extends JpaRepository<JobMatch, String> {
     // Find applied matches for a profile
     List<JobMatch> findByProfileIdAndIsAppliedTrue(String profileId);
 
-    // Delete only non-saved matches for a profile (for force refresh)
+    // Delete only matches without user actions (for force refresh)
+    // Preserve: saved (isSaved > 0), applied (isApplied = true), red-flagged (isRedflag = true)
     @Modifying
-    @Query("DELETE FROM JobMatch m WHERE m.profileId = :profileId AND m.isSaved = 0")
+    @Query("DELETE FROM JobMatch m WHERE m.profileId = :profileId AND m.isSaved = 0 AND m.isApplied = false AND m.isRedflag = false")
     void deleteNonSavedByProfileId(@Param("profileId") String profileId);
 
     // Find existing match by profile and listing

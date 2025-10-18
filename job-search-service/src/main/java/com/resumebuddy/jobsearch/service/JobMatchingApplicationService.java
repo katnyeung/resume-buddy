@@ -47,9 +47,17 @@ public class JobMatchingApplicationService {
      * Stage 2: Skill keyword matching (validation)
      */
     @Transactional
-    public List<JobMatch> searchMatchingJobs(String profileId, int topK) {
+    public List<JobMatch> searchMatchingJobs(String profileId, int topK, int maxDaysOld) {
         try {
-            log.info("=== Starting 2-stage line-by-line job matching for profile: {} (topK: {}) ===", profileId, topK);
+            // Special case: topK <= 0 or >= 9999 means "analyze ALL jobs"
+            boolean analyzeAll = topK <= 0 || topK >= 9999;
+            if (analyzeAll) {
+                log.info("=== Starting COMPLETE job matching for profile: {} (analyzing ALL job listings, maxDaysOld: {}) ===",
+                        profileId, maxDaysOld);
+            } else {
+                log.info("=== Starting 2-stage line-by-line job matching for profile: {} (topK: {}, maxDaysOld: {}) ===",
+                        profileId, topK, maxDaysOld);
+            }
 
             // 1. Get profile
             JobSearchProfile profile = profileRepository.findById(profileId)
@@ -91,14 +99,15 @@ public class JobMatchingApplicationService {
                     }
 
                     // Search for top-K similar job lines across ALL jobs
+                    // Use larger multiplier to ensure we cover more unique job listings
+                    // Each job has ~5-20 lines, so topK * 10 ensures broad coverage
+                    // Special case: if analyzing all, search up to 50,000 results (covers all job lines)
+                    int searchLimit = analyzeAll ? 50000 : topK * 10;
                     List<RedisVectorService.VectorSearchResult> lineMatches =
-                            redisVectorService.vectorSearch(profileLine.getRedisVectorKey(), topK * 2);
+                            redisVectorService.vectorSearch(profileLine.getRedisVectorKey(), searchLimit);
 
-                    String profileLinePreview = profileLine.getLineContent().substring(0, Math.min(80, profileLine.getLineContent().length()));
-                    log.info("Profile line #{}: \"{}...\" found {} matches",
-                            profileLine.getLineNumber(),
-                            profileLinePreview,
-                            lineMatches.size());
+                    // Reduced verbosity - only log line match counts at DEBUG level
+                    log.debug("Profile line #{} found {} matches", profileLine.getLineNumber(), lineMatches.size());
 
                     // Group matches by listing ID and track best match text
                     for (RedisVectorService.VectorSearchResult lineMatch : lineMatches) {
@@ -135,14 +144,17 @@ public class JobMatchingApplicationService {
                                     String.format("  ↳ BEST MATCH [%.3f]: \"%s...\"", score, jobLinePreview));
                             }
 
-                            // Log top 3 matches for this profile line
+                            // Disabled verbose per-match logging (generates 100+ lines per search)
+                            // Uncomment for debugging specific matching issues
+                            /*
                             if (lineMatches.indexOf(lineMatch) < 3) {
                                 String jobLinePreview = jobLine.getLineContent().substring(0, Math.min(80, jobLine.getLineContent().length()));
-                                log.info("    → Match #{} [score={}]: \"{}...\"",
+                                log.debug("    → Match #{} [score={}]: \"{}...\"",
                                         lineMatches.indexOf(lineMatch) + 1,
                                         String.format("%.3f", score),
                                         jobLinePreview);
                             }
+                            */
                         }
                     }
 
@@ -188,13 +200,20 @@ public class JobMatchingApplicationService {
                 return Integer.compare(b.matchCount, a.matchCount); // Tiebreaker: more matches
             });
 
-            List<ListingScore> topKListings = rankedListings.stream()
-                    .limit(topK)
-                    .collect(java.util.stream.Collectors.toList());
+            List<ListingScore> topKListings;
+            if (analyzeAll) {
+                // Return ALL ranked listings (no limit)
+                topKListings = rankedListings;
+                log.info("ALL {} listings selected for final processing (complete analysis)", topKListings.size());
+            } else {
+                // Return top-K only
+                topKListings = rankedListings.stream()
+                        .limit(topK)
+                        .collect(java.util.stream.Collectors.toList());
+                log.info("Top {} listings selected for final processing", topKListings.size());
+            }
 
-            log.info("Top {} listings selected for final processing", topKListings.size());
-
-            // Delete old non-saved matches for this profile (preserve bookmarked jobs)
+            // Delete old matches without user actions (preserve saved/applied/red-flagged)
             matchRepository.deleteNonSavedByProfileId(profileId);
 
             // STAGE 2: Process top-K with skill validation
@@ -204,8 +223,25 @@ public class JobMatchingApplicationService {
                     // Check if a match already exists for this profile+listing combination
                     JobMatch existingMatch = matchRepository.findByProfileIdAndListingId(profileId, listingScore.listingId);
                     if (existingMatch != null) {
-                        log.info("SKIPPING existing match for listing: {} (already exists, saved={})",
-                                listingScore.listingId, existingMatch.getIsSaved());
+                        // Update scores but preserve user actions (saved/applied/red-flagged)
+                        log.debug("Updating existing match for listing: {} (saved={}, applied={}, redflag={})",
+                                listingScore.listingId, existingMatch.getIsSaved(),
+                                existingMatch.getIsApplied(), existingMatch.getIsRedflag());
+
+                        // Fetch listing and recalculate skill gap for updated scores
+                        JobListing listing = listingRepository.findById(listingScore.listingId).orElse(null);
+                        if (listing != null) {
+                            SkillGap skillGap = skillMatcher.analyzeSkillGapWithProficiency(
+                                    skillProficiencies,
+                                    listing.getDescription()
+                            );
+
+                            // Update similarity score and skill gaps, preserve user actions
+                            existingMatch.setSimilarityScore(BigDecimal.valueOf(listingScore.score));
+                            existingMatch.setSkillGaps(skillMatcher.skillGapToJson(skillGap));
+                            matchRepository.save(existingMatch);
+                        }
+
                         matches.add(existingMatch);
                         continue;
                     }
@@ -223,12 +259,15 @@ public class JobMatchingApplicationService {
                             listing.getDescription()
                     );
 
-                    // Calculate combined score for logging context
+                    // Calculate combined score (logging disabled - too verbose for 1000+ matches)
                     double vectorScore = listingScore.score;
                     double weightedSkillScore = skillGap.getWeightedScore();
                     double combinedScore = (vectorScore * 0.6) + (weightedSkillScore / 100.0 * 0.4);
 
-                    log.info("MATCH - {}: HybridVector={} (MAX={}, AVG={}, COV={}%), Skill={}%, Combined={}, Matches={}",
+                    // Disabled verbose match logging - generates 1000+ log lines
+                    // Uncomment below for debugging specific match issues
+                    /*
+                    log.debug("MATCH - {}: HybridVector={} (MAX={}, AVG={}, COV={}%), Skill={}%, Combined={}, Matches={}",
                             listing.getTitle(),
                             String.format("%.3f", vectorScore),
                             String.format("%.3f", listingScore.maxScore),
@@ -237,6 +276,7 @@ public class JobMatchingApplicationService {
                             String.format("%.1f", weightedSkillScore),
                             String.format("%.3f", combinedScore),
                             listingScore.matchCount);
+                    */
 
                     // Create JobMatch
                     JobMatch match = new JobMatch();
@@ -339,12 +379,13 @@ public class JobMatchingApplicationService {
      * @param profileId Profile ID
      * @param topK Number of top matches
      * @param forceRefresh If true, always perform fresh search (ignore cache)
+     * @param maxDaysOld Only include jobs posted within last N days (0 = no limit)
      */
     @Transactional
-    public List<JobMatchWithListing> getOrCreateMatchingResults(String profileId, int topK, boolean forceRefresh) {
+    public List<JobMatchWithListing> getOrCreateMatchingResults(String profileId, int topK, boolean forceRefresh, int maxDaysOld) {
         try {
-            log.info("Getting or creating matching results for profile: {} (topK: {}, forceRefresh: {})",
-                    profileId, topK, forceRefresh);
+            log.info("Getting or creating matching results for profile: {} (topK: {}, forceRefresh: {}, maxDaysOld: {})",
+                    profileId, topK, forceRefresh, maxDaysOld);
 
             // STEP 1: Clean up expired matches based on retention policy (7/14/20 days)
             int deletedCount = cleanupExpiredMatches(profileId);
@@ -355,17 +396,41 @@ public class JobMatchingApplicationService {
             // STEP 2: Check if matches already exist
             List<JobMatch> existingMatches = matchRepository.findByProfileIdOrderBySimilarityScoreDesc(profileId);
 
-            // STEP 3: Force refresh OR no matches exist OR topK changed significantly
-            if (forceRefresh || existingMatches.isEmpty() || Math.abs(existingMatches.size() - topK) > 5) {
-                log.info("Performing FRESH search (forceRefresh={}, existing={}, topK={})",
-                        forceRefresh, existingMatches.size(), topK);
-                searchMatchingJobs(profileId, topK);
+            // STEP 3: Determine if we need a fresh search
+            // ONLY refresh if:
+            //   - Force refresh is explicitly requested (user clicked with checkbox), OR
+            //   - No cached matches exist (first time search)
+            // Do NOT auto-refresh based on topK - let user control refreshes
+            boolean needsRefresh = forceRefresh || existingMatches.isEmpty();
+
+            if (needsRefresh) {
+                log.info("Performing FRESH search (forceRefresh={}, existing={}, topK={}, reason={})",
+                        forceRefresh, existingMatches.size(), topK,
+                        forceRefresh ? "force_refresh" : "no_cache");
+                searchMatchingJobs(profileId, topK, maxDaysOld);
             } else {
-                log.info("Using cached matches: {} results", existingMatches.size());
+                log.info("Using cached matches: {} results (topK={}, will return top {})",
+                        existingMatches.size(), topK, Math.min(topK, existingMatches.size()));
             }
 
             // STEP 4: Return enriched matches (includes redflagged for collapsible section)
-            return getMatchesWithListings(profileId);
+            // Apply date filter to returned results
+            List<JobMatchWithListing> allMatches = getMatchesWithListings(profileId);
+            if (maxDaysOld > 0) {
+                java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(maxDaysOld);
+                allMatches = allMatches.stream()
+                        .filter(match -> {
+                            java.time.LocalDateTime postedDate = match.getListing().getPostedDate();
+                            java.time.LocalDateTime fetchedDate = match.getListing().getFetchedAt();
+                            // Use postedDate if available, otherwise use fetchedAt
+                            java.time.LocalDateTime relevantDate = postedDate != null ? postedDate : fetchedDate;
+                            return relevantDate != null && relevantDate.isAfter(cutoffDate);
+                        })
+                        .collect(java.util.stream.Collectors.toList());
+                log.info("Applied date filter: {} matches after filtering to last {} days",
+                        allMatches.size(), maxDaysOld);
+            }
+            return allMatches;
 
         } catch (Exception e) {
             log.error("Failed to get or create matching results", e);
@@ -374,11 +439,19 @@ public class JobMatchingApplicationService {
     }
 
     /**
-     * Backwards compatibility: default to NOT forcing refresh
+     * Backwards compatibility: default to NOT forcing refresh, 30 days old
      */
     @Transactional
     public List<JobMatchWithListing> getOrCreateMatchingResults(String profileId, int topK) {
-        return getOrCreateMatchingResults(profileId, topK, false);
+        return getOrCreateMatchingResults(profileId, topK, false, 30);
+    }
+
+    /**
+     * Backwards compatibility: with refresh flag but default 30 days
+     */
+    @Transactional
+    public List<JobMatchWithListing> getOrCreateMatchingResults(String profileId, int topK, boolean forceRefresh) {
+        return getOrCreateMatchingResults(profileId, topK, forceRefresh, 30);
     }
 
     /**

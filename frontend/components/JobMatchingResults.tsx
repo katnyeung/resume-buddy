@@ -14,35 +14,88 @@ type SortDirection = 'asc' | 'desc';
 export default function JobMatchingResults({ profileId }: JobMatchingResultsProps) {
   const [results, setResults] = useState<JobMatchingResultsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isManualRefresh, setIsManualRefresh] = useState(false); // Track manual button click
   const [error, setError] = useState<string | null>(null);
   const [sortField, setSortField] = useState<SortField>('matchScore');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [forceRefresh, setForceRefresh] = useState(false);
 
-  // Auto-fetch results on mount
+  // Load topK and maxDaysOld from localStorage (persist user preferences)
+  const [topK, setTopK] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('jobMatching_topK');
+      return saved ? parseInt(saved) : 200;
+    }
+    return 200;
+  });
+
+  const [maxDaysOld, setMaxDaysOld] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('jobMatching_maxDaysOld');
+      return saved ? parseInt(saved) : 30;
+    }
+    return 30;
+  });
+
+  // Save preferences to localStorage when changed
   useEffect(() => {
-    handleSearch();
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('jobMatching_topK', topK.toString());
+    }
+  }, [topK]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('jobMatching_maxDaysOld', maxDaysOld.toString());
+    }
+  }, [maxDaysOld]);
+
+  // Auto-load existing results from job_match table on mount (fast!)
+  // This shows cached results immediately without expensive vector search
+  useEffect(() => {
+    handleSearch(false); // Load cached results from job_match table
   }, [profileId]);
 
-  const handleSearch = async (refresh?: boolean) => {
+  const handleSearch = async (refresh?: boolean, retryCount: number = 0, isManual: boolean = false) => {
     setLoading(true);
+    if (isManual) {
+      setIsManualRefresh(true); // User clicked button
+    }
     setError(null);
     try {
+      // If refresh is explicitly passed, use it; otherwise use forceRefresh checkbox state
       const shouldRefresh = refresh !== undefined ? refresh : forceRefresh;
-      const data = await getMatchingResults(profileId, 50, shouldRefresh);
-      setResults(data);
-    } catch (err) {
+      const data = await getMatchingResults(profileId, topK, shouldRefresh, maxDaysOld);
+
+      // Null safety check
+      if (data && data.matches) {
+        setResults(data);
+      } else {
+        throw new Error('Invalid response from server');
+      }
+    } catch (err: any) {
       console.error('Failed to fetch matching results:', err);
-      setError('Failed to fetch matching jobs. Please try again.');
+
+      // Retry once after 1 second on first failure (transient errors)
+      if (retryCount === 0 && err?.response?.status === 500) {
+        console.log('Retrying search after 500 error...');
+        setTimeout(() => {
+          handleSearch(refresh, retryCount + 1, isManual);
+        }, 1000);
+        return; // Skip finally block for retry case
+      } else {
+        setError('Failed to fetch matching jobs. Please try again.');
+      }
     } finally {
+      // Always reset loading states (fix: button stuck in "Refreshing..." state)
       setLoading(false);
+      setIsManualRefresh(false);
     }
   };
 
-  const handleToggleSaved = async (matchId: string, currentRating: number) => {
+  const handleToggleSaved = async (matchId: string, newRating: number) => {
     try {
-      // Cycle through ratings: 0 -> 1 -> 2 -> 3 -> 0
-      const newRating = currentRating >= 3 ? 0 : currentRating + 1;
+      // Directly set the rating (0-3) - no more cycling
       await toggleMatchSaved(matchId, newRating);
       // Update local state
       if (results) {
@@ -251,28 +304,36 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
             {/* Actions Column - Merged 3 buttons */}
             <td className="px-6 py-2" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-center gap-2">
-                {/* Saved Button - 3 Star Rating */}
-                <button
-                  onClick={() => handleToggleSaved(match.matchId, match.isSaved)}
-                  className={`flex items-center gap-0.5 p-1.5 rounded-lg transition-colors ${
-                    match.isSaved > 0
-                      ? 'text-yellow-600 bg-yellow-50 hover:bg-yellow-100'
-                      : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'
-                  }`}
-                  title={`Click to ${match.isSaved === 0 ? 'save' : match.isSaved === 3 ? 'remove' : 'increase priority'} (${match.isSaved}/3 stars)`}
-                >
+                {/* Saved Button - 3 Star Rating (Click individual star to set rating) */}
+                <div className="flex items-center gap-0.5 p-1.5 rounded-lg bg-gray-50">
                   {[1, 2, 3].map((star) => (
-                    <svg
+                    <button
                       key={star}
-                      className="w-3.5 h-3.5"
-                      fill={star <= match.isSaved ? 'currentColor' : 'none'}
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
+                      onClick={() => handleToggleSaved(match.matchId, star === match.isSaved ? 0 : star)}
+                      className={`transition-colors ${
+                        star <= match.isSaved
+                          ? 'text-yellow-600 hover:text-yellow-700'
+                          : 'text-gray-300 hover:text-yellow-500'
+                      }`}
+                      title={
+                        star === match.isSaved
+                          ? `Remove ${star}-star rating`
+                          : star <= match.isSaved
+                          ? `Change to ${star}-star rating`
+                          : `Set ${star}-star rating`
+                      }
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                    </svg>
+                      <svg
+                        className="w-4 h-4"
+                        fill={star <= match.isSaved ? 'currentColor' : 'none'}
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                      </svg>
+                    </button>
                   ))}
-                </button>
+                </div>
 
                 {/* Applied Button */}
                 <button
@@ -359,7 +420,115 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
   }
 
   if (!results) {
-    return null;
+    // Show empty state with controls - user must click "Refresh Results" to search
+    return (
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Job Matching Results
+              </h3>
+              <p className="text-sm text-gray-600 mt-1">
+                Configure your search and click "Refresh Results"
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <span className="text-gray-600">Top</span>
+                <select
+                  value={topK}
+                  onChange={(e) => setTopK(parseInt(e.target.value))}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                  <option value="300">300</option>
+                  <option value="500">500</option>
+                  <option value="9999">ALL</option>
+                </select>
+                <span className="text-gray-600">jobs</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <span className="text-gray-600">from last</span>
+                <select
+                  value={maxDaysOld}
+                  onChange={(e) => setMaxDaysOld(parseInt(e.target.value))}
+                  className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                >
+                  <option value="7">7 days</option>
+                  <option value="14">2 weeks</option>
+                  <option value="30">1 month</option>
+                  <option value="60">2 months</option>
+                  <option value="90">3 months</option>
+                  <option value="0">All time</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={forceRefresh}
+                  onChange={(e) => setForceRefresh(e.target.checked)}
+                  className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                />
+                <span>Force Refresh</span>
+              </label>
+              <button
+                onClick={() => handleSearch(undefined, 0, true)}
+                disabled={isManualRefresh}
+                className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isManualRefresh ? 'Searching...' : 'Refresh Results'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Empty state message */}
+        <div className="px-6 py-16 text-center">
+          <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <h3 className="text-lg font-medium text-gray-900 mb-2">No matching results found yet</h3>
+          <p className="text-gray-600 mb-6 max-w-md mx-auto">
+            Click <strong>"Refresh Results"</strong> above to search for jobs that match your profile.
+            <span className="block mt-2 text-sm">
+              {forceRefresh ? (
+                <span className="text-indigo-600">
+                  ✓ Force Refresh enabled - will perform fresh vector search (~10-15s)
+                </span>
+              ) : (
+                <span className="text-gray-500">
+                  Tip: Check "Force Refresh" to perform a fresh search and update cached results
+                </span>
+              )}
+            </span>
+          </p>
+          <div className="flex items-center justify-center gap-6 text-sm text-gray-500">
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <span>Vector similarity matching</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <span>Skill gap analysis</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <svg className="h-5 w-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <span>Ranked by match score</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -376,6 +545,37 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="text-gray-600">Top</span>
+              <select
+                value={topK}
+                onChange={(e) => setTopK(parseInt(e.target.value))}
+                className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="200">200</option>
+                <option value="300">300</option>
+                <option value="500">500</option>
+                <option value="9999">ALL</option>
+              </select>
+              <span className="text-gray-600">jobs</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <span className="text-gray-600">from last</span>
+              <select
+                value={maxDaysOld}
+                onChange={(e) => setMaxDaysOld(parseInt(e.target.value))}
+                className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+              >
+                <option value="7">7 days</option>
+                <option value="14">2 weeks</option>
+                <option value="30">1 month</option>
+                <option value="60">2 months</option>
+                <option value="90">3 months</option>
+                <option value="0">All time</option>
+              </select>
+            </label>
             <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
               <input
                 type="checkbox"
@@ -386,11 +586,11 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
               <span>Force Refresh</span>
             </label>
             <button
-              onClick={() => handleSearch()}
-              disabled={loading}
+              onClick={() => handleSearch(undefined, 0, true)}
+              disabled={isManualRefresh}
               className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {loading ? 'Refreshing...' : 'Refresh Results'}
+              {isManualRefresh ? 'Refreshing...' : 'Refresh Results'}
             </button>
           </div>
         </div>

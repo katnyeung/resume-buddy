@@ -9,6 +9,8 @@ import com.resumebuddy.jobsearch.repository.JobListingLineRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -121,39 +123,36 @@ public class JobAnalysisService {
 
     /**
      * Fetch jobs that need analysis based on request parameters
+     * Optimized to limit query results at database level using Pageable
      */
     private List<JobListing> fetchJobsForAnalysis(JobAnalysisRequest request) {
+        // Calculate effective limit (default to reasonable number if not specified)
+        Integer effectiveLimit = request.getMaxJobs() != null ? request.getMaxJobs() : 1000;
+
+        // Create Pageable to limit at database level
+        Pageable pageable = PageRequest.of(0, effectiveLimit);
+
         List<JobListing> jobs;
 
         if (request.getForceReanalyze()) {
-            // Get all jobs (newest first)
+            // Get all jobs (newest first) with database-level limit
             if (request.getMaxDaysOld() != null) {
                 LocalDateTime cutoff = LocalDateTime.now().minusDays(request.getMaxDaysOld());
-                jobs = listingRepository.findAll().stream()
-                        .filter(j -> j.getFetchedAt().isAfter(cutoff))
-                        .sorted((j1, j2) -> j2.getFetchedAt().compareTo(j1.getFetchedAt()))
-                        .toList();
+                jobs = listingRepository.findByFetchedAtAfterOrderByFetchedAtDesc(cutoff, pageable);
             } else {
-                jobs = listingRepository.findAll().stream()
-                        .sorted((j1, j2) -> j2.getFetchedAt().compareTo(j1.getFetchedAt()))
-                        .toList();
+                jobs = listingRepository.findAllByOrderByFetchedAtDesc(pageable);
             }
         } else {
-            // Get only unanalyzed jobs (newest first)
+            // Get only unanalyzed jobs (newest first) with database-level limit
             if (request.getMaxDaysOld() != null) {
                 LocalDateTime cutoff = LocalDateTime.now().minusDays(request.getMaxDaysOld());
-                jobs = listingRepository.findByAnalyzedAtIsNullAndFetchedAtAfterOrderByFetchedAtDesc(cutoff);
+                jobs = listingRepository.findByAnalyzedAtIsNullAndFetchedAtAfterOrderByFetchedAtDesc(cutoff, pageable);
             } else {
-                jobs = listingRepository.findByAnalyzedAtIsNullOrderByFetchedAtDesc();
+                jobs = listingRepository.findByAnalyzedAtIsNullOrderByFetchedAtDesc(pageable);
             }
         }
 
-        // Apply maxJobs limit if specified
-        if (request.getMaxJobs() != null && jobs.size() > request.getMaxJobs()) {
-            log.info("Limiting analysis to {} jobs (found {} total)", request.getMaxJobs(), jobs.size());
-            jobs = jobs.subList(0, request.getMaxJobs());
-        }
-
+        log.info("Fetched {} jobs for analysis (limit: {})", jobs.size(), effectiveLimit);
         return jobs;
     }
 
