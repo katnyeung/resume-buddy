@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -215,6 +216,31 @@ public class JobAnalysisController {
 
         } catch (Exception e) {
             log.error("Error getting task popularity for skill '{}': {}", skillName, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/{resumeId}/experiences/{experienceId}/tasks/{taskId}/skill-popularity")
+    @Operation(summary = "Get skill popularity for a specific task (PHASE 11.3)",
+               description = "Show which skills other people use to demonstrate this O*NET task")
+    public ResponseEntity<Map<String, Object>> getTaskSkillPopularity(
+            @PathVariable String resumeId,
+            @PathVariable String experienceId,
+            @PathVariable String taskId) {
+
+        log.info("Getting skill popularity for task '{}' in experience {}", taskId, experienceId);
+
+        try {
+            List<Map<String, Object>> skillPopularity = neo4jGraphService.getTaskSkillPopularityAnalysis(experienceId, taskId);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("taskId", taskId);
+            result.put("skillPopularity", skillPopularity);
+
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            log.error("Error getting skill popularity for task '{}': {}", taskId, e.getMessage());
             return ResponseEntity.internalServerError().build();
         }
     }

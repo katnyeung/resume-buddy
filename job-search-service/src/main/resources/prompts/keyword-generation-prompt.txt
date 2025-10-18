@@ -41,23 +41,23 @@ Analyze user demand and generate {count} GENERIC job titles that:
 **Format (JSON array with location analysis):**
 Output ONLY valid JSON, no markdown, no explanations:
 [
-  {"keyword": "Java Developer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "London"},
-  {"keyword": "Software Engineer", "exclude": [], "targetCountryCode": "us", "targetCityRegion": "New York"},
-  {"keyword": "Cloud Engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "London"},
-  {"keyword": "Python Developer", "exclude": [], "targetCountryCode": "us", "targetCityRegion": "San Francisco"},
-  {"keyword": "DevOps Engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "Manchester"}
+  {"keyword": "Java Developer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "United Kingdom"},
+  {"keyword": "Software Engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "United Kingdom"},
+  {"keyword": "Cloud Engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "United Kingdom"},
+  {"keyword": "Python Developer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "United Kingdom"},
+  {"keyword": "DevOps Engineer", "exclude": [], "targetCountryCode": "gb", "targetCityRegion": "United Kingdom"}
 ]
 
 **Location Mapping Rules:**
 - targetCountryCode: 2-letter Adzuna country code (gb, us, au, ca, de, fr, nl, in, nz, za, sg, ie)
-- targetCityRegion: Specific city/region for the "where" parameter (e.g., "London", "Manchester", "New York", "San Francisco")
+- targetCityRegion: ALWAYS use country name for maximum coverage: "United Kingdom", "United States", "Australia", "Canada"
 - Analyze profile locations to determine the right country code:
-  * "London", "Manchester", "UK", "United Kingdom" → gb
-  * "New York", "San Francisco", "USA", "United States" → us
-  * "Sydney", "Melbourne", "Australia" → au
-  * "Toronto", "Vancouver", "Canada" → ca
-- If no location data available, default to "gb" and "London"
-- Distribute keywords across different cities if profiles show multiple locations
+  * "London", "Manchester", "UK", "United Kingdom" → gb with "United Kingdom"
+  * "New York", "San Francisco", "USA", "United States" → us with "United States"
+  * "Sydney", "Melbourne", "Australia" → au with "Australia"
+  * "Toronto", "Vancouver", "Canada" → ca with "Canada"
+- If no location data available, default to "gb" and "United Kingdom"
+- ALWAYS use country-level locations (e.g., "United Kingdom") to maximize job coverage across all cities
 
 **Requirements:**
 - Generate GENERIC job titles (2-4 words max): "Java Developer", "Software Engineer", "Cloud Engineer"
@@ -66,8 +66,9 @@ Output ONLY valid JSON, no markdown, no explanations:
 - Focus on BROAD technical job titles that maximize search results
 - Use SINGLE technology per title (Java, Python, React, AWS, etc.) - NO combinations
 - Prioritize GENERIC versions of users' desired job titles
-- Analyze profile locations to determine appropriate country codes and cities
+- Analyze profile locations to determine appropriate country codes (gb, us, etc.)
+- ALWAYS use country-level locations like "United Kingdom", "United States" - NOT city names
 - If no active profiles exist, generate diverse generic tech roles as fallback
 - Think like a job board search optimizer: BROADER = MORE RESULTS
 
-Generate {count} GENERIC job title keywords with location analysis now:
+Generate {count} GENERIC job title keywords with country-level location analysis now:

@@ -224,20 +224,10 @@ public class JobAnalysisService {
         try {
             log.info("Enriching analysis with deep graph insights for experience: {}", experienceId);
 
-            // 1. Skill demonstration analysis (WITHOUT task-level popularity for performance)
-            List<Map<String, Object>> skillDemo = neo4jGraphService.getSkillDemonstrationAnalysis(experienceId);
-            log.info("Retrieved {} skill demonstration records from Neo4j", skillDemo != null ? skillDemo.size() : 0);
-            if (skillDemo != null && !skillDemo.isEmpty()) {
-                List<JobAnalysisResultDto.SkillDemonstrationDto> skillDemos = convertToSkillDemonstrationDtos(skillDemo);
-
-                // PHASE 6.5: Task-level popularity now loaded on-demand via API endpoint
-                // enrichSkillsWithTaskPopularity(skillDemos, experienceId); // REMOVED
-
-                dto.setSkillDemonstrationAnalysis(skillDemos);
-                log.info("Added {} skill demonstration analyses to DTO", skillDemo.size());
-            } else {
-                log.warn("No skill demonstration data found for experience: {}", experienceId);
-            }
+            // 1. Skill demonstration analysis - REMOVED (replaced by task demonstration in Phase 11.3)
+            // Old skill-first view no longer used in frontend
+            // List<Map<String, Object>> skillDemo = neo4jGraphService.getSkillDemonstrationAnalysis(experienceId);
+            // dto.setSkillDemonstrationAnalysis(convertToSkillDemonstrationDtos(skillDemo));
 
             // 2. Description line value scores
             List<Map<String, Object>> lineValues = neo4jGraphService.getDescriptionLineValueScores(experienceId);
@@ -275,6 +265,15 @@ public class JobAnalysisService {
             if (missingSkills != null && !missingSkills.isEmpty()) {
                 dto.setMissingSkillsByCategory(convertToMissingSkillByCategoryDtos(missingSkills));
                 log.debug("Added {} missing skills grouped by category", missingSkills.size());
+            }
+
+            // 6. Task demonstration analysis (PHASE 11.3)
+            List<Map<String, Object>> taskDemo = neo4jGraphService.getTaskDemonstrationAnalysis(experienceId);
+            if (taskDemo != null && !taskDemo.isEmpty()) {
+                dto.setTaskDemonstrationAnalysis(convertToTaskDemonstrationDtos(taskDemo));
+                log.info("Added {} task demonstration analyses to DTO", taskDemo.size());
+            } else {
+                log.warn("No task demonstration data found for experience: {}", experienceId);
             }
 
             log.info("Successfully enriched analysis with deep graph insights");
@@ -484,6 +483,51 @@ public class JobAnalysisService {
             dto.setRequiredByTasks(((Number) map.get("requiredByTasks")).intValue());
             dto.setAvgImportance(((Number) map.get("avgImportance")).doubleValue());
             dto.setTaskNames((List<String>) map.get("taskNames"));
+            dtos.add(dto);
+        }
+        return dtos;
+    }
+
+    /**
+     * Convert task demonstration maps to DTOs (PHASE 11.3)
+     */
+    private List<JobAnalysisResultDto.TaskDemonstrationDto> convertToTaskDemonstrationDtos(List<Map<String, Object>> taskMaps) {
+        List<JobAnalysisResultDto.TaskDemonstrationDto> dtos = new ArrayList<>();
+        for (Map<String, Object> map : taskMaps) {
+            JobAnalysisResultDto.TaskDemonstrationDto dto = new JobAnalysisResultDto.TaskDemonstrationDto();
+            dto.setTaskId((String) map.get("taskId"));
+            dto.setTaskName((String) map.get("taskName"));
+            dto.setImportance(((Number) map.get("importance")).doubleValue());
+            dto.setTaskCategory((String) map.get("taskCategory"));
+            dto.setCoverageStrength((String) map.get("coverageStrength"));
+            dto.setSkillCount(((Number) map.get("skillCount")).intValue());
+            dto.setLineCount(((Number) map.get("lineCount")).intValue());
+
+            // Convert skills
+            List<Map<String, Object>> skillMaps = (List<Map<String, Object>>) map.get("skills");
+            List<JobAnalysisResultDto.SkillCoveringTaskDto> skills = new ArrayList<>();
+            for (Map<String, Object> skillMap : skillMaps) {
+                JobAnalysisResultDto.SkillCoveringTaskDto skillDto = new JobAnalysisResultDto.SkillCoveringTaskDto();
+                skillDto.setSkillName((String) skillMap.get("skillName"));
+                skillDto.setCategory((String) skillMap.get("category"));
+                skillDto.setIsPrimary((Boolean) skillMap.get("isPrimary"));
+                skillDto.setLineCount(((Number) skillMap.get("lineCount")).intValue());
+                skills.add(skillDto);
+            }
+            dto.setSkills(skills);
+
+            // Convert lines
+            List<Map<String, Object>> lineMaps = (List<Map<String, Object>>) map.get("lines");
+            List<JobAnalysisResultDto.ResumeLineDto> lines = new ArrayList<>();
+            for (Map<String, Object> lineMap : lineMaps) {
+                JobAnalysisResultDto.ResumeLineDto lineDto = new JobAnalysisResultDto.ResumeLineDto();
+                lineDto.setLineId((String) lineMap.get("lineId"));
+                lineDto.setSequence(((Number) lineMap.get("sequence")).intValue());
+                lineDto.setText((String) lineMap.get("text"));
+                lines.add(lineDto);
+            }
+            dto.setLines(lines);
+
             dtos.add(dto);
         }
         return dtos;

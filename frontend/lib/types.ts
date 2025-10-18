@@ -222,3 +222,29 @@ export interface JobListing {
   fetchedAt: string;
   extractedSkills?: string; // JSON string
 }
+
+// Task Demonstration Analysis (Phase 11.3) - Task-first credibility view
+export interface TaskDemonstration {
+  taskId: string;
+  taskName: string;
+  importance: number;
+  taskCategory: string;
+  coverageStrength: 'STRONG' | 'MODERATE' | 'WEAK' | 'NONE';
+  skillCount: number;
+  lineCount: number;
+  skills: SkillCoveringTask[];
+  lines: TaskResumeLineDto[];
+}
+
+export interface SkillCoveringTask {
+  skillName: string;
+  category: string;
+  isPrimary: boolean;
+  lineCount: number; // how many lines demonstrate this task via this skill
+}
+
+export interface TaskResumeLineDto {
+  lineId: string;
+  sequence: number;
+  text: string;
+}

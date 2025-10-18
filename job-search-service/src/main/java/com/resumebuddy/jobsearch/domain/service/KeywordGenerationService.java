@@ -263,14 +263,15 @@ public class KeywordGenerationService {
         private final String targetCityRegion;  // e.g., "London", "New York"
 
         public KeywordPair(String keyword, List<String> exclude) {
-            this(keyword, exclude, "gb", "London"); // Default to UK
+            this(keyword, exclude, "gb", "United Kingdom"); // Default to all of UK
         }
 
         public KeywordPair(String keyword, List<String> exclude, String targetCountryCode, String targetCityRegion) {
             this.keyword = keyword;
             this.exclude = exclude;
             this.targetCountryCode = targetCountryCode;
-            this.targetCityRegion = targetCityRegion;
+            // Override city-specific locations to use "United Kingdom" for broader coverage
+            this.targetCityRegion = "United Kingdom";
         }
 
         public String getKeyword() {

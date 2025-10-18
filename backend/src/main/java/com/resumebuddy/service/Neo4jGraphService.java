@@ -2075,6 +2075,131 @@ public class Neo4jGraphService {
         }
     }
 
+    // ==================== TASK DEMONSTRATION ANALYSIS (PHASE 11.3) ====================
+
+    /**
+     * Get task-centric view of how user demonstrates O*NET tasks
+     * For each task, shows which skills relate to it and which lines demonstrate it
+     * Replaces skill-first credibility report with task-first coverage analysis
+     *
+     * @param experienceId Job experience ID
+     * @return List of tasks with their demonstrating skills and lines
+     */
+    public List<Map<String, Object>> getTaskDemonstrationAnalysis(String experienceId) {
+        log.info("Analyzing task demonstration coverage for experience: {}", experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Get all O*NET tasks for this experience's occupations
+                    MATCH (je:JobExperience {id: $experienceId})-[:MAPS_TO]->(o:Occupation)-[:REQUIRES_TASK]->(task:ONetTask)
+
+                    // Find user skills that relate to these tasks
+                    OPTIONAL MATCH (je)-[:REQUIRES_SKILL]->(skill:Skill)-[:RELATES_TO_TASK]->(task)
+
+                    // Find resume lines that demonstrate these tasks
+                    OPTIONAL MATCH (je)-[:HAS_DESCRIPTION_LINE]->(line:DescriptionLine)-[:DEMONSTRATES_TASK]->(task)
+
+                    WITH task,
+                         collect(DISTINCT {
+                           skillName: skill.name,
+                           category: skill.category,
+                           skillId: skill.id,
+                           isPrimary: EXISTS((je)-[:REQUIRES_SKILL {is_primary: true}]->(skill))
+                         }) as skillsRaw,
+                         collect(DISTINCT {
+                           lineId: line.id,
+                           sequence: line.sequence,
+                           text: line.text
+                         }) as linesRaw
+
+                    // Filter out null skills/lines
+                    WITH task,
+                         [s IN skillsRaw WHERE s.skillName IS NOT NULL] as skills,
+                         [l IN linesRaw WHERE l.lineId IS NOT NULL] as lines
+
+                    // Calculate skill count for each skill (how many lines per skill)
+                    UNWIND skills AS skill
+                    OPTIONAL MATCH (je:JobExperience {id: $experienceId})-[:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)-[:DEMONSTRATES_TASK]->(task)
+                    WHERE toLower(dl.text) CONTAINS toLower(skill.skillName)
+                    WITH task, skill, lines,
+                         count(DISTINCT dl) as linesForSkill,
+                         collect(DISTINCT skills) as allSkills
+
+                    WITH task, lines,
+                         collect(DISTINCT {
+                           skillName: skill.skillName,
+                           category: skill.category,
+                           isPrimary: skill.isPrimary,
+                           lineCount: linesForSkill
+                         }) as skillsWithCounts,
+                         allSkills[0] as allSkillsList
+
+                    RETURN task.id as taskId,
+                           task.name as taskName,
+                           task.importance as importance,
+                           task.category as taskCategory,
+                           size(skillsWithCounts) as skillCount,
+                           size(lines) as lineCount,
+                           skillsWithCounts as skills,
+                           lines,
+                           CASE
+                             WHEN size(skillsWithCounts) >= 4 THEN 'STRONG'
+                             WHEN size(skillsWithCounts) >= 2 THEN 'MODERATE'
+                             WHEN size(skillsWithCounts) >= 1 THEN 'WEAK'
+                             ELSE 'NONE'
+                           END as coverageStrength
+                    ORDER BY task.importance DESC
+                    """;
+
+                Result result = tx.run(query, Values.parameters("experienceId", experienceId));
+
+                List<Map<String, Object>> taskAnalysis = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> taskData = new HashMap<>();
+
+                    taskData.put("taskId", record.get("taskId").asString());
+                    taskData.put("taskName", record.get("taskName").asString());
+                    taskData.put("importance", record.get("importance").asDouble());
+                    taskData.put("taskCategory", record.get("taskCategory").asString(""));
+                    taskData.put("coverageStrength", record.get("coverageStrength").asString());
+                    taskData.put("skillCount", record.get("skillCount").asInt());
+                    taskData.put("lineCount", record.get("lineCount").asInt());
+
+                    // Parse skills list
+                    List<Map<String, Object>> skills = record.get("skills").asList(v -> {
+                        Map<String, Object> skillMap = new HashMap<>();
+                        skillMap.put("skillName", v.get("skillName").asString(""));
+                        skillMap.put("category", v.get("category").asString(""));
+                        skillMap.put("isPrimary", v.get("isPrimary").asBoolean(false));
+                        skillMap.put("lineCount", v.get("lineCount").asInt(0));
+                        return skillMap;
+                    });
+                    taskData.put("skills", skills);
+
+                    // Parse lines list
+                    List<Map<String, Object>> lines = record.get("lines").asList(v -> {
+                        Map<String, Object> lineMap = new HashMap<>();
+                        lineMap.put("lineId", v.get("lineId").asString(""));
+                        lineMap.put("sequence", v.get("sequence").asInt(0));
+                        lineMap.put("text", v.get("text").asString(""));
+                        return lineMap;
+                    });
+                    taskData.put("lines", lines);
+
+                    taskAnalysis.add(taskData);
+                }
+
+                log.info("Found {} tasks with demonstration analysis", taskAnalysis.size());
+                return taskAnalysis;
+            });
+        } catch (Exception e) {
+            log.error("Error analyzing task demonstrations for experience {}: {}", experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
     // ==================== TASK-LEVEL SKILL POPULARITY ANALYSIS (PHASE 6.5) ====================
 
     /**

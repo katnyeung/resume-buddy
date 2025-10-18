@@ -64,6 +64,9 @@ public class JobAnalysisResultDto {
     private List<MissingActivityDto> missingActivities;
     private List<MissingSkillByCategoryDto> missingSkillsByCategory;
 
+    // Task Demonstration Analysis (PHASE 11.3)
+    private List<TaskDemonstrationDto> taskDemonstrationAnalysis;
+
     private LocalDateTime createdAt;
 
     @Data
@@ -286,5 +289,51 @@ public class JobAnalysisResultDto {
         private String category;
         private Integer peopleWithSkill;
         private Double taskImportance;
+    }
+
+    // ==================== PHASE 11.3: Task Demonstration Analysis ====================
+
+    /**
+     * Task-centric view of how user demonstrates O*NET tasks
+     * Shows which skills and resume lines demonstrate each task
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class TaskDemonstrationDto {
+        private String taskId;
+        private String taskName;
+        private Double importance;
+        private String taskCategory;
+        private String coverageStrength; // STRONG/MODERATE/WEAK/NONE
+        private Integer skillCount;
+        private Integer lineCount;
+        private List<SkillCoveringTaskDto> skills;
+        private List<ResumeLineDto> lines;
+    }
+
+    /**
+     * Skill that demonstrates a specific O*NET task
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SkillCoveringTaskDto {
+        private String skillName;
+        private String category;
+        private Boolean isPrimary;
+        private Integer lineCount; // how many lines for THIS skill demonstrate the task
+    }
+
+    /**
+     * Resume line that demonstrates an O*NET task
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ResumeLineDto {
+        private String lineId;
+        private Integer sequence;
+        private String text;
     }
 }

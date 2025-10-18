@@ -32,10 +32,8 @@ export default function CreditBalance({ userId = 'default_user', compact = false
 
   useEffect(() => {
     fetchCredits();
-
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchCredits, 30000);
-    return () => clearInterval(interval);
+    // No polling - credits only change on user actions (upload/analyze)
+    // Parent component should call fetchCredits() after credit-consuming operations
   }, [userId]);
 
   if (loading && !credits) {

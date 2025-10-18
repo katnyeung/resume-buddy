@@ -402,12 +402,10 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
         </div>
       )}
 
-      {/* Extracted Skills (MERGED with Evidence Crossing + Missing Skills) */}
-      {analysis.extractedSkills && analysis.extractedSkills.length > 0 && (
-        <SkillsTable
-          skills={analysis.extractedSkills}
-          evidenceData={analysis.skillDemonstrationAnalysis}
-          missingSkills={analysis.missingSkillsByCategory}
+      {/* Task Coverage Analysis (PHASE 11.3) - Task-first credibility view */}
+      {analysis.taskDemonstrationAnalysis && analysis.taskDemonstrationAnalysis.length > 0 && (
+        <TaskCoverageTable
+          tasks={analysis.taskDemonstrationAnalysis}
           resumeId={analysis.resumeId}
           experienceId={analysis.experienceId}
         />
@@ -415,8 +413,19 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
 
       {/* PHASE 6: DEEP GRAPH ANALYSIS - Priority Order */}
 
-      {/* Section 1: Untapped Opportunities (HIGHEST PRIORITY) */}
-      {analysis.missingOpportunities && analysis.missingOpportunities.length > 0 && (
+      {/* Section 1: Untapped Opportunities (Tasks completely missing from Task Coverage) */}
+      {analysis.missingOpportunities && analysis.missingOpportunities.length > 0 && (() => {
+        // Filter out opportunities that already appear in taskDemonstrationAnalysis
+        const taskIdsInCoverage = new Set(
+          (analysis.taskDemonstrationAnalysis || []).map((t: any) => t.taskId)
+        );
+        const trulyMissingOpportunities = analysis.missingOpportunities.filter(
+          (opp: any) => !taskIdsInCoverage.has(opp.taskId)
+        );
+
+        if (trulyMissingOpportunities.length === 0) return null;
+
+        return (
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-lg p-6">
           <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
             <span>💡</span> Untapped Opportunities
@@ -425,16 +434,13 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
             You have skills that could demonstrate these important O*NET tasks, but you don't currently showcase them
           </p>
           <div className="space-y-3">
-            {analysis.missingOpportunities.map((opp: any, idx: number) => (
+            {trulyMissingOpportunities.map((opp: any, idx: number) => (
               <div key={idx} className="bg-white border-l-4 border-amber-400 rounded p-4">
-                <div className="flex justify-between items-start">
+                <div className="flex justify-between items-start gap-4">
                   <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="mb-1">
                       <span className="text-sm font-semibold text-amber-900">
                         {opp.taskName}
-                      </span>
-                      <span className="text-xs bg-amber-100 text-amber-800 px-2 py-1 rounded">
-                        {opp.importance.toFixed(0)}% importance
                       </span>
                     </div>
                     <p className="text-sm text-gray-700 mt-2">
@@ -445,12 +451,18 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
                       {opp.taskCategory} • {opp.occupationTitle}
                     </div>
                   </div>
+                  <div>
+                    <span className="text-xs font-medium bg-amber-100 text-amber-800 px-2 py-1 rounded border border-amber-300">
+                      ⭐ {opp.importance.toFixed(0)}% importance
+                    </span>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Section 2: Missing High-Priority Tasks & Activities */}
       {((analysis.missingTasks && analysis.missingTasks.length > 0) ||
@@ -566,6 +578,238 @@ function TrustBadge({ evidenceStrength, linesCount, onClick }: {
         {linesCount > 0 && (
           <span className="text-[10px] opacity-75">{linesCount} {linesCount === 1 ? 'connection' : 'connections'}</span>
         )}
+      </div>
+    </div>
+  );
+}
+
+// ==================== TASK COVERAGE TABLE (PHASE 11.3) ====================
+
+function TaskCoverageTable({ tasks, resumeId, experienceId }: {
+  tasks: any[],
+  resumeId: string,
+  experienceId: string
+}) {
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+  const [taskPopupData, setTaskPopupData] = useState<any>(null);
+  const [loadingTask, setLoadingTask] = useState<string | null>(null);
+
+  const toggleExpand = (taskId: string) => {
+    const newExpanded = new Set(expandedTasks);
+    if (newExpanded.has(taskId)) {
+      newExpanded.delete(taskId);
+    } else {
+      newExpanded.add(taskId);
+    }
+    setExpandedTasks(newExpanded);
+  };
+
+  const fetchTaskPopularity = async (taskId: string) => {
+    setLoadingTask(taskId);
+    try {
+      const token = localStorage.getItem('authToken');
+      const headers: any = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/resumes/${resumeId}/experiences/${experienceId}/tasks/${taskId}/skill-popularity`,
+        { headers }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        setTaskPopupData(data);
+      }
+    } catch (error) {
+      console.error('Error fetching task popularity:', error);
+    } finally {
+      setLoadingTask(null);
+    }
+  };
+
+  const getCoverageBadge = (strength: string) => {
+    const badges = {
+      STRONG: { color: 'bg-green-100 text-green-800 border-green-300', icon: '✅', text: 'STRONG COVERAGE' },
+      MODERATE: { color: 'bg-yellow-100 text-yellow-800 border-yellow-300', icon: '🟡', text: 'MODERATE COVERAGE' },
+      WEAK: { color: 'bg-orange-100 text-orange-800 border-orange-300', icon: '⚠️', text: 'WEAK COVERAGE' },
+      NONE: { color: 'bg-gray-100 text-gray-800 border-gray-300', icon: '❌', text: 'NO COVERAGE' }
+    };
+    const badge = badges[strength as keyof typeof badges] || badges.NONE;
+    return (
+      <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border ${badge.color}`}>
+        <span>{badge.icon}</span>
+        <span>{badge.text}</span>
+      </span>
+    );
+  };
+
+  return (
+    <div className="bg-white border rounded-lg p-6">
+      <h2 className="text-xl font-semibold mb-2 flex items-center gap-2">
+        <span>🎯</span> Task Coverage Analysis
+      </h2>
+      <p className="text-sm text-gray-600 mb-4">
+        How your skills demonstrate critical O*NET job tasks. Tasks with multiple skills = stronger evidence.
+      </p>
+
+      <div className="space-y-3">
+        {tasks
+          .sort((a, b) => {
+            // Sort by skill count first (descending)
+            if (b.skillCount !== a.skillCount) {
+              return b.skillCount - a.skillCount;
+            }
+            // Then by line count (descending)
+            if (b.lineCount !== a.lineCount) {
+              return b.lineCount - a.lineCount;
+            }
+            // Finally by importance (descending)
+            return b.importance - a.importance;
+          })
+          .map((task) => {
+            // Calculate importance background - higher importance = stronger purple
+            const importance = task.importance || 0;
+            const getImportanceBackground = (imp: number) => {
+              if (imp >= 80) return 'bg-indigo-100 border-indigo-200';
+              if (imp >= 60) return 'bg-indigo-50 border-indigo-200';
+              if (imp >= 40) return 'bg-purple-50/50 border-purple-100';
+              return 'bg-white border-gray-200';
+            };
+
+            const getImportanceBadge = (imp: number) => {
+              if (imp >= 80) return 'bg-indigo-100 text-indigo-800 border-indigo-300';
+              if (imp >= 60) return 'bg-indigo-50 text-indigo-700 border-indigo-200';
+              if (imp >= 40) return 'bg-purple-50 text-purple-700 border-purple-200';
+              return 'bg-gray-50 text-gray-600 border-gray-200';
+            };
+
+            return (
+              <div key={task.taskId} className={`border rounded-lg ${getImportanceBackground(importance)}`}>
+                <div
+                  onClick={() => toggleExpand(task.taskId)}
+                  className="p-4 cursor-pointer hover:opacity-90 transition-opacity"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-medium">📋 {task.taskName}</span>
+                      </div>
+                      <div className="text-xs text-gray-600">
+                        {task.skillCount} skill{task.skillCount !== 1 ? 's' : ''} across {task.lineCount} resume line{task.lineCount !== 1 ? 's' : ''}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      {getCoverageBadge(task.coverageStrength)}
+                      <span className={`text-xs font-medium px-2 py-1 rounded border ${getImportanceBadge(importance)}`}>
+                        ⭐ {task.importance?.toFixed(0)}% importance
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+            {expandedTasks.has(task.taskId) && (
+              <div className="px-4 pb-4 border-t bg-gray-50">
+                {task.skills && task.skills.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">Skills demonstrating this task:</h4>
+                    <div className="space-y-2">
+                      {task.skills.map((skill: any, idx: number) => {
+                        // Find benchmark data for this skill
+                        const benchmarkSkill = taskPopupData?.taskId === task.taskId
+                          ? taskPopupData.skillPopularity?.find((s: any) => s.skillName === skill.skillName)
+                          : null;
+
+                        return (
+                          <div key={idx} className="text-sm text-gray-700">
+                            <div className="flex items-center gap-2">
+                              <span>•</span>
+                              <span className="font-medium">{skill.skillName}</span>
+                              <span className="text-gray-500">({skill.category})</span>
+                              {skill.isPrimary && <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">⭐ Primary</span>}
+                              <span className="text-gray-400 text-xs">- {skill.lineCount} line{skill.lineCount !== 1 ? 's' : ''}</span>
+                            </div>
+                            {benchmarkSkill && (
+                              <div className="ml-4 mt-0.5 text-xs text-blue-600">
+                                💡 {benchmarkSkill.peopleWithSkill} other {benchmarkSkill.peopleWithSkill === 1 ? 'person uses' : 'people use'} this skill for this task
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Show skills others use that user doesn't have */}
+                    {taskPopupData?.taskId === task.taskId && taskPopupData.skillPopularity && (
+                      <div className="mt-3 pt-3 border-t border-gray-200">
+                        {(() => {
+                          const userSkillNames = task.skills.map((s: any) => s.skillName);
+                          const othersSkills = taskPopupData.skillPopularity
+                            .filter((s: any) => !userSkillNames.includes(s.skillName))
+                            .slice(0, 5);
+
+                          if (othersSkills.length === 0) return null;
+
+                          return (
+                            <>
+                              <h5 className="text-sm font-semibold text-amber-700 mb-2">💡 Others also use:</h5>
+                              <div className="space-y-1">
+                                {othersSkills.map((skill: any, i: number) => (
+                                  <div key={i} className="text-sm text-gray-700 ml-4">
+                                    • <span className="font-medium">{skill.skillName}</span> <span className="text-gray-500">({skill.skillCategory})</span> - {skill.peopleWithSkill} people
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    )}
+
+                    {/* Load benchmark button */}
+                    {!taskPopupData || taskPopupData.taskId !== task.taskId ? (
+                      <div className="mt-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            fetchTaskPopularity(task.taskId);
+                          }}
+                          disabled={loadingTask === task.taskId}
+                          className="text-xs text-blue-600 hover:text-blue-700 underline disabled:text-gray-400"
+                        >
+                          {loadingTask === task.taskId ? 'Loading...' : '💡 See how other people handle this task'}
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                )}
+
+                {task.lines && task.lines.length > 0 && (
+                  <div className="mt-3">
+                    <h4 className="text-sm font-semibold text-gray-700 mb-2">
+                      Resume Evidence ({task.lines.length} line{task.lines.length !== 1 ? 's' : ''}):
+                    </h4>
+                    <div className="space-y-2">
+                      {task.lines.slice(0, 3).map((line: any, idx: number) => (
+                        <div key={idx} className="text-sm bg-white p-2 rounded border border-gray-200">
+                          <span className="text-gray-500 font-mono text-xs">Line {line.sequence}:</span>
+                          <span className="ml-2 text-gray-700">{line.text}</span>
+                        </div>
+                      ))}
+                      {task.lines.length > 3 && (
+                        <div className="text-xs text-gray-500">+ {task.lines.length - 3} more line{task.lines.length - 3 !== 1 ? 's' : ''}</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+            );
+          })}
       </div>
     </div>
   );
