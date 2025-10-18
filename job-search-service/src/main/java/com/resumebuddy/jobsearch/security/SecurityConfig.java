@@ -37,6 +37,9 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         // Admin endpoints (public for MVP testing - secure in production!)
                         .requestMatchers("/api/job-search/admin/**").permitAll()
+                        // Skill drilldown endpoints (public for MVP - allows anonymous job browsing)
+                        .requestMatchers("/api/job-search/skills/**").permitAll()
+                        .requestMatchers("/api/job-search/jobs/by-ids").permitAll()
                         // All other endpoints require authentication
                         .anyRequest().authenticated()
                 )

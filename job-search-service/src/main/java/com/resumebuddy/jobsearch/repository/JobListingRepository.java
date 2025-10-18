@@ -45,4 +45,7 @@ public interface JobListingRepository extends JpaRepository<JobListing, String> 
     List<JobListing> findByFetchedAtAfterOrderByFetchedAtDesc(LocalDateTime cutoff, Pageable pageable);
 
     List<JobListing> findAllByOrderByFetchedAtDesc(Pageable pageable);
+
+    // Skill Drilldown: Fetch jobs by list of IDs (from Neo4j queries)
+    List<JobListing> findByIdIn(List<String> ids);
 }

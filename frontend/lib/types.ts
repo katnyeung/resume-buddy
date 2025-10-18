@@ -193,3 +193,32 @@ export interface JobMatchingResultsResponse {
   profileSummary: string;
   matches: JobMatchResult[];
 }
+
+// Skill Drilldown types (Neo4j graph-based job discovery)
+export interface SkillCooccurrence {
+  skillName: string;
+  jobCount: number;
+}
+
+export interface SkillDrilldownResponse {
+  totalJobs: number;
+  jobIds: string[];
+  dateDistribution: Record<string, number>;
+  relatedSkills: SkillCooccurrence[];
+}
+
+export interface JobListing {
+  id: string;
+  source: string;
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  url: string;
+  salaryRange?: string;
+  contractType?: string;
+  postedDate?: string;
+  expiresDate?: string;
+  fetchedAt: string;
+  extractedSkills?: string; // JSON string
+}

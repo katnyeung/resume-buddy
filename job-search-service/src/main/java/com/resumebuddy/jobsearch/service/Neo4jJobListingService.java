@@ -185,4 +185,120 @@ public class Neo4jJobListingService {
             return Map.of();
         }
     }
+
+    /**
+     * Get jobs by skills (AND logic - must have ALL skills)
+     * Returns job IDs and date distribution for skill drill-down feature
+     *
+     * @param skillNames List of skill names (AND logic)
+     * @return Map with jobIds and dateDistribution
+     */
+    public Map<String, Object> getJobsBySkills(List<String> skillNames) {
+        log.info("Finding jobs requiring ALL skills: {}", skillNames);
+
+        SessionConfig sessionConfig = SessionConfig.builder()
+                .withDatabase(database)
+                .build();
+
+        try (Session session = neo4jDriver.session(sessionConfig)) {
+            return session.executeRead(tx -> {
+                // Cypher: Find jobs that have ALL specified skills
+                String cypher = """
+                    MATCH (job:JobListing)-[:REQUIRES_SKILL]->(skill:Skill)
+                    WHERE skill.name IN $skillNames
+                    WITH job, COUNT(DISTINCT skill) as matchCount
+                    WHERE matchCount = SIZE($skillNames)
+                    RETURN job.id as jobId,
+                           date(job.lastUpdated) as jobDate
+                    ORDER BY job.lastUpdated DESC
+                    """;
+
+                var result = tx.run(cypher, Map.of("skillNames", skillNames));
+
+                List<String> jobIds = new java.util.ArrayList<>();
+                Map<String, Long> dateDistribution = new java.util.HashMap<>();
+
+                result.stream().forEach(record -> {
+                    String jobId = record.get("jobId").asString();
+                    jobIds.add(jobId);
+
+                    // Group by week for date distribution (ISO week format: YYYY-Www)
+                    try {
+                        String dateStr = record.get("jobDate").asString();
+                        // Extract week from date (e.g., "2025-01-15" -> "2025-W03")
+                        String weekKey = dateStr.substring(0, 8) + "01"; // Simplify to month start
+                        dateDistribution.merge(weekKey, 1L, Long::sum);
+                    } catch (Exception e) {
+                        log.debug("Could not parse date for job {}", jobId);
+                    }
+                });
+
+                log.info("Found {} jobs matching ALL skills: {}", jobIds.size(), skillNames);
+
+                return Map.of(
+                        "jobIds", jobIds,
+                        "dateDistribution", dateDistribution
+                );
+            });
+        } catch (Exception e) {
+            log.error("Failed to get jobs by skills: {}", skillNames, e);
+            return Map.of(
+                    "jobIds", List.of(),
+                    "dateDistribution", Map.of()
+            );
+        }
+    }
+
+    /**
+     * Get related skills that co-occur with selected skills
+     * Used for skill drill-down: shows what other skills appear in jobs with selected skills
+     *
+     * @param selectedSkills List of already selected skills
+     * @param limit Maximum number of related skills to return
+     * @return Map of skill name to job count
+     */
+    public Map<String, Long> getRelatedSkills(List<String> selectedSkills, int limit) {
+        log.info("Finding skills related to: {}", selectedSkills);
+
+        SessionConfig sessionConfig = SessionConfig.builder()
+                .withDatabase(database)
+                .build();
+
+        try (Session session = neo4jDriver.session(sessionConfig)) {
+            return session.executeRead(tx -> {
+                // Cypher: Find jobs with ALL selected skills, then get OTHER skills in those jobs
+                String cypher = """
+                    MATCH (job:JobListing)-[:REQUIRES_SKILL]->(selected:Skill)
+                    WHERE selected.name IN $selectedSkills
+                    WITH job, COUNT(DISTINCT selected) as matchCount
+                    WHERE matchCount = SIZE($selectedSkills)
+                    MATCH (job)-[:REQUIRES_SKILL]->(other:Skill)
+                    WHERE NOT other.name IN $selectedSkills
+                    RETURN other.name as skillName,
+                           COUNT(DISTINCT job) as jobCount
+                    ORDER BY jobCount DESC
+                    LIMIT $limit
+                    """;
+
+                var result = tx.run(cypher, Map.of(
+                        "selectedSkills", selectedSkills,
+                        "limit", limit
+                ));
+
+                Map<String, Long> relatedSkills = new java.util.LinkedHashMap<>();
+                result.stream().forEach(record -> {
+                    String skillName = record.get("skillName").asString();
+                    Long jobCount = record.get("jobCount").asLong();
+                    relatedSkills.put(skillName, jobCount);
+                });
+
+                log.info("Found {} related skills for: {}", relatedSkills.size(), selectedSkills);
+
+                return relatedSkills;
+            });
+        } catch (Exception e) {
+            log.error("Failed to get related skills for: {}", selectedSkills, e);
+            return Map.of();
+        }
+    }
 }

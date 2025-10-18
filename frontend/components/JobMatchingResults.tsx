@@ -2,7 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import { getMatchingResults, toggleMatchSaved, markMatchApplied, toggleMatchRedflag } from '@/lib/api';
-import { JobMatchingResultsResponse, JobMatchResult } from '@/lib/types';
+import { JobMatchingResultsResponse, JobMatchResult, JobListing } from '@/lib/types';
+import SkillFilterCloud from './SkillFilterCloud';
+import SkillDrilldownModal from './SkillDrilldownModal';
 
 interface JobMatchingResultsProps {
   profileId: string;
@@ -19,6 +21,12 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
   const [sortField, setSortField] = useState<SortField>('matchScore');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
   const [forceRefresh, setForceRefresh] = useState(false);
+
+  // Skill drilldown state
+  const [isDrilldownModalOpen, setIsDrilldownModalOpen] = useState(false);
+  const [selectedSkillForDrilldown, setSelectedSkillForDrilldown] = useState<string | undefined>();
+  const [graphDiscoveredJobs, setGraphDiscoveredJobs] = useState<JobListing[] | null>(null);
+  const [selectedSkillsForDisplay, setSelectedSkillsForDisplay] = useState<string[]>([]);
 
   // Load topK and maxDaysOld from localStorage (persist user preferences)
   const [topK, setTopK] = useState(() => {
@@ -392,7 +400,26 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
     );
   };
 
-  if (loading && !results) {
+  // Skill drilldown handlers
+  const handleSkillClick = (skillName: string) => {
+    setSelectedSkillForDrilldown(skillName);
+    setIsDrilldownModalOpen(true);
+  };
+
+  const handleViewJobsFromDrilldown = (jobs: JobListing[], selectedSkills: string[]) => {
+    setGraphDiscoveredJobs(jobs);
+    setSelectedSkillsForDisplay(selectedSkills);
+    // Clear vector search results to show graph-discovered jobs
+    setResults(null);
+  };
+
+  const handleBackToVectorSearch = () => {
+    setGraphDiscoveredJobs(null);
+    setSelectedSkillsForDisplay([]);
+    handleSearch(false); // Reload vector search results
+  };
+
+  if (loading && !results && !graphDiscoveredJobs) {
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-12 text-center">
         <div className="flex flex-col items-center">
@@ -403,7 +430,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
     );
   }
 
-  if (error && !results) {
+  if (error && !results && !graphDiscoveredJobs) {
     return (
       <div className="bg-white border border-gray-200 rounded-lg p-8 text-center">
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded text-red-700">
@@ -419,7 +446,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
     );
   }
 
-  if (!results) {
+  if (!results && !graphDiscoveredJobs) {
     // Show empty state with controls - user must click "Refresh Results" to search
     return (
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -532,9 +559,111 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-      {/* Header */}
-      <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
+    <>
+      {/* Skill Filter Cloud */}
+      <SkillFilterCloud onSkillClick={handleSkillClick} />
+
+      {/* Skill Drilldown Modal */}
+      <SkillDrilldownModal
+        isOpen={isDrilldownModalOpen}
+        initialSkill={selectedSkillForDrilldown}
+        onClose={() => setIsDrilldownModalOpen(false)}
+        onViewJobs={handleViewJobsFromDrilldown}
+      />
+
+      {/* Show graph-discovered jobs if available */}
+      {graphDiscoveredJobs && (
+        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+          <div className="px-6 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-indigo-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Neo4j Graph Discovery Results
+                </h3>
+                {selectedSkillsForDisplay.length > 0 && (
+                  <div className="flex items-center gap-2 mt-2 mb-1">
+                    <span className="text-xs text-gray-600 font-medium">Selected skills:</span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {selectedSkillsForDisplay.map((skill, index) => (
+                        <span key={skill} className="flex items-center gap-1">
+                          {index > 0 && <span className="text-indigo-400 text-xs">+</span>}
+                          <span className="px-2.5 py-1 bg-indigo-600 text-white rounded-full text-xs font-semibold shadow-sm">
+                            {skill}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <p className="text-sm text-gray-600 mt-1">
+                  Found {graphDiscoveredJobs.length} jobs from skill-based graph query
+                </p>
+              </div>
+              <button
+                onClick={handleBackToVectorSearch}
+                className="px-4 py-2 bg-white border border-indigo-300 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
+              >
+                ← Back to Vector Search
+              </button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Job Details
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Company
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Location
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Posted
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {graphDiscoveredJobs.map((job) => (
+                  <tr key={job.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4">
+                      <a
+                        href={job.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800 underline"
+                      >
+                        {job.title}
+                      </a>
+                      {job.salaryRange && (
+                        <div className="text-xs text-green-600 font-medium mt-1">
+                          {job.salaryRange}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-gray-900">{job.company}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">{job.location}</td>
+                    <td className="px-6 py-4 text-sm text-gray-500">
+                      {job.postedDate ? new Date(job.postedDate).toLocaleDateString() : 'N/A'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Original vector search results */}
+      {results && (
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {/* Header */}
+        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-900">
@@ -664,5 +793,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
         </div>
       )}
     </div>
+      )}
+    </>
   );
 }

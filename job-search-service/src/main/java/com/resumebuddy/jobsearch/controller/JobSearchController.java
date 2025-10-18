@@ -1,12 +1,12 @@
 package com.resumebuddy.jobsearch.controller;
 
+import com.resumebuddy.jobsearch.domain.JobListing;
 import com.resumebuddy.jobsearch.domain.JobMatch;
-import com.resumebuddy.jobsearch.dto.CreateProfileRequest;
-import com.resumebuddy.jobsearch.dto.JobMatchResponse;
-import com.resumebuddy.jobsearch.dto.JobMatchingResultResponse;
-import com.resumebuddy.jobsearch.dto.UpdateJobPostRequest;
+import com.resumebuddy.jobsearch.dto.*;
+import com.resumebuddy.jobsearch.repository.JobListingRepository;
 import com.resumebuddy.jobsearch.service.JobMatchingApplicationService;
 import com.resumebuddy.jobsearch.service.JobSearchApplicationService;
+import com.resumebuddy.jobsearch.service.Neo4jJobListingService;
 import com.resumebuddy.jobsearch.domain.JobSearchProfile;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -24,8 +24,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
-import java.util.List;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * REST Controller: Job Search API
@@ -40,6 +41,8 @@ public class JobSearchController {
 
     private final JobSearchApplicationService jobSearchService;
     private final JobMatchingApplicationService jobMatchingService;
+    private final Neo4jJobListingService neo4jJobListingService;
+    private final JobListingRepository jobListingRepository;
 
     /**
      * Create job search profile from selected experiences
@@ -705,6 +708,133 @@ public class JobSearchController {
 
         JobMatch match = jobMatchingService.toggleRedflag(matchId, request.isRedflag());
         return ResponseEntity.ok(match);
+    }
+
+    /**
+     * Skill Drilldown: Get top in-demand skills
+     * GET /api/job-search/skills/top?limit=30
+     */
+    @Operation(
+            summary = "Get top in-demand skills",
+            description = "Returns top N skills by job count from Neo4j graph. " +
+                    "Used to populate skill tag cloud for interactive filtering."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Skills retrieved successfully"),
+            @ApiResponse(responseCode = "500", description = "Failed to fetch skills")
+    })
+    @GetMapping("/skills/top")
+    public ResponseEntity<List<SkillCooccurrence>> getTopSkills(
+            @Parameter(description = "Number of top skills to return") @RequestParam(defaultValue = "30") int limit) {
+        log.info("Fetching top {} in-demand skills", limit);
+
+        try {
+            Map<String, Long> topSkills = neo4jJobListingService.getTopInDemandSkills(limit);
+
+            List<SkillCooccurrence> result = topSkills.entrySet().stream()
+                    .sorted((e1, e2) -> Long.compare(e2.getValue(), e1.getValue())) // Sort by job count DESC
+                    .map(entry -> new SkillCooccurrence(entry.getKey(), entry.getValue()))
+                    .collect(Collectors.toList());
+
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Failed to fetch top skills", e);
+            return ResponseEntity.status(500).body(new ArrayList<>());
+        }
+    }
+
+    /**
+     * Skill Drilldown: Find jobs by skills (Neo4j graph query)
+     * POST /api/job-search/skills/drilldown
+     */
+    @Operation(
+            summary = "Find jobs by skills (Neo4j)",
+            description = "Uses Neo4j graph to find jobs that require ALL specified skills (AND logic). " +
+                    "Returns job IDs, date distribution, and related skills for drill-down UI."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Drilldown results retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = SkillDrilldownResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "500", description = "Neo4j query failed")
+    })
+    @PostMapping("/skills/drilldown")
+    public ResponseEntity<SkillDrilldownResponse> skillDrilldown(@Valid @RequestBody SkillDrilldownRequest request) {
+        log.info("Skill drilldown requested for: {}", request.getSkills());
+
+        try {
+            // Step 1: Query Neo4j for jobs matching ALL skills
+            Map<String, Object> jobData = neo4jJobListingService.getJobsBySkills(request.getSkills());
+            @SuppressWarnings("unchecked")
+            List<String> jobIds = (List<String>) jobData.get("jobIds");
+            @SuppressWarnings("unchecked")
+            Map<String, Long> dateDistribution = (Map<String, Long>) jobData.get("dateDistribution");
+
+            // Step 2: Get related skills (skills that co-occur with selected skills)
+            Map<String, Long> relatedSkillsMap = neo4jJobListingService.getRelatedSkills(request.getSkills(), 50);
+            List<SkillCooccurrence> relatedSkills = relatedSkillsMap.entrySet().stream()
+                    .map(entry -> new SkillCooccurrence(entry.getKey(), entry.getValue()))
+                    .collect(Collectors.toList());
+
+            // Step 3: Build response
+            SkillDrilldownResponse response = new SkillDrilldownResponse();
+            response.setTotalJobs((long) jobIds.size());
+            response.setJobIds(jobIds);
+            response.setDateDistribution(dateDistribution);
+            response.setRelatedSkills(relatedSkills);
+
+            log.info("Drilldown complete: {} jobs, {} related skills", jobIds.size(), relatedSkills.size());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Skill drilldown failed for: {}", request.getSkills(), e);
+            return ResponseEntity.status(500).body(new SkillDrilldownResponse(
+                    0L, List.of(), Map.of(), List.of()
+            ));
+        }
+    }
+
+    /**
+     * Fetch jobs by IDs (from Neo4j drilldown results)
+     * POST /api/job-search/jobs/by-ids
+     */
+    @Operation(
+            summary = "Fetch jobs by IDs",
+            description = "Retrieves full job details from MySQL for given job IDs (from Neo4j queries). " +
+                    "Optionally filters by date. Used to display jobs after skill drilldown."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Jobs retrieved successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "500", description = "Database query failed")
+    })
+    @PostMapping("/jobs/by-ids")
+    public ResponseEntity<List<JobListing>> getJobsByIds(@Valid @RequestBody JobsByIdsRequest request) {
+        log.info("Fetching {} jobs by IDs (maxDaysOld: {})", request.getJobIds().size(), request.getMaxDaysOld());
+
+        try {
+            // Fetch jobs from MySQL by IDs
+            List<JobListing> jobs = jobListingRepository.findByIdIn(request.getJobIds());
+
+            // Apply date filter if specified
+            if (request.getMaxDaysOld() != null && request.getMaxDaysOld() > 0) {
+                LocalDateTime cutoff = LocalDateTime.now().minusDays(request.getMaxDaysOld());
+                jobs = jobs.stream()
+                        .filter(job -> {
+                            LocalDateTime date = job.getPostedDate() != null ? job.getPostedDate() : job.getFetchedAt();
+                            return date.isAfter(cutoff);
+                        })
+                        .collect(Collectors.toList());
+            }
+
+            log.info("Returning {} jobs (after date filtering)", jobs.size());
+            return ResponseEntity.ok(jobs);
+
+        } catch (Exception e) {
+            log.error("Failed to fetch jobs by IDs", e);
+            return ResponseEntity.status(500).body(new ArrayList<>());
+        }
     }
 
     // Request DTOs

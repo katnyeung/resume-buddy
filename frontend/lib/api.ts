@@ -375,3 +375,25 @@ export const getCrawlActivityHistory = async (limit: number = 5): Promise<any[]>
   const response = await jobSearchClient.get(`/job-search/admin/crawl/history?limit=${limit}`);
   return response.data;
 };
+
+// Skill Drilldown (Neo4j graph-based job discovery)
+export const getTopSkills = async (limit: number = 30): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/skills/top?limit=${limit}`);
+  return response.data;
+};
+
+export const skillDrilldown = async (skills: string[], maxDaysOld: number = 30): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/skills/drilldown`, {
+    skills,
+    maxDaysOld
+  });
+  return response.data;
+};
+
+export const getJobsByIds = async (jobIds: string[], maxDaysOld: number = 0): Promise<any[]> => {
+  const response = await jobSearchClient.post(`/job-search/jobs/by-ids`, {
+    jobIds,
+    maxDaysOld
+  });
+  return response.data;
+};
