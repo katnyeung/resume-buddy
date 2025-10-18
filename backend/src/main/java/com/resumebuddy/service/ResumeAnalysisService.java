@@ -39,6 +39,7 @@ public class ResumeAnalysisService {
     private final JobAnalysisRepository jobAnalysisRepository;
     private final ObjectMapper objectMapper;
     private final EntityManager entityManager;
+    private final Neo4jGraphService neo4jGraphService;
 
     @Value("${app.openai.api-key}")
     private String openaiApiKey;
@@ -87,7 +88,12 @@ public class ResumeAnalysisService {
 
         // Delete existing analysis FIRST (before LLM call) to avoid conflicts
         resumeAnalysisRepository.findByResumeId(resumeId).ifPresent(existing -> {
-            log.info("Deleting existing analysis for resume ID: {}", resumeId);
+            log.info("Deleting existing analysis and Neo4j graph data for resume ID: {}", resumeId);
+
+            // STEP 1: Clean up Neo4j graph nodes first (JobExperience nodes and relationships)
+            neo4jGraphService.deleteResumeFromGraph(resumeId);
+
+            // STEP 2: Then delete MySQL data (CASCADE will delete child tables)
             resumeAnalysisRepository.delete(existing);
             resumeAnalysisRepository.flush();
         });

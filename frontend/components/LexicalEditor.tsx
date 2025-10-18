@@ -136,6 +136,23 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
 
   // Analyze handler - triggers AI analysis
   const handleAnalyze = async () => {
+    // If already analyzed, show warning about data loss
+    if (structuredAnalysis) {
+      const confirmed = window.confirm(
+        '⚠️ Warning: Re-analyzing will permanently delete all job analysis data including:\n\n' +
+        '• Recruiter evaluations and scores\n' +
+        '• O*NET skill mappings and graph relationships\n' +
+        '• STARS suggestions and improvement areas\n' +
+        '• Missing skills analysis\n\n' +
+        'You will need to re-analyze each job experience individually after this.\n\n' +
+        'Continue with re-analysis?'
+      );
+
+      if (!confirmed) {
+        return; // User cancelled
+      }
+    }
+
     try {
       setAnalyzing(true);
       setAnalysisStatus('Analyzing with AI...');

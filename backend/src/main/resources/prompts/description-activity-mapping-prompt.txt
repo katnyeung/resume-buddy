@@ -62,6 +62,14 @@ For EACH description line, provide a recruiter's evaluation:
 - Technology choices and constraints
 - Business outcomes beyond technical metrics
 
+**STARS Analysis** - How to improve this line using STARS framework (1-2 brief suggestions):
+- Focus on what's MISSING or unclear in this specific line
+- Combine multiple STARS elements in one suggestion for brevity
+- Examples:
+  - "Add context about WHY this was needed (Situation) and quantify the impact (Result)"
+  - "Clarify your specific role (Task/Action) and business value delivered (Significance)"
+- Be specific and actionable for this line only
+
 **Recruiter Appeal Score** (0-10):
 - 9-10: Exceptional - Clear senior+ impact with quantifiable results
 - 7-8: Strong - Good technical depth with measurable outcomes
@@ -165,6 +173,10 @@ For EACH description line, provide a recruiter's evaluation:
           "What was your specific role - architect, lead developer, or team contributor?",
           "How large was the microservices ecosystem?",
           "What cloud provider and what was the deployment architecture?"
+        ],
+        "starsAnalysis": [
+          "Add context about the business challenge that prompted the microservices migration (Situation) and quantify scale metrics like request volume or user count (Result)",
+          "Clarify your specific role in the architecture and implementation (Task/Action) to show ownership level"
         ],
         "recruiterAppealScore": 8,
         "appealReasoning": "Strong technical depth with quantifiable uptime metric, but could use more scale context (request volume, user count, team size)",

@@ -55,11 +55,12 @@ public class JobMatch {
     private LocalDateTime createdAt;
 
     /**
-     * User bookmarked this job match
-     * Saved matches won't be deleted during force refresh
+     * User star rating for saved job match (0-3)
+     * 0 = not saved, 1-3 = saved with priority level (1=low, 2=medium, 3=high)
+     * Saved matches (rating > 0) won't be deleted during force refresh
      */
     @Column(name = "is_saved", nullable = false)
-    private Boolean isSaved = false;
+    private Integer isSaved = 0;
 
     /**
      * User applied to this job

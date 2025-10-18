@@ -56,7 +56,7 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
           </div>
         </div>
 
-        <div className="mt-4 flex items-center gap-4">
+        <div className="mt-4 flex items-center gap-4 flex-wrap">
           <span className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
             {analysis.normalizedTitle}
           </span>
@@ -69,6 +69,48 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
             </span>
           )}
         </div>
+
+        {/* Industry Classification */}
+        {(analysis.primaryIndustry || analysis.industryVertical || (analysis.industrySectors && analysis.industrySectors.length > 0)) && (
+          <div className="mt-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-lg p-4">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">🏢</span>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-emerald-900 mb-2">Industry Classification</h3>
+                <div className="space-y-2">
+                  {analysis.primaryIndustry && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-emerald-700 font-medium min-w-20">Primary:</span>
+                      <span className="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 rounded-full text-sm font-medium">
+                        {analysis.primaryIndustry}
+                      </span>
+                    </div>
+                  )}
+                  {analysis.industryVertical && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-emerald-700 font-medium min-w-20">Vertical:</span>
+                      <span className="inline-block px-3 py-1 bg-teal-100 text-teal-800 rounded-full text-sm font-medium">
+                        {analysis.industryVertical}
+                      </span>
+                    </div>
+                  )}
+                  {analysis.industrySectors && analysis.industrySectors.length > 0 && (
+                    <div className="flex items-start gap-2">
+                      <span className="text-xs text-emerald-700 font-medium min-w-20 pt-1">Sectors:</span>
+                      <div className="flex flex-wrap gap-2">
+                        {analysis.industrySectors.map((sector: string, idx: number) => (
+                          <span key={idx} className="inline-block px-2 py-1 bg-white border border-emerald-300 text-emerald-800 rounded text-xs">
+                            {sector}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Job Families & Key Responsibilities - TOP PRIORITY */}
@@ -288,6 +330,18 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
                           <div className="space-y-1">
                             {line.recruiterInsights.potentialQuestions.map((q: string, i: number) => (
                               <div key={i} className="text-sm ml-4 text-gray-600">• {q}</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* STARS Analysis */}
+                      {line.recruiterInsights.starsAnalysis && line.recruiterInsights.starsAnalysis.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-sm font-medium text-gray-700 mb-2">📋 STARS Suggestions:</p>
+                          <div className="space-y-1">
+                            {line.recruiterInsights.starsAnalysis.map((suggestion: string, i: number) => (
+                              <div key={i} className="text-sm ml-4 text-indigo-700">• {suggestion}</div>
                             ))}
                           </div>
                         </div>

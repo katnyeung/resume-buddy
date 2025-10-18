@@ -37,9 +37,9 @@ Provide a comprehensive evaluation covering:
 
 5. **Key Strengths**: List 3-5 specific strengths with evidence from the description
 
-6. **Improvement Areas**: List 2-3 areas where the description could be stronger or skills that are typically expected but not demonstrated
+6. **Improvement Areas**: List 3-6 areas where the description could be stronger or skills that are typically expected but not demonstrated
 
-7. **Recruiter Summary**: A 2-3 sentence honest evaluation of this experience that a recruiter would use to assess the candidate
+7. **Recruiter Summary**: A 2-4 sentence honest evaluation of this experience that a recruiter would use to assess the candidate
 
 Format your response as JSON:
 {

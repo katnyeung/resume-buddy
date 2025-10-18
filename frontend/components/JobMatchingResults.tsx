@@ -8,7 +8,7 @@ interface JobMatchingResultsProps {
   profileId: string;
 }
 
-type SortField = 'matchScore' | 'skillMatch' | 'postedDate';
+type SortField = 'matchScore' | 'skillMatch' | 'postedDate' | 'fetchedDate';
 type SortDirection = 'asc' | 'desc';
 
 export default function JobMatchingResults({ profileId }: JobMatchingResultsProps) {
@@ -39,18 +39,20 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
     }
   };
 
-  const handleToggleSaved = async (matchId: string, currentlySaved: boolean) => {
+  const handleToggleSaved = async (matchId: string, currentRating: number) => {
     try {
-      await toggleMatchSaved(matchId, !currentlySaved);
+      // Cycle through ratings: 0 -> 1 -> 2 -> 3 -> 0
+      const newRating = currentRating >= 3 ? 0 : currentRating + 1;
+      await toggleMatchSaved(matchId, newRating);
       // Update local state
       if (results) {
         const updatedMatches = results.matches.map(match =>
-          match.matchId === matchId ? { ...match, isSaved: !currentlySaved } : match
+          match.matchId === matchId ? { ...match, isSaved: newRating } : match
         );
         setResults({ ...results, matches: updatedMatches });
       }
     } catch (err) {
-      console.error('Failed to toggle saved status:', err);
+      console.error('Failed to update saved rating:', err);
     }
   };
 
@@ -134,6 +136,9 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
         case 'postedDate':
           comparison = new Date(a.postedDate).getTime() - new Date(b.postedDate).getTime();
           break;
+        case 'fetchedDate':
+          comparison = new Date(a.fetchedAt).getTime() - new Date(b.fetchedAt).getTime();
+          break;
       }
 
       return sortDirection === 'asc' ? comparison : -comparison;
@@ -152,7 +157,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
         className={`transition-all ${
           isCollapsed
             ? 'bg-red-50 cursor-pointer hover:bg-red-100'
-            : match.isSaved
+            : match.isSaved > 0
             ? 'bg-yellow-50 hover:bg-yellow-100'
             : 'hover:bg-gray-50'
         }`}
@@ -177,11 +182,17 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
           /* Expanded view - full details */
           <>
             {/* Job Details */}
-            <td className="px-6 py-4">
+            <td className="px-6 py-2">
               <div className="max-w-xs">
-                <div className="text-sm font-medium text-gray-900 truncate">
+                <a
+                  href={match.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm font-medium text-indigo-600 hover:text-indigo-800 truncate block underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   {match.title}
-                </div>
+                </a>
                 <div className="text-sm text-gray-500 truncate">
                   {match.company}
                 </div>
@@ -197,26 +208,26 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
             </td>
 
             {/* Match Score */}
-            <td className="px-6 py-4">
+            <td className="px-3 py-2 text-center">
               <div className="text-sm font-medium text-gray-900">
                 {(match.similarityScore * 100).toFixed(1)}%
               </div>
             </td>
 
             {/* Skills Match */}
-            <td className="px-6 py-4">
-              <div className="flex flex-col gap-1">
+            <td className="px-3 py-2 text-center">
+              <div className="flex flex-col gap-0.5">
                 <div className="text-sm font-medium text-gray-900">
                   {Math.round(match.skillMatchPercentage)}%
                 </div>
                 <div className="text-xs text-gray-500">
-                  Weighted: {Math.round(match.weightedSkillScore)}%
+                  W:{Math.round(match.weightedSkillScore)}%
                 </div>
               </div>
             </td>
 
             {/* Matched Skills */}
-            <td className="px-6 py-4">
+            <td className="px-6 py-2">
               <div className="text-sm text-green-700 max-w-xs">
                 {match.matchedSkills.slice(0, 5).join(', ')}
                 {match.matchedSkills.length > 5 && (
@@ -228,26 +239,39 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
             </td>
 
             {/* Posted Date */}
-            <td className="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">
+            <td className="px-6 py-2 text-sm text-gray-500 whitespace-nowrap">
               {formatDate(match.postedDate)}
             </td>
 
+            {/* Fetched Date */}
+            <td className="px-6 py-2 text-sm text-gray-500 whitespace-nowrap">
+              {formatDate(match.fetchedAt)}
+            </td>
+
             {/* Actions Column - Merged 3 buttons */}
-            <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
+            <td className="px-6 py-2" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-center gap-2">
-                {/* Saved Button */}
+                {/* Saved Button - 3 Star Rating */}
                 <button
                   onClick={() => handleToggleSaved(match.matchId, match.isSaved)}
-                  className={`p-1.5 rounded-lg transition-colors ${
-                    match.isSaved
+                  className={`flex items-center gap-0.5 p-1.5 rounded-lg transition-colors ${
+                    match.isSaved > 0
                       ? 'text-yellow-600 bg-yellow-50 hover:bg-yellow-100'
                       : 'text-gray-400 hover:text-yellow-600 hover:bg-yellow-50'
                   }`}
-                  title="Save (kept 14 days)"
+                  title={`Click to ${match.isSaved === 0 ? 'save' : match.isSaved === 3 ? 'remove' : 'increase priority'} (${match.isSaved}/3 stars)`}
                 >
-                  <svg className="w-4 h-4" fill={match.isSaved ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-                  </svg>
+                  {[1, 2, 3].map((star) => (
+                    <svg
+                      key={star}
+                      className="w-3.5 h-3.5"
+                      fill={star <= match.isSaved ? 'currentColor' : 'none'}
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                    </svg>
+                  ))}
                 </button>
 
                 {/* Applied Button */}
@@ -281,21 +305,6 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                   </svg>
                 </button>
               </div>
-            </td>
-
-            {/* View Job Button */}
-            <td className="px-6 py-4 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-              <a
-                href={match.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 transition-colors"
-              >
-                View Job
-                <svg className="ml-1 h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-              </a>
             </td>
           </>
         )}
@@ -396,20 +405,20 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                 Job Details
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => handleSort('matchScore')}
               >
-                <div className="flex items-center gap-1">
-                  Match Score
+                <div className="flex items-center justify-center gap-1">
+                  Match
                   <SortIcon field="matchScore" />
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
                 onClick={() => handleSort('skillMatch')}
               >
-                <div className="flex items-center gap-1">
-                  Skills Match
+                <div className="flex items-center justify-center gap-1">
+                  Skills
                   <SortIcon field="skillMatch" />
                 </div>
               </th>
@@ -425,11 +434,17 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                   <SortIcon field="postedDate" />
                 </div>
               </th>
+              <th
+                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                onClick={() => handleSort('fetchedDate')}
+              >
+                <div className="flex items-center gap-1">
+                  Fetched
+                  <SortIcon field="fetchedDate" />
+                </div>
+              </th>
               <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
-              </th>
-              <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                View
               </th>
             </tr>
           </thead>

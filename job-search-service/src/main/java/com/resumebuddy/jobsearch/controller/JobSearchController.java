@@ -424,6 +424,7 @@ public class JobSearchController {
             response.setUrl(enriched.getListing().getUrl());
             response.setSalaryRange(enriched.getListing().getSalaryRange());
             response.setPostedDate(enriched.getListing().getPostedDate());
+            response.setFetchedAt(enriched.getListing().getFetchedAt());
 
             // Skill gap
             response.setMatchedSkills(enriched.getSkillGap().getMatchedSkills());
@@ -582,6 +583,7 @@ public class JobSearchController {
             response.setUrl(enriched.getListing().getUrl());
             response.setSalaryRange(enriched.getListing().getSalaryRange());
             response.setPostedDate(enriched.getListing().getPostedDate());
+            response.setFetchedAt(enriched.getListing().getFetchedAt());
 
             // Skill gap
             response.setMatchedSkills(enriched.getSkillGap().getMatchedSkills());
@@ -635,24 +637,25 @@ public class JobSearchController {
     }
 
     /**
-     * Toggle saved status for a match
+     * Update saved rating for a match
      * PATCH /api/job-search/matches/{matchId}/save
      */
     @Operation(
-            summary = "Toggle saved status",
-            description = "Toggles the saved/bookmarked status for a job match. Saved matches are preserved during force refresh."
+            summary = "Update saved rating",
+            description = "Updates the star rating (0-3) for a job match. 0=not saved, 1-3=saved with priority. Saved matches are preserved during force refresh."
     )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Saved status updated successfully"),
+            @ApiResponse(responseCode = "200", description = "Saved rating updated successfully"),
+            @ApiResponse(responseCode = "400", description = "Invalid rating value (must be 0-3)"),
             @ApiResponse(responseCode = "404", description = "Match not found")
     })
     @PatchMapping("/matches/{matchId}/save")
     public ResponseEntity<JobMatch> toggleSaved(
             @Parameter(description = "Match ID") @PathVariable String matchId,
             @RequestBody SaveMatchRequest request) {
-        log.info("Toggling saved status for match {}: {}", matchId, request.isSaved());
+        log.info("Updating saved rating for match {}: {}", matchId, request.getRating());
 
-        JobMatch match = jobMatchingService.toggleSaved(matchId, request.isSaved());
+        JobMatch match = jobMatchingService.toggleSaved(matchId, request.getRating());
         return ResponseEntity.ok(match);
     }
 
@@ -701,14 +704,14 @@ public class JobSearchController {
 
     // Request DTOs
     public static class SaveMatchRequest {
-        private boolean saved;
+        private int rating; // 0-3 star rating
 
-        public boolean isSaved() {
-            return saved;
+        public int getRating() {
+            return rating;
         }
 
-        public void setSaved(boolean saved) {
-            this.saved = saved;
+        public void setRating(int rating) {
+            this.rating = rating;
         }
     }
 

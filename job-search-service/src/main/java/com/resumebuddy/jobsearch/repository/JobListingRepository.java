@@ -4,6 +4,7 @@ import com.resumebuddy.jobsearch.domain.JobListing;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,4 +20,19 @@ public interface JobListingRepository extends JpaRepository<JobListing, String> 
     Optional<JobListing> findByContentHash(String contentHash);
 
     boolean existsByContentHash(String contentHash);
+
+    // Market Insights: Find unanalyzed jobs (ordered by newest first)
+    List<JobListing> findByAnalyzedAtIsNullAndFetchedAtAfterOrderByFetchedAtDesc(LocalDateTime cutoff);
+
+    // Market Insights: Find all unanalyzed jobs (ordered by newest first)
+    List<JobListing> findByAnalyzedAtIsNullOrderByFetchedAtDesc();
+
+    // Market Insights: Find jobs analyzed in a date range (for monthly aggregation)
+    List<JobListing> findByAnalyzedAtBetween(LocalDateTime start, LocalDateTime end);
+
+    // Market Insights: Count unanalyzed jobs
+    long countByAnalyzedAtIsNull();
+
+    // Market Insights: Count analyzed jobs
+    long countByAnalyzedAtIsNotNull();
 }

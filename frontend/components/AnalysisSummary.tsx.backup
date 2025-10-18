@@ -5,8 +5,23 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
   createJobSearchProfile,
-  getJobSearchProfilesByResume
+  updateJobPost,
+  getJobSearchProfilesByResume,
+  getJobSearchProfileLines,
+  getProfileSkills,
+  addProfileSkill,
+  removeProfileSkill,
+  updateProfileMetadata,
+  updateSkillProficiency
 } from '@/lib/api';
+import type { EditorState } from 'lexical';
+import dynamic from 'next/dynamic';
+
+// Dynamically import JobProfileEditor to avoid SSR issues with Lexical
+const JobProfileEditor = dynamic(() => import('./JobProfileEditor'), {
+  ssr: false,
+  loading: () => <div className="h-64 bg-gray-100 animate-pulse rounded-lg"></div>
+});
 
 interface AnalysisSummaryProps {
   analysis: ResumeAnalysisDto;
@@ -21,6 +36,17 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
   const [generatingProfile, setGeneratingProfile] = useState(false);
   const [selectedExperiences, setSelectedExperiences] = useState<Set<string>>(new Set());
   const [currentProfile, setCurrentProfile] = useState<any>(null);
+  const [editedJobPost, setEditedJobPost] = useState<string>('');
+  const [currentEditorState, setCurrentEditorState] = useState<EditorState | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Form fields
+  const [desiredJobTitle, setDesiredJobTitle] = useState<string>('');
+  const [location, setLocation] = useState<string>('');
+  const [experienceLevel, setExperienceLevel] = useState<string>('');
+  const [skills, setSkills] = useState<any[]>([]);
+  const [newSkillName, setNewSkillName] = useState<string>('');
+  const [isAddingSkill, setIsAddingSkill] = useState(false);
 
   // Build analyzed experiences map from the isAnalyzed flag in each experience
   const analyzedExperiences: Record<string, boolean> = {};
@@ -28,13 +54,33 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
     analyzedExperiences[exp.id] = exp.isAnalyzed || false;
   });
 
-  // Load existing profile on mount (lightweight check only)
+  // Load existing profile on mount
   useEffect(() => {
     const loadProfile = async () => {
       try {
         const profiles = await getJobSearchProfilesByResume(resumeId);
         if (profiles && profiles.length > 0) {
-          setCurrentProfile(profiles[0]);
+          // Get most recent profile
+          const latestProfile = profiles[0];
+          setCurrentProfile(latestProfile);
+
+          // Set form fields from profile
+          setDesiredJobTitle(latestProfile.desiredJobTitle || '');
+          setLocation(latestProfile.location || '');
+          setExperienceLevel(latestProfile.experienceLevel || '');
+
+          // Fetch lines from job_search_profile_line table (single source of truth)
+          const lines = await getJobSearchProfileLines(latestProfile.id);
+          // Reconstruct job post from lines
+          const reconstructedJobPost = lines
+            .sort((a: any, b: any) => a.lineNumber - b.lineNumber)
+            .map((line: any) => line.lineContent)
+            .join('\n');
+          setEditedJobPost(reconstructedJobPost || '');
+
+          // Fetch skills
+          const profileSkills = await getProfileSkills(latestProfile.id);
+          setSkills(profileSkills);
         }
       } catch (error) {
         console.error('Failed to load job search profile:', error);
@@ -77,13 +123,124 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
       const profile = await createJobSearchProfile(resumeId, Array.from(selectedExperiences));
       setCurrentProfile(profile);
 
-      // Redirect to job search page
-      router.push(`/job-search/${profile.id}`);
+      // Auto-fill metadata from LLM-generated profile
+      setDesiredJobTitle(profile.desiredJobTitle || '');
+      setLocation(profile.location || '');
+      setExperienceLevel(profile.experienceLevel || '');
+
+      // Fetch lines from job_search_profile_line table (single source of truth)
+      const lines = await getJobSearchProfileLines(profile.id);
+      // Reconstruct job post from lines
+      const reconstructedJobPost = lines
+        .sort((a: any, b: any) => a.lineNumber - b.lineNumber)
+        .map((line: any) => line.lineContent)
+        .join('\n');
+      setEditedJobPost(reconstructedJobPost || '');
+
+      // Fetch skills
+      const profileSkills = await getProfileSkills(profile.id);
+      setSkills(profileSkills);
+
+      alert('Job search profile generated successfully! Location, experience level, and skills have been auto-filled. You can edit them above.');
     } catch (error) {
       console.error('Failed to generate job post:', error);
       alert('Failed to generate job post. Please try again.');
     } finally {
       setGeneratingProfile(false);
+    }
+  };
+
+  // Extract plain text from Lexical editor state
+  const extractTextFromEditorState = (editorState: EditorState): string => {
+    const textContent: string[] = [];
+    editorState.read(() => {
+      const root = editorState._nodeMap.get('root');
+      if (root && 'getTextContent' in root) {
+        const text = (root as any).getTextContent();
+        return text;
+      }
+    });
+
+    // Alternative: serialize and extract text from JSON
+    const json = editorState.toJSON();
+    const extractText = (node: any): void => {
+      if (node.type === 'text') {
+        textContent.push(node.text);
+      }
+      if (node.children) {
+        node.children.forEach(extractText);
+      }
+      if (node.type === 'paragraph' || node.type === 'listitem') {
+        textContent.push('\n');
+      }
+    };
+
+    if (json.root && json.root.children) {
+      json.root.children.forEach(extractText);
+    }
+
+    return textContent.join('').trim();
+  };
+
+  const handleEditorChange = (editorState: EditorState) => {
+    setCurrentEditorState(editorState);
+    // Extract plain text for backend
+    const plainText = extractTextFromEditorState(editorState);
+    setEditedJobPost(plainText);
+  };
+
+  const handleAddSkill = async () => {
+    if (!currentProfile || !newSkillName.trim()) {
+      alert('Please enter a skill name');
+      return;
+    }
+
+    setIsAddingSkill(true);
+    try {
+      const newSkill = await addProfileSkill(currentProfile.id, newSkillName.trim(), 'Technical');
+      setSkills([...skills, newSkill]);
+      setNewSkillName('');
+    } catch (error) {
+      console.error('Failed to add skill:', error);
+      alert('Failed to add skill. It may already exist.');
+    } finally {
+      setIsAddingSkill(false);
+    }
+  };
+
+  const handleRemoveSkill = async (skillId: string) => {
+    if (!currentProfile) return;
+
+    try {
+      await removeProfileSkill(currentProfile.id, skillId);
+      setSkills(skills.filter(s => s.id !== skillId));
+    } catch (error) {
+      console.error('Failed to remove skill:', error);
+      alert('Failed to remove skill.');
+    }
+  };
+
+  const handleSaveJobPost = async () => {
+    if (!currentProfile || !editedJobPost.trim()) {
+      alert('Please enter job post content before saving');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      // 1. Update metadata (location, experience level, and desired job title)
+      await updateProfileMetadata(currentProfile.id, location, experienceLevel, desiredJobTitle);
+
+      // 2. Update job post and regenerate vectors
+      const updatedProfile = await updateJobPost(currentProfile.id, editedJobPost);
+      setCurrentProfile(updatedProfile);
+
+      alert('Profile saved successfully! Vectors regenerated.');
+    } catch (error) {
+      console.error('Failed to update profile:', error);
+      alert('Failed to save profile. Please try again.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -112,6 +269,260 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               Go to Job Search
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-6 mb-4">
+        <div className="flex items-center gap-2 mb-4">
+          <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          </svg>
+          <h3 className="text-xl font-bold text-gray-800">ATS Analysis Summary</h3>
+        </div>
+
+        <div className="space-y-4">
+            </label>
+            <input
+              type="text"
+              value={desiredJobTitle}
+              onChange={(e) => setDesiredJobTitle(e.target.value)}
+              placeholder="e.g., Senior Java Developer, Data Scientist, Full Stack Engineer"
+              disabled={isSaving}
+              className="w-full px-4 py-2.5 text-base border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 disabled:bg-gray-100 font-medium"
+            />
+            <p className="mt-1.5 text-xs text-gray-500">
+              This will be used as the primary keyword for job searching in Adzuna and other job boards
+            </p>
+          </div>
+
+          {/* Row 2: Metadata (Location + Experience Level) */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <svg className="inline h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                </svg>
+                Target Location
+              </label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g., San Francisco, CA or Remote"
+                disabled={isSaving}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <svg className="inline h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                </svg>
+                Target Experience Level
+              </label>
+              <select
+                value={experienceLevel}
+                onChange={(e) => setExperienceLevel(e.target.value)}
+                disabled={isSaving}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent disabled:bg-gray-100"
+              >
+                <option value="">Select level...</option>
+                <option value="Entry Level">Entry Level (0-2 years)</option>
+                <option value="Mid Level">Mid Level (3-5 years)</option>
+                <option value="Senior">Senior (6-10 years)</option>
+                <option value="Lead">Lead/Principal (10+ years)</option>
+                <option value="Executive">Executive/Director</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: Skills */}
+          <div className="mb-6">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <svg className="inline h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              Skills ({skills.length})
+            </label>
+            <div className="bg-white border border-gray-300 rounded-lg p-4">
+              <div className="flex flex-wrap gap-2 mb-3">
+                {skills
+                  .sort((a, b) => (b.proficiencyScore || 50) - (a.proficiencyScore || 50)) // Sort by proficiency descending
+                  .map((skill) => {
+                  const proficiency = skill.proficiencyScore || 50;
+
+                  // Map score to 5 levels with focus labels
+                  const getProficiencyLevel = (score: number) => {
+                    if (score >= 90) return { level: 5, label: 'Highly Focus', icon: '⭐⭐⭐', color: 'text-yellow-600', bgColor: 'bg-yellow-50' };
+                    if (score >= 70) return { level: 4, label: 'High Focus', icon: '⭐⭐', color: 'text-blue-600', bgColor: 'bg-blue-50' };
+                    if (score >= 50) return { level: 3, label: 'Moderate Focus', icon: '⭐', color: 'text-indigo-600', bgColor: 'bg-indigo-50' };
+                    if (score >= 30) return { level: 2, label: 'Low Focus', icon: '○', color: 'text-gray-600', bgColor: 'bg-gray-50' };
+                    if (score >= 10) return { level: 1, label: 'Less Focus', icon: '○', color: 'text-gray-500', bgColor: 'bg-gray-50' };
+                    return { level: 0, label: 'Minimal', icon: '○', color: 'text-gray-400', bgColor: 'bg-gray-50' };
+                  };
+
+                  const currentLevel = getProficiencyLevel(proficiency);
+                  const canIncrease = proficiency < 100;
+                  const canDecrease = proficiency > 0;
+
+                  const handleIncrease = async () => {
+                    const newScore = Math.min(proficiency + 20, 100);
+                    try {
+                      const updated = await updateSkillProficiency(currentProfile.id, skill.id, newScore);
+                      setSkills(skills.map(s => s.id === skill.id ? updated : s));
+                    } catch (error) {
+                      console.error('Failed to increase proficiency:', error);
+                      alert('Failed to update proficiency');
+                    }
+                  };
+
+                  const handleDecrease = async () => {
+                    const newScore = Math.max(proficiency - 20, 0);
+                    try {
+                      const updated = await updateSkillProficiency(currentProfile.id, skill.id, newScore);
+                      setSkills(skills.map(s => s.id === skill.id ? updated : s));
+                    } catch (error) {
+                      console.error('Failed to decrease proficiency:', error);
+                      alert('Failed to update proficiency');
+                    }
+                  };
+
+                  return (
+                    <div key={skill.id} className={`inline-flex items-center gap-1.5 ${currentLevel.bgColor} border ${currentLevel.color.replace('text-', 'border-')} rounded-lg px-2.5 py-1.5`}>
+                      {/* Rank icon */}
+                      <span className={`text-xs ${currentLevel.color}`} title={`${currentLevel.label} (${proficiency}/100)`}>
+                        {currentLevel.icon}
+                      </span>
+
+                      {/* Skill name */}
+                      <span className="text-gray-800 text-sm font-medium">
+                        {skill.skillName}
+                      </span>
+
+                      {/* Focus label */}
+                      <span className={`text-[10px] ${currentLevel.color} font-semibold`}>
+                        {currentLevel.label}
+                      </span>
+
+                      {/* Up button - smaller */}
+                      <button
+                        onClick={handleIncrease}
+                        disabled={!canIncrease || isSaving}
+                        className="p-0.5 bg-green-500 text-white rounded hover:bg-green-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors ml-1"
+                        title="Increase importance (+20)"
+                      >
+                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                        </svg>
+                      </button>
+
+                      {/* Down button - smaller */}
+                      <button
+                        onClick={handleDecrease}
+                        disabled={!canDecrease || isSaving}
+                        className="p-0.5 bg-red-500 text-white rounded hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        title="Decrease importance (-20)"
+                      >
+                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </button>
+
+                      {/* Remove button */}
+                      <button
+                        onClick={() => handleRemoveSkill(skill.id)}
+                        disabled={isSaving}
+                        className="text-gray-600 hover:text-red-600 disabled:opacity-50 text-base leading-none ml-0.5"
+                        title="Remove skill"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+                {skills.length === 0 && (
+                  <p className="text-sm text-gray-500">No skills added yet. Add skills below.</p>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newSkillName}
+                  onChange={(e) => setNewSkillName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleAddSkill()}
+                  placeholder="Type skill name (e.g., React, Python)"
+                  disabled={isSaving || isAddingSkill}
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                <button
+                  onClick={handleAddSkill}
+                  disabled={isSaving || isAddingSkill || !newSkillName.trim()}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-1"
+                >
+                  {isAddingSkill ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      Adding...
+                    </>
+                  ) : (
+                    <>+ Add</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Row 3: Job Post Editor */}
+          <div className="mb-4">
+            <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <svg className="inline h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Mock Job Requirements (vectors will regenerate on save)
+            </label>
+            <JobProfileEditor
+              initialContent={editedJobPost}
+              onChange={handleEditorChange}
+              disabled={isSaving}
+            />
+          </div>
+
+          {/* Footer: Metadata + Save Button */}
+          <div className="flex items-center justify-between pt-4 border-t border-green-200">
+            <p className="text-xs text-gray-600">
+              <strong>Created:</strong> {new Date(currentProfile.createdAt).toLocaleString()}
+              {currentProfile.updatedAt && currentProfile.updatedAt !== currentProfile.createdAt && (
+                <> | <strong>Updated:</strong> {new Date(currentProfile.updatedAt).toLocaleString()}</>
+              )}
+            </p>
+            <button
+              onClick={handleSaveJobPost}
+              disabled={isSaving || !editedJobPost.trim()}
+              className="px-6 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-md"
+            >
+              {isSaving ? (
+                <>
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Saving All Changes...
+                </>
+              ) : (
+                <>
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                  </svg>
+                  Save All Changes
+                </>
+              )}
             </button>
           </div>
         </div>
@@ -205,9 +616,9 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
         </div>
 
         {/* Detailed Sections - Collapsible */}
-        <details open className="bg-white rounded-lg shadow-sm">
+        <details className="bg-white rounded-lg shadow-sm">
           <summary className="cursor-pointer p-4 font-semibold text-gray-700 hover:bg-gray-50 rounded-lg">
-            Detailed Analysis
+            View Detailed Analysis
           </summary>
           <div className="p-4 space-y-4 border-t">
             {/* Experiences */}
@@ -241,23 +652,13 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
                 <div className="space-y-3">
                   {analysis.experiences.map((exp, index) => (
                     <div key={exp.id} className="text-sm border-l-4 border-blue-400 pl-4 py-2 bg-blue-50 rounded-r relative">
-                      {/* Checkbox for Job Post Generation */}
-                      <div className="flex items-center gap-2 mb-2">
-                        <input
-                          type="checkbox"
-                          checked={selectedExperiences.has(exp.id)}
-                          onChange={() => toggleExperienceSelection(exp.id)}
-                          id={`exp-${exp.id}`}
-                          className="h-4 w-4 text-indigo-600 rounded cursor-pointer"
-                        />
-                        <label
-                          htmlFor={`exp-${exp.id}`}
-                          className="text-xs text-gray-600 font-medium cursor-pointer select-none"
-                        >
-                          Include in Mock Job Post Generation
-                        </label>
-                      </div>
-
+                      <input
+                        type="checkbox"
+                        checked={selectedExperiences.has(exp.id)}
+                        onChange={() => toggleExperienceSelection(exp.id)}
+                        className="absolute top-3 right-3 h-5 w-5 text-indigo-600 rounded cursor-pointer"
+                        title="Select for job post generation"
+                      />
                       <div className="flex items-start justify-between mb-1">
                         <div className="font-bold text-gray-900">
                           {exp.jobTitle || 'Position not specified'}
@@ -285,7 +686,7 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
                       <div className="flex gap-2 mt-3 pt-2 border-t border-blue-200 flex-wrap">
                         {analyzedExperiences[exp.id] ? (
                           <>
-                            {/* View Detail Report Button (Primary) */}
+                            {/* View Latest Report Button (Primary) */}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -294,13 +695,13 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
                                 }
                               }}
                               className="px-3 py-1.5 bg-indigo-600 text-white rounded-md text-xs font-medium hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shadow-sm disabled:bg-gray-400 disabled:cursor-not-allowed"
-                              title="View detail analysis report"
+                              title="View latest analysis report"
                               disabled={!exp.analysisId}
                             >
                               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                               </svg>
-                              View Detail Report
+                              View Latest Report
                             </button>
 
                             {/* Re-analyze Button (Secondary) */}
@@ -362,6 +763,20 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
                             )}
                           </button>
                         )}
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onFindJobs?.(exp.id);
+                          }}
+                          className="px-3 py-1.5 bg-green-100 text-green-700 rounded-md text-xs font-medium hover:bg-green-200 transition-colors flex items-center gap-1"
+                          title="Find similar job opportunities (Coming soon)"
+                        >
+                          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                          Find Similar Jobs
+                        </button>
                       </div>
                     </div>
                   ))}

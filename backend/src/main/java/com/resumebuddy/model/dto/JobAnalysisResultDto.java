@@ -33,6 +33,7 @@ public class JobAnalysisResultDto {
     private List<WorkActivityDto> workActivities;
     private List<String> keyStrengths;
     private List<String> improvementAreas;
+    private List<String> starsAnalysisSuggestions;
 
     // Comprehensive Report (NEW)
     private List<SocCodeDto> socCodes;
@@ -137,6 +138,7 @@ public class JobAnalysisResultDto {
         public static class RecruiterInsightsDto {
             private List<SignalDto> strongSignals;
             private List<String> potentialQuestions;
+            private List<String> starsAnalysis;
             private Integer recruiterAppealScore;
             private String appealReasoning;
             private List<String> bestFitRoles;

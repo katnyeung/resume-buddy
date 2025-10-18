@@ -6,11 +6,14 @@ import com.resumebuddy.jobsearch.domain.JobListingLine;
 import com.resumebuddy.jobsearch.domain.JobSearchProfile;
 import com.resumebuddy.jobsearch.domain.service.JobDescriptionParser;
 import com.resumebuddy.jobsearch.domain.service.KeywordGenerationService;
+import com.resumebuddy.jobsearch.dto.analysis.JobAnalysisRequest;
+import com.resumebuddy.jobsearch.dto.analysis.JobAnalysisResponse;
 import com.resumebuddy.jobsearch.dto.crawl.JobCrawlRequest;
 import com.resumebuddy.jobsearch.dto.crawl.JobCrawlResponse;
 import com.resumebuddy.jobsearch.repository.JobListingLineRepository;
 import com.resumebuddy.jobsearch.repository.JobListingRepository;
 import com.resumebuddy.jobsearch.repository.JobSearchProfileRepository;
+import com.resumebuddy.jobsearch.service.JobAnalysisService;
 import com.resumebuddy.jobsearch.service.RedisVectorService;
 import com.resumebuddy.jobsearch.service.VectorEmbeddingService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -54,6 +57,7 @@ public class AdminController {
     private final RedisVectorService redisVectorService;
     private final VectorEmbeddingService vectorEmbeddingService;
     private final JobDescriptionParser jobDescriptionParser;
+    private final JobAnalysisService jobAnalysisService;
 
     @Value("${app.job-crawling.max-days-old:7}")
     private int maxDaysOld;
@@ -533,6 +537,36 @@ public class AdminController {
             );
             return ResponseEntity.status(500).body(response);
         }
+    }
+
+    /**
+     * Analyze jobs for market insights (skill extraction)
+     * POST /api/job-search/admin/analyze-jobs
+     */
+    @Operation(
+            summary = "Analyze jobs for market insights (Phase 1)",
+            description = "Extracts skills from job descriptions using GPT-4o-mini for market intelligence. " +
+                    "Processes unanalyzed jobs in batches and stores results in MySQL + Neo4j. " +
+                    "This is the Phase 1 implementation of the Job Market Insights feature."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Analysis completed successfully",
+                    content = @Content(schema = @Schema(implementation = JobAnalysisResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid request parameters"),
+            @ApiResponse(responseCode = "500", description = "Analysis failed")
+    })
+    @PostMapping("/analyze-jobs")
+    public ResponseEntity<JobAnalysisResponse> analyzeJobs(@Valid @RequestBody JobAnalysisRequest request) {
+        log.info("Job analysis triggered - batchSize: {}, forceReanalyze: {}",
+                request.getBatchSize(), request.getForceReanalyze());
+
+        JobAnalysisResponse response = jobAnalysisService.batchAnalyzeJobs(request);
+
+        if ("error".equals(response.getStatus())) {
+            return ResponseEntity.status(500).body(response);
+        }
+
+        return ResponseEntity.ok(response);
     }
 
     /**

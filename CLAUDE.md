@@ -310,12 +310,15 @@ Content-Type: application/json
 - `domain/model/` - JobSearchProfile, JobListing, JobMatch entities
 - `domain/service/` - JobPostGenerator, SkillMatcher, JobCrawlerService, JobDescriptionParser
 - `application/service/` - JobSearchApplicationService, JobMatchingApplicationService, JobCrawlingApplicationService
+- `service/` - JobAnalysisService (keyword matching), KeywordSkillMatcher (regex-based), Neo4jJobListingService (direct Neo4j indexing)
 - `infrastructure/redis/` - RedisVectorService
-- `infrastructure/external/` - ResumeApiClient, GrokLLMClient, VectorEmbeddingService, AdzunaApiClient, ReedApiClient
+- `infrastructure/external/` - GrokLLMClient, VectorEmbeddingService, AdzunaApiClient, ReedApiClient
 - `infrastructure/external/jobsources/` - JobSourceApiClient (interface), AdzunaApiClient, ReedApiClient, JSearchApiClient
+- `config/` - Neo4jConfig (Neo4j Driver bean)
 - `dto/adzuna/` - AdzunaJobDto, AdzunaSearchResponse (common format)
 - `dto/reed/` - ReedJobDto, ReedSearchResponse
 - `dto/jsearch/` - JSearchJobDto, JSearchSearchResponse
+- `dto/analysis/` - JobAnalysisRequest, JobAnalysisResponse (skill extraction DTOs)
 - `api/controller/` - JobSearchController, AdminController
 
 **Frontend**:
@@ -414,6 +417,18 @@ Content-Type: application/json
   - Exception flow: `AdzunaApiClient` → `JobCrawlerService` → `JobCrawlingApplicationService` → Controller/Scheduler
   - Scheduler re-throws exceptions to ensure Spring sees the failure
   - Clear CRITICAL logs at each layer for easy debugging
+- **Job skill extraction & Neo4j indexing** (Oct 17 - Keyword-based):
+  - **Keyword matching** against Neo4j `Skill` vocabulary (no LLM required!)
+  - Uses regex with word boundaries (`\b`) for accurate matching
+  - **Uses full job descriptions** from `job_listing_line` table (concatenated) instead of truncated `description` field
+  - Skills stored in MySQL `job_listing.extracted_skills` JSON column
+  - Direct Neo4j indexing via `Neo4jJobListingService` (no HTTP calls to backend)
+  - Creates `JobListing` nodes linked to `Skill` nodes via `REQUIRES_SKILL`
+  - Shared Neo4j Aura instance with backend service (database: `neo4j`)
+  - Skill vocabulary cached for 1 hour (Spring `@Cacheable`)
+  - **Performance**: Processes 100+ jobs/second (vs 2-3 jobs/sec with LLM)
+  - **Cost**: $0 (vs ~$0.001 per job with GPT-4o-mini)
+  - Enables market insights: skill demand analysis, co-occurrence patterns
 
 **Phase 9 (Oct 14, 2025)** - Line-by-Line Job Matching with Proficiency Weighting (Enhanced Parser):
 - **Pure line-by-line matching** (removed full-doc vectors):

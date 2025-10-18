@@ -941,6 +941,7 @@ public class JobAnalysisService {
                 }
 
                 insightsDto.setPotentialQuestions((List<String>) recruiterInsights.get("potentialQuestions"));
+                insightsDto.setStarsAnalysis((List<String>) recruiterInsights.get("starsAnalysis"));
                 insightsDto.setRecruiterAppealScore(
                         recruiterInsights.get("recruiterAppealScore") != null ?
                                 ((Number) recruiterInsights.get("recruiterAppealScore")).intValue() : null
@@ -1081,6 +1082,7 @@ public class JobAnalysisService {
                 }
 
                 recruiterInsights.put("potentialQuestions", insights.getPotentialQuestions());
+                recruiterInsights.put("starsAnalysis", insights.getStarsAnalysis());
                 recruiterInsights.put("recruiterAppealScore", insights.getRecruiterAppealScore());
                 recruiterInsights.put("appealReasoning", insights.getAppealReasoning());
                 recruiterInsights.put("bestFitRoles", insights.getBestFitRoles());

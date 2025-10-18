@@ -74,4 +74,19 @@ public class JobListing {
 
     @Column(name = "last_seen_at")
     private LocalDateTime lastSeenAt; // Track when we last saw this job (for updates)
+
+    /**
+     * Timestamp when skill extraction was completed
+     * Used to track which jobs have been analyzed for market insights
+     */
+    @Column(name = "analyzed_at")
+    private LocalDateTime analyzedAt;
+
+    /**
+     * Cached extracted skills from LLM analysis
+     * JSON array format: ["Java", "Spring Boot", "Docker"]
+     * Used for quick skill lookups without re-parsing description
+     */
+    @Column(name = "extracted_skills", columnDefinition = "JSON")
+    private String extractedSkills;
 }

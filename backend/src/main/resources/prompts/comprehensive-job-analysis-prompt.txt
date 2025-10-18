@@ -159,7 +159,7 @@ Limit to top 15-20 most relevant skills.
 - Industry Sectors should list 2-4 related domains that provide context
 - Consider: company's products, services, clients, and market position
 - Examples:
-  - GFT Technologies (banking clients) → Financial Services / Banking / [Financial Technology, Enterprise Software]
+  - IBM (banking clients) → Financial Services / Banking / [Financial Technology, Enterprise Software]
   - Stripe → Financial Services / Fintech / [Payment Processing, Financial Technology, SaaS]
   - Epic Systems → Healthcare / Health Tech / [Electronic Health Records, Healthcare IT]
   - Amazon → Technology / E-commerce / [Cloud Computing, Retail Technology, Logistics]

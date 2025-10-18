@@ -26,7 +26,8 @@ public class JobMatchResponse {
     private String description;
     private String url;
     private String salaryRange;
-    private LocalDateTime postedDate; // Job posting date
+    private LocalDateTime postedDate;  // Job posting date (from job board)
+    private LocalDateTime fetchedAt;   // When we fetched this job
 
     // Skill gap analysis
     private List<String> matchedSkills;
@@ -35,8 +36,8 @@ public class JobMatchResponse {
     private double weightedSkillScore;   // Proficiency-weighted: sum(matched proficiencies) / sum(all)
 
     // User actions
-    private Boolean isSaved;        // User bookmarked this match
-    private Boolean isApplied;      // User applied to this job
-    private Boolean isRedflag;      // User marked as not interested/expired
+    private Integer isSaved;         // Star rating: 0=not saved, 1-3=saved with priority
+    private Boolean isApplied;       // User applied to this job
+    private Boolean isRedflag;       // User marked as not interested/expired
     private LocalDateTime flaggedAt; // When user took any action (saved/applied/redflag)
 }

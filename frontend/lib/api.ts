@@ -261,9 +261,9 @@ export const getMatchingResults = async (profileId: string, topK: number = 20, r
   return response.data;
 };
 
-export const toggleMatchSaved = async (matchId: string, saved: boolean): Promise<any> => {
+export const toggleMatchSaved = async (matchId: string, rating: number): Promise<any> => {
   const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/save`, {
-    saved
+    rating
   });
   return response.data;
 };

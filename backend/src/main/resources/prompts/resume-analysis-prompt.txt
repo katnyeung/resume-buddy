@@ -148,7 +148,11 @@ Response format:
     ],
     "improvements": [
       "Consider adding more quantifiable metrics (percentages, numbers, time saved)",
-      "Skills section could benefit from categorization (e.g., Backend, DevOps, Frontend)"
+      "Skills section could benefit from categorization (e.g., Backend, DevOps, Frontend)",
+      "Add specific timeframes or project durations to demonstrate scope of work",
+      "Consider adding LinkedIn or GitHub profile to showcase professional presence",
+      "Some job descriptions could use stronger action verbs to emphasize impact",
+      "Missing certifications section - include professional credentials if applicable"
     ],
     "contentBalance": "balanced",
     "readability": "good",
@@ -188,16 +192,28 @@ HOW TO GENERATE THE ATS REPORT:
     - "L101-L105: Professional summary spans multiple well-organized paragraphs (groupId 8)"
 
 - **improvements**: Array of STRUCTURE-FOCUSED suggestions (NO line references)
+  - IMPORTANT: Provide 4-8 improvement suggestions (aim for 5-6 typically)
+  - EXCLUDE: Do NOT suggest improvements related to name, address, phone numbers, or email format (these may be masked/redacted for privacy)
   - Look at your lineAnalysis to identify:
     - Sections with too few lines (e.g., SKILLS section has only 2 lines - suggest adding more)
     - Missing standard sections (no EDUCATION, no CERTIFICATIONS detected in lineAnalysis)
     - Unbalanced groups (some JOB groups have 1 line, others have 10+ lines)
     - Vague or thin analysis notes suggesting insufficient detail
+    - Missing quantifiable metrics (numbers, percentages, timeframes)
+    - Lack of action verbs or achievement-oriented language
+    - Section ordering that could be improved
+    - Missing professional links (LinkedIn, GitHub, portfolio) - but NOT basic contact info
+    - Formatting inconsistencies between similar sections
+    - Missing or vague dates in experience/education
   - Examples:
     - "Skills section appears sparse - consider adding more technical skills for better coverage"
     - "Some job entries lack detailed descriptions - expand responsibilities and achievements"
     - "Missing education section - include academic background for completeness"
-    - "Contact information could include LinkedIn or GitHub for professional networking"
+    - "Consider adding LinkedIn or GitHub profile to showcase professional presence"
+    - "Add quantifiable metrics to job achievements (e.g., improved performance by 40%)"
+    - "Consider adding certifications section to highlight professional credentials"
+    - "Some job descriptions lack specific timeframes - add duration or project timelines"
+    - "Include more action verbs to strengthen impact statements"
 
 - **contentBalance**: "sparse" | "balanced" | "verbose"
   - Look at lineAnalysis group sizes and analysis notes:

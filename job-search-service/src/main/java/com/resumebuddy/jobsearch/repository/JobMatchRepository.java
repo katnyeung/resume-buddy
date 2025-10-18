@@ -19,15 +19,16 @@ public interface JobMatchRepository extends JpaRepository<JobMatch, String> {
 
     void deleteByProfileId(String profileId);
 
-    // Find saved matches for a profile
-    List<JobMatch> findByProfileIdAndIsSavedTrue(String profileId);
+    // Find saved matches for a profile (rating > 0)
+    @Query("SELECT m FROM JobMatch m WHERE m.profileId = :profileId AND m.isSaved > 0")
+    List<JobMatch> findByProfileIdAndIsSavedTrue(@Param("profileId") String profileId);
 
     // Find applied matches for a profile
     List<JobMatch> findByProfileIdAndIsAppliedTrue(String profileId);
 
     // Delete only non-saved matches for a profile (for force refresh)
     @Modifying
-    @Query("DELETE FROM JobMatch m WHERE m.profileId = :profileId AND m.isSaved = false")
+    @Query("DELETE FROM JobMatch m WHERE m.profileId = :profileId AND m.isSaved = 0")
     void deleteNonSavedByProfileId(@Param("profileId") String profileId);
 
     // Find existing match by profile and listing
@@ -36,7 +37,7 @@ public interface JobMatchRepository extends JpaRepository<JobMatch, String> {
     // Delete expired matches based on retention policy (7/14/20 days)
     @Modifying
     @Query("DELETE FROM JobMatch m WHERE m.profileId = :profileId AND " +
-           "((m.isSaved = true AND m.flaggedAt < :savedCutoff) OR " +
+           "((m.isSaved > 0 AND m.flaggedAt < :savedCutoff) OR " +
            "(m.isApplied = true AND m.flaggedAt < :appliedCutoff) OR " +
            "(m.isRedflag = true AND m.flaggedAt < :redflagCutoff))")
     void deleteExpiredMatches(@Param("profileId") String profileId,

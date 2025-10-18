@@ -69,6 +69,7 @@ public class DescriptionLineMappingDto {
     public static class RecruiterInsightsDto {
         private List<SignalDto> strongSignals;
         private List<String> potentialQuestions;
+        private List<String> starsAnalysis;
         private Integer recruiterAppealScore;
         private String appealReasoning;
         private List<String> bestFitRoles;

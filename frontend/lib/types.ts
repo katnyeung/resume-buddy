@@ -176,11 +176,12 @@ export interface JobMatchResult {
   url: string;
   salaryRange?: string;
   postedDate: string;
+  fetchedAt: string; // When we fetched this job from the source
   matchedSkills: string[];
   missingSkills: string[];
   skillMatchPercentage: number;
   weightedSkillScore: number;
-  isSaved: boolean;
+  isSaved: number; // 0-3 star rating (0 = not saved, 1-3 = saved with priority)
   isApplied: boolean;
   isRedflag: boolean;
   flaggedAt?: string;

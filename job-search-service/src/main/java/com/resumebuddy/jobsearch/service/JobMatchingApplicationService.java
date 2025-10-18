@@ -409,16 +409,22 @@ public class JobMatchingApplicationService {
     }
 
     /**
-     * Toggle saved status for a match
+     * Update saved rating for a match (0-3 stars)
+     * 0 = not saved, 1-3 = saved with priority level
      * Sets flaggedAt timestamp for retention policy enforcement
      */
     @Transactional
-    public JobMatch toggleSaved(String matchId, boolean saved) {
+    public JobMatch toggleSaved(String matchId, int rating) {
         JobMatch match = matchRepository.findById(matchId)
                 .orElseThrow(() -> new RuntimeException("Match not found: " + matchId));
 
-        match.setIsSaved(saved);
-        if (saved) {
+        // Validate rating range (0-3)
+        if (rating < 0 || rating > 3) {
+            throw new IllegalArgumentException("Rating must be between 0 and 3");
+        }
+
+        match.setIsSaved(rating);
+        if (rating > 0) {
             match.setFlaggedAt(java.time.LocalDateTime.now());
         }
         return matchRepository.save(match);
