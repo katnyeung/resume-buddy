@@ -40,4 +40,7 @@ public class JobMatchResponse {
     private Boolean isApplied;       // User applied to this job
     private Boolean isRedflag;       // User marked as not interested/expired
     private LocalDateTime flaggedAt; // When user took any action (saved/applied/redflag)
+
+    // Deal-breaker keywords
+    private List<String> matchedNegativeKeywords; // Deal-breaker keywords found in this job
 }

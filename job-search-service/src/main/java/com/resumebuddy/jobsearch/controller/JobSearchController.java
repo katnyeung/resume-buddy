@@ -69,7 +69,8 @@ public class JobSearchController {
         JobSearchProfile profile = jobSearchService.createProfile(
                 userId,
                 request.getResumeId(),
-                request.getExperienceIds()
+                request.getExperienceIds(),
+                request.getExcludedKeywords()
         );
 
         return ResponseEntity.status(HttpStatus.CREATED).body(profile);
@@ -95,7 +96,7 @@ public class JobSearchController {
             @Valid @RequestBody UpdateJobPostRequest request) {
 
         log.info("Updating job post for profile: {}", id);
-        JobSearchProfile profile = jobSearchService.updateJobPost(id, request.getEditedJobPost());
+        JobSearchProfile profile = jobSearchService.updateJobPost(id, request.getEditedJobPost(), request.getExcludedKeywords());
         return ResponseEntity.ok(profile);
     }
 
@@ -538,6 +539,20 @@ public class JobSearchController {
     }
 
     /**
+     * Find which excluded keywords are present in a job description (case-insensitive)
+     */
+    private List<String> findMatchedKeywords(String description, List<String> excludedKeywords) {
+        if (description == null || excludedKeywords == null || excludedKeywords.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        String lowerDesc = description.toLowerCase();
+        return excludedKeywords.stream()
+                .filter(keyword -> lowerDesc.contains(keyword.toLowerCase()))
+                .collect(Collectors.toList());
+    }
+
+    /**
      * Get job matching results for a profile
      * GET /api/job-search/profiles/{id}/matching-results
      */
@@ -606,6 +621,20 @@ public class JobSearchController {
             response.setFlaggedAt(enriched.getMatch().getFlaggedAt());
 
             matchResponses.add(response);
+        }
+
+        // Check for negative keywords in each job description
+        if (profile.getExcludedKeywords() != null && !profile.getExcludedKeywords().isEmpty()) {
+            List<String> excludedKeywords = Arrays.asList(profile.getExcludedKeywords().split(","))
+                    .stream()
+                    .map(String::trim)
+                    .filter(kw -> !kw.isEmpty())
+                    .collect(Collectors.toList());
+
+            for (JobMatchResponse match : matchResponses) {
+                List<String> matchedKeywords = findMatchedKeywords(match.getDescription(), excludedKeywords);
+                match.setMatchedNegativeKeywords(matchedKeywords);
+            }
         }
 
         // Sort by combined score (primary), then by posted date descending (secondary - newest first)

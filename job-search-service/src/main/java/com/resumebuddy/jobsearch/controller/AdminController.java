@@ -259,6 +259,53 @@ public class AdminController {
     }
 
     /**
+     * Crawl Theirstack API (50M+ jobs, 195 countries, 16+ job boards)
+     * POST /api/job-search/admin/crawl/theirstack
+     */
+    @Operation(
+            summary = "Crawl Theirstack API (50M+ jobs, multi-source aggregator)",
+            description = "Fetches jobs from Theirstack (aggregates LinkedIn, Indeed, Adzuna + 13 more sources). " +
+                    "Massive 50M+ job database covering 195 countries with full job descriptions. " +
+                    "Advanced filters: remote, hybrid, country codes. " +
+                    "Fast (~5-10 seconds for 50 jobs). Uses Bearer token authentication."
+    )
+    @PostMapping("/crawl/theirstack")
+    public ResponseEntity<JobCrawlResponse> crawlTheirstack(
+            @Parameter(description = "Job keywords/title") @RequestParam(defaultValue = "software engineer") String keywords,
+            @Parameter(description = "Location (format: gb:United Kingdom or country code)") @RequestParam(defaultValue = "gb:United Kingdom") String location,
+            @Parameter(description = "Max jobs to fetch") @RequestParam(defaultValue = "50") Integer maxResults,
+            @Parameter(description = "Jobs from last N days") @RequestParam(defaultValue = "7") Integer maxDaysOld,
+            @Parameter(description = "Remote jobs only") @RequestParam(required = false) Boolean remoteJobsOnly) {
+
+        log.info("Theirstack crawl triggered - keywords: {}, location: {}, remote: {}",
+                keywords, location, remoteJobsOnly);
+
+        JobCrawlRequest request = new JobCrawlRequest();
+        request.setSource("THEIRSTACK");
+        request.setKeywords(keywords);
+        request.setLocation(location);
+        request.setMaxResults(maxResults);
+        request.setMaxDaysOld(maxDaysOld);
+        request.setPage(1);
+
+        // Add to params map for Theirstack-specific parameters
+        java.util.Map<String, Object> params = new java.util.HashMap<>();
+        params.put("keywords", keywords);
+        params.put("location", location);
+        params.put("resultsPerPage", maxResults);
+        params.put("maxDaysOld", maxDaysOld);
+        params.put("page", 1);
+
+        if (remoteJobsOnly != null) {
+            params.put("remoteJobsOnly", remoteJobsOnly);
+        }
+
+        // Use service directly with params map
+        JobCrawlResponse response = jobCrawlingService.crawlJobsWithParams(request.getSource(), params);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * Simulate scheduled crawl with LLM-generated keywords
      * POST /api/job-search/admin/crawl/scheduled-simulation
      */

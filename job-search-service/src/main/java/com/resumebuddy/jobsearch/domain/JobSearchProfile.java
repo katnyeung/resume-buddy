@@ -83,6 +83,14 @@ public class JobSearchProfile {
     @Column(name = "last_visit_date")
     private LocalDateTime lastVisitDate;
 
+    /**
+     * Comma-separated deal-breaker keywords (e.g., "SC Clearance,PhD required,blockchain")
+     * Jobs containing these keywords will be highlighted in red in the UI
+     * Does NOT filter out jobs - only highlights for user awareness
+     */
+    @Column(name = "excluded_keywords", columnDefinition = "TEXT")
+    private String excludedKeywords;
+
     @PreUpdate
     protected void onUpdate() {
         this.updatedAt = LocalDateTime.now();

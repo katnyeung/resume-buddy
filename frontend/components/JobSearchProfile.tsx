@@ -40,6 +40,10 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
   const [newSkillName, setNewSkillName] = useState<string>('');
   const [isAddingSkill, setIsAddingSkill] = useState(false);
 
+  // Excluded keywords (deal-breakers)
+  const [excludedKeywords, setExcludedKeywords] = useState<string[]>([]);
+  const [newExcludedKeyword, setNewExcludedKeyword] = useState<string>('');
+
   // Save collapse state to localStorage
   const toggleExpanded = () => {
     const newState = !isExpanded;
@@ -73,6 +77,12 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
         // Fetch skills
         const profileSkills = await getProfileSkills(profileId);
         setSkills(profileSkills);
+
+        // Load excluded keywords
+        if (profile.excludedKeywords) {
+          const keywords = profile.excludedKeywords.split(',').map((k: string) => k.trim()).filter((k: string) => k);
+          setExcludedKeywords(keywords);
+        }
       } catch (error) {
         console.error('Failed to load job search profile:', error);
       }
@@ -112,6 +122,18 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
     }
   };
 
+  const handleAddExcludedKeyword = () => {
+    const keyword = newExcludedKeyword.trim();
+    if (keyword && !excludedKeywords.includes(keyword)) {
+      setExcludedKeywords([...excludedKeywords, keyword]);
+      setNewExcludedKeyword('');
+    }
+  };
+
+  const handleRemoveExcludedKeyword = (index: number) => {
+    setExcludedKeywords(excludedKeywords.filter((_, i) => i !== index));
+  };
+
   const handleSaveJobPost = async () => {
     if (!currentProfile || !editedJobPost.trim()) {
       return;
@@ -123,8 +145,8 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
       // 1. Update metadata (location, experience level, and desired job title)
       await updateProfileMetadata(currentProfile.id, location, experienceLevel, desiredJobTitle);
 
-      // 2. Update job post and regenerate vectors
-      const updatedProfile = await updateJobPost(currentProfile.id, editedJobPost);
+      // 2. Update job post and regenerate vectors (includes excluded keywords)
+      const updatedProfile = await updateJobPost(currentProfile.id, editedJobPost, excludedKeywords);
       setCurrentProfile(updatedProfile);
 
       // Show success indicator
@@ -382,6 +404,57 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
               ) : (
                 <>+ Add</>
               )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 3.5: Deal-Breaker Keywords */}
+      <div className="mb-6">
+        <label className="block text-sm font-semibold text-gray-700 mb-2">
+          <svg className="inline h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          Deal-Breaker Keywords ({excludedKeywords.length})
+        </label>
+        <p className="text-xs text-gray-500 mb-3">
+          Jobs containing these keywords will be highlighted in red in the results table (e.g., "SC Clearance", "PhD required", "blockchain")
+        </p>
+        <div className="bg-white border border-gray-300 rounded-lg p-4">
+          <div className="flex flex-wrap gap-2 mb-3">
+            {excludedKeywords.map((keyword, index) => (
+              <span key={index} className="inline-flex items-center gap-2 px-3 py-1.5 bg-red-100 text-red-800 border border-red-300 rounded-full text-sm font-medium">
+                {keyword}
+                <button
+                  onClick={() => handleRemoveExcludedKeyword(index)}
+                  disabled={isSaving}
+                  className="text-red-600 hover:text-red-800 disabled:opacity-50 text-base leading-none"
+                  title="Remove keyword"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {excludedKeywords.length === 0 && (
+              <p className="text-sm text-gray-500">No deal-breaker keywords added yet. Add keywords below.</p>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newExcludedKeyword}
+              onChange={(e) => setNewExcludedKeyword(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleAddExcludedKeyword()}
+              placeholder="Type keyword and press Enter (e.g., SC Clearance, PhD required)"
+              disabled={isSaving}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+            />
+            <button
+              onClick={handleAddExcludedKeyword}
+              disabled={isSaving || !newExcludedKeyword.trim()}
+              className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-1"
+            >
+              + Add
             </button>
           </div>
         </div>

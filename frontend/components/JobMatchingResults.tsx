@@ -61,7 +61,11 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
   // Auto-load existing results from job_match table on mount (fast!)
   // This shows cached results immediately without expensive vector search
   useEffect(() => {
-    handleSearch(false); // Load cached results from job_match table
+    // Small delay to ensure backend services are fully initialized
+    const timer = setTimeout(() => {
+      handleSearch(false); // Load cached results from job_match table
+    }, 100);
+    return () => clearTimeout(timer);
   }, [profileId]);
 
   const handleSearch = async (refresh?: boolean, retryCount: number = 0, isManual: boolean = false) => {
@@ -226,7 +230,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
         {isCollapsed ? (
           /* Collapsed view - thin single column */
           <>
-            <td colSpan={7} className="px-6 py-2">
+            <td colSpan={7} className="px-3 py-2">
               <div className="flex items-center justify-between text-sm text-red-600">
                 <div className="flex items-center gap-2">
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
@@ -243,14 +247,15 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
           /* Expanded view - full details */
           <>
             {/* Job Details */}
-            <td className="px-6 py-2">
+            <td className="px-3 py-2">
               <div className="max-w-xs">
                 <a
                   href={match.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-sm font-medium text-indigo-600 hover:text-indigo-800 truncate block underline"
+                  className="text-sm font-medium text-indigo-600 hover:text-indigo-800 block underline line-clamp-2"
                   onClick={(e) => e.stopPropagation()}
+                  title={match.title}
                 >
                   {match.title}
                 </a>
@@ -261,7 +266,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                   {match.location}
                 </div>
                 {match.salaryRange && (
-                  <div className="text-xs text-green-600 font-medium mt-1">
+                  <div className="text-xs text-green-600 font-medium mt-1 truncate">
                     {match.salaryRange}
                   </div>
                 )}
@@ -269,14 +274,14 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
             </td>
 
             {/* Match Score */}
-            <td className="px-3 py-2 text-center">
+            <td className="px-2 py-2 text-center">
               <div className="text-sm font-medium text-gray-900">
                 {(match.similarityScore * 100).toFixed(1)}%
               </div>
             </td>
 
             {/* Skills Match */}
-            <td className="px-3 py-2 text-center">
+            <td className="px-2 py-2 text-center">
               <div className="flex flex-col gap-0.5">
                 <div className="text-sm font-medium text-gray-900">
                   {Math.round(match.skillMatchPercentage)}%
@@ -288,29 +293,50 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
             </td>
 
             {/* Matched Skills */}
-            <td className="px-6 py-2">
-              <div className="text-sm text-green-700 max-w-xs">
-                {match.matchedSkills.slice(0, 5).join(', ')}
-                {match.matchedSkills.length > 5 && (
-                  <span className="text-gray-500">
-                    {' '}+{match.matchedSkills.length - 5} more
-                  </span>
+            <td className="px-3 py-2">
+              <div className="space-y-1">
+                {/* Matched Skills */}
+                <div className="text-sm text-green-700">
+                  {match.matchedSkills.slice(0, 5).join(', ')}
+                  {match.matchedSkills.length > 5 && (
+                    <span className="text-gray-500">
+                      {' '}+{match.matchedSkills.length - 5} more
+                    </span>
+                  )}
+                </div>
+
+                {/* Deal Breaker Keywords - shown below matched skills */}
+                {match.matchedNegativeKeywords && match.matchedNegativeKeywords.length > 0 && (
+                  <div className="flex flex-wrap gap-1 pt-1 border-t border-red-200">
+                    {match.matchedNegativeKeywords.map((keyword, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 bg-red-100 text-red-700 border border-red-300 rounded text-xs font-medium"
+                        title={`Deal-breaker: ${keyword}`}
+                      >
+                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        {keyword}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
             </td>
 
             {/* Posted Date */}
-            <td className="px-6 py-2 text-sm text-gray-500 whitespace-nowrap">
+            <td className="px-3 py-2 text-sm text-gray-500 whitespace-nowrap">
               {formatDate(match.postedDate)}
             </td>
 
             {/* Fetched Date */}
-            <td className="px-6 py-2 text-sm text-gray-500 whitespace-nowrap">
+            <td className="px-3 py-2 text-sm text-gray-500 whitespace-nowrap">
               {formatDate(match.fetchedAt)}
             </td>
 
             {/* Actions Column - Merged 3 buttons */}
-            <td className="px-6 py-2" onClick={(e) => e.stopPropagation()}>
+            <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-center gap-2">
                 {/* Saved Button - 3 Star Rating (Click individual star to set rating) */}
                 <div className="flex items-center gap-0.5 p-1.5 rounded-lg bg-gray-50">
@@ -406,11 +432,61 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
     setIsDrilldownModalOpen(true);
   };
 
-  const handleViewJobsFromDrilldown = (jobs: JobListing[], selectedSkills: string[]) => {
-    setGraphDiscoveredJobs(jobs);
+  const handleViewJobsFromDrilldown = async (jobs: JobListing[], selectedSkills: string[]) => {
+    // Fetch existing matches to preserve user actions (saved/applied/redflag)
+    let existingMatches: JobMatchingResultsResponse | null = null;
+    try {
+      existingMatches = await getMatchingResults(profileId, 9999, false, 0); // Get all existing matches
+    } catch (error) {
+      console.log('No existing matches found, creating fresh results');
+    }
+
+    // Create a map of listingId -> existing match for quick lookup
+    const existingMatchMap = new Map<string, JobMatchResult>();
+    if (existingMatches) {
+      existingMatches.matches.forEach(match => {
+        existingMatchMap.set(match.listingId, match);
+      });
+    }
+
+    // Convert JobListing to JobMatchResult format, preserving existing user actions
+    const convertedResults: JobMatchingResultsResponse = {
+      profileId: profileId,
+      totalMatches: jobs.length,
+      profileSummary: `Graph-based discovery for skills: ${selectedSkills.join(', ')}`,
+      matches: jobs.map((job) => {
+        const existingMatch = existingMatchMap.get(job.id);
+        return {
+          matchId: existingMatch?.matchId || `graph-${job.id}`,
+          profileId: profileId,
+          listingId: job.id,
+          similarityScore: 0, // No vector score for graph-based
+          matchLevel: 'MODERATE' as const,
+          title: job.title,
+          company: job.company,
+          location: job.location,
+          description: job.description,
+          url: job.url,
+          salaryRange: job.salaryRange,
+          postedDate: job.postedDate || job.fetchedAt,
+          fetchedAt: job.fetchedAt,
+          matchedSkills: selectedSkills, // Show selected skills as matched
+          missingSkills: [],
+          skillMatchPercentage: 100, // All selected skills matched by definition
+          weightedSkillScore: 100,
+          // Preserve user actions from existing match
+          isSaved: existingMatch?.isSaved || 0,
+          isApplied: existingMatch?.isApplied || false,
+          isRedflag: existingMatch?.isRedflag || false,
+          flaggedAt: existingMatch?.flaggedAt,
+          matchedNegativeKeywords: []
+        };
+      })
+    };
+
+    setResults(convertedResults);
     setSelectedSkillsForDisplay(selectedSkills);
-    // Clear vector search results to show graph-discovered jobs
-    setResults(null);
+    setGraphDiscoveredJobs(null); // Clear graph jobs since we're using results now
   };
 
   const handleBackToVectorSearch = () => {
@@ -572,155 +648,101 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
       />
 
       {/* Show graph-discovered jobs if available */}
-      {graphDiscoveredJobs && (
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
-          <div className="px-6 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-indigo-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                  </svg>
-                  Neo4j Graph Discovery Results
-                </h3>
-                {selectedSkillsForDisplay.length > 0 && (
-                  <div className="flex items-center gap-2 mt-2 mb-1">
-                    <span className="text-xs text-gray-600 font-medium">Selected skills:</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedSkillsForDisplay.map((skill, index) => (
-                        <span key={skill} className="flex items-center gap-1">
-                          {index > 0 && <span className="text-indigo-400 text-xs">+</span>}
-                          <span className="px-2.5 py-1 bg-indigo-600 text-white rounded-full text-xs font-semibold shadow-sm">
-                            {skill}
-                          </span>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <p className="text-sm text-gray-600 mt-1">
-                  Found {graphDiscoveredJobs.length} jobs from skill-based graph query
-                </p>
+      {/* Graph and vector search results use same table */}
+      {results && (
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        {/* Header */}
+        <div className={`px-6 py-4 border-b border-gray-200 ${selectedSkillsForDisplay.length > 0 ? 'bg-gradient-to-r from-purple-50 to-indigo-50 border-indigo-200' : 'bg-gray-50'}`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              {selectedSkillsForDisplay.length > 0 && (
+                <svg className="w-5 h-5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+              )}
+              {selectedSkillsForDisplay.length > 0 ? 'Neo4j Graph Discovery Results' : 'Job Matching Results'}
+            </h3>
+            {selectedSkillsForDisplay.length > 0 && (
+              <div className="flex items-center gap-2 mt-2 mb-1">
+                <span className="text-xs text-gray-600 font-medium">Selected skills:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedSkillsForDisplay.map((skill, index) => (
+                    <span key={skill} className="flex items-center gap-1">
+                      {index > 0 && <span className="text-indigo-400 text-xs">+</span>}
+                      <span className="px-2.5 py-1 bg-indigo-600 text-white rounded-full text-xs font-semibold shadow-sm">
+                        {skill}
+                      </span>
+                    </span>
+                  ))}
+                </div>
               </div>
+            )}
+            <p className="text-sm text-gray-600 mt-1">
+              Found {results.totalMatches} matching jobs
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {selectedSkillsForDisplay.length > 0 ? (
+              /* Graph results - show back button */
               <button
                 onClick={handleBackToVectorSearch}
                 className="px-4 py-2 bg-white border border-indigo-300 rounded-lg text-sm font-medium text-indigo-700 hover:bg-indigo-50 transition-colors"
               >
                 ← Back to Vector Search
               </button>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Job Details
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Company
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Location
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Posted
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white divide-y divide-gray-200">
-                {graphDiscoveredJobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <a
-                        href={job.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium text-indigo-600 hover:text-indigo-800 underline"
-                      >
-                        {job.title}
-                      </a>
-                      {job.salaryRange && (
-                        <div className="text-xs text-green-600 font-medium mt-1">
-                          {job.salaryRange}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-gray-900">{job.company}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">{job.location}</td>
-                    <td className="px-6 py-4 text-sm text-gray-500">
-                      {job.postedDate ? new Date(job.postedDate).toLocaleDateString() : 'N/A'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Original vector search results */}
-      {results && (
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-        {/* Header */}
-        <div className="px-6 py-4 bg-gray-50 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">
-              Job Matching Results
-            </h3>
-            <p className="text-sm text-gray-600 mt-1">
-              Found {results.totalMatches} matching jobs
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-gray-600">Top</span>
-              <select
-                value={topK}
-                onChange={(e) => setTopK(parseInt(e.target.value))}
-                className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="50">50</option>
-                <option value="100">100</option>
-                <option value="200">200</option>
-                <option value="300">300</option>
-                <option value="500">500</option>
-                <option value="9999">ALL</option>
-              </select>
-              <span className="text-gray-600">jobs</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700">
-              <span className="text-gray-600">from last</span>
-              <select
-                value={maxDaysOld}
-                onChange={(e) => setMaxDaysOld(parseInt(e.target.value))}
-                className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="7">7 days</option>
-                <option value="14">2 weeks</option>
-                <option value="30">1 month</option>
-                <option value="60">2 months</option>
-                <option value="90">3 months</option>
-                <option value="0">All time</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={forceRefresh}
-                onChange={(e) => setForceRefresh(e.target.checked)}
-                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
-              />
-              <span>Force Refresh</span>
-            </label>
-            <button
-              onClick={() => handleSearch(undefined, 0, true)}
-              disabled={isManualRefresh}
-              className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isManualRefresh ? 'Refreshing...' : 'Refresh Results'}
-            </button>
+            ) : (
+              /* Vector results - show filters */
+              <>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <span className="text-gray-600">Top</span>
+                  <select
+                    value={topK}
+                    onChange={(e) => setTopK(parseInt(e.target.value))}
+                    className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                    <option value="300">300</option>
+                    <option value="500">500</option>
+                    <option value="9999">ALL</option>
+                  </select>
+                  <span className="text-gray-600">jobs</span>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <span className="text-gray-600">from last</span>
+                  <select
+                    value={maxDaysOld}
+                    onChange={(e) => setMaxDaysOld(parseInt(e.target.value))}
+                    className="px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                  >
+                    <option value="7">7 days</option>
+                    <option value="14">2 weeks</option>
+                    <option value="30">1 month</option>
+                    <option value="60">2 months</option>
+                    <option value="90">3 months</option>
+                    <option value="0">All time</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={forceRefresh}
+                    onChange={(e) => setForceRefresh(e.target.checked)}
+                    className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                  />
+                  <span>Force Refresh</span>
+                </label>
+                <button
+                  onClick={() => handleSearch(undefined, 0, true)}
+                  disabled={isManualRefresh}
+                  className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isManualRefresh ? 'Refreshing...' : 'Refresh Results'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -730,11 +752,11 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-80">
                 Job Details
               </th>
               <th
-                className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-16"
                 onClick={() => handleSort('matchScore')}
               >
                 <div className="flex items-center justify-center gap-1">
@@ -743,7 +765,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                 </div>
               </th>
               <th
-                className="px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-16"
                 onClick={() => handleSort('skillMatch')}
               >
                 <div className="flex items-center justify-center gap-1">
@@ -751,11 +773,11 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                   <SortIcon field="skillMatch" />
                 </div>
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-40">
                 Matched Skills
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
                 onClick={() => handleSort('postedDate')}
               >
                 <div className="flex items-center gap-1">
@@ -764,7 +786,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                 </div>
               </th>
               <th
-                className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100 w-24"
                 onClick={() => handleSort('fetchedDate')}
               >
                 <div className="flex items-center gap-1">
@@ -772,7 +794,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                   <SortIcon field="fetchedDate" />
                 </div>
               </th>
-              <th className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider w-32">
                 Actions
               </th>
             </tr>

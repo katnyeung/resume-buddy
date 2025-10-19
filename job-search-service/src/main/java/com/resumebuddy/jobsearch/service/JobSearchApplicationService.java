@@ -44,7 +44,7 @@ public class JobSearchApplicationService {
      * Cleans up any existing profile for this resume before creating new one
      */
     @Transactional
-    public JobSearchProfile createProfile(String userId, String resumeId, List<String> experienceIds) {
+    public JobSearchProfile createProfile(String userId, String resumeId, List<String> experienceIds, List<String> excludedKeywords) {
         try {
             log.info("Creating job search profile for user {} with resume {} and {} experiences",
                     userId, resumeId, experienceIds.size());
@@ -89,6 +89,11 @@ public class JobSearchApplicationService {
             profile.setLocation(generatedProfile.getLocation());
             profile.setExperienceLevel(generatedProfile.getExperienceLevel());
 
+            // Set excluded keywords (comma-separated)
+            if (excludedKeywords != null && !excludedKeywords.isEmpty()) {
+                profile.setExcludedKeywords(String.join(",", excludedKeywords));
+            }
+
             // 6. Save to MySQL first to get ID
             profile = profileRepository.save(profile);
             log.info("Saved profile to MySQL with ID: {}", profile.getId());
@@ -112,7 +117,7 @@ public class JobSearchApplicationService {
      * Update profile's job post (regenerate embedding and re-vectorize lines)
      */
     @Transactional
-    public JobSearchProfile updateJobPost(String profileId, String editedJobPost) {
+    public JobSearchProfile updateJobPost(String profileId, String editedJobPost, List<String> excludedKeywords) {
         try {
             log.info("Updating job post for profile: {}", profileId);
 
@@ -122,8 +127,16 @@ public class JobSearchApplicationService {
             // 1. Delete old line vectors from Redis and MySQL
             deleteProfileLines(profileId);
 
-            // 2. Update profile with new job post
+            // 2. Update profile with new job post and excluded keywords
             profile.setGeneratedJobPost(editedJobPost);
+
+            // Update excluded keywords (comma-separated)
+            if (excludedKeywords != null && !excludedKeywords.isEmpty()) {
+                profile.setExcludedKeywords(String.join(",", excludedKeywords));
+            } else {
+                profile.setExcludedKeywords(null);
+            }
+
             profile = profileRepository.save(profile);
 
             // 4. Re-vectorize edited job post lines

@@ -185,6 +185,7 @@ export interface JobMatchResult {
   isApplied: boolean;
   isRedflag: boolean;
   flaggedAt?: string;
+  matchedNegativeKeywords?: string[]; // Deal-breaker keywords found in this job
 }
 
 export interface JobMatchingResultsResponse {

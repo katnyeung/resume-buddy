@@ -18,4 +18,9 @@ public class CreateProfileRequest {
 
     @NotEmpty
     private List<String> experienceIds;
+
+    /**
+     * Deal-breaker keywords to highlight in job results (e.g., "SC Clearance", "PhD required")
+     */
+    private List<String> excludedKeywords;
 }

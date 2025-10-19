@@ -217,9 +217,10 @@ export const createJobSearchProfile = async (resumeId: string, experienceIds: st
   return response.data;
 };
 
-export const updateJobPost = async (profileId: string, editedJobPost: string): Promise<any> => {
+export const updateJobPost = async (profileId: string, editedJobPost: string, excludedKeywords?: string[]): Promise<any> => {
   const response = await jobSearchClient.put(`/job-search/profiles/${profileId}`, {
-    editedJobPost
+    editedJobPost,
+    excludedKeywords: excludedKeywords || []
   });
   return response.data;
 };

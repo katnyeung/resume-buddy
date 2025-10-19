@@ -9,6 +9,7 @@ import com.resumebuddy.jobsearch.infrastructure.external.jobsources.ReedApiClien
 import com.resumebuddy.jobsearch.infrastructure.external.jobsources.JSearchApiClient;
 import com.resumebuddy.jobsearch.infrastructure.external.jobsources.DevITJobsApiClient;
 import com.resumebuddy.jobsearch.infrastructure.external.jobsources.FantasticJobsApiClient;
+import com.resumebuddy.jobsearch.infrastructure.external.jobsources.TheirstackApiClient;
 import com.resumebuddy.jobsearch.infrastructure.external.jobsources.JobSourceApiClient;
 import com.resumebuddy.jobsearch.repository.CrawlActivityLogRepository;
 import lombok.RequiredArgsConstructor;
@@ -34,6 +35,7 @@ public class JobCrawlingApplicationService {
     private final JSearchApiClient jSearchApiClient;
     private final DevITJobsApiClient devITJobsApiClient;
     private final FantasticJobsApiClient fantasticJobsApiClient;
+    private final TheirstackApiClient theirstackApiClient;
     private final CrawlActivityLogRepository crawlActivityLogRepository;
 
     /**
@@ -225,6 +227,9 @@ public class JobCrawlingApplicationService {
         }
         if ("FANTASTICJOBS".equalsIgnoreCase(source)) {
             return fantasticJobsApiClient;
+        }
+        if ("THEIRSTACK".equalsIgnoreCase(source)) {
+            return theirstackApiClient;
         }
         throw new IllegalArgumentException("Unsupported job source: " + source);
     }
