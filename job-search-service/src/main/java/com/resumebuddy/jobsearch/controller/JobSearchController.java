@@ -43,6 +43,7 @@ public class JobSearchController {
     private final JobMatchingApplicationService jobMatchingService;
     private final Neo4jJobListingService neo4jJobListingService;
     private final JobListingRepository jobListingRepository;
+    private final com.resumebuddy.jobsearch.service.ResumeApiClient resumeApiClient;
 
     /**
      * Create job search profile from selected experiences
@@ -737,6 +738,110 @@ public class JobSearchController {
 
         JobMatch match = jobMatchingService.toggleRedflag(matchId, request.isRedflag());
         return ResponseEntity.ok(match);
+    }
+
+    /**
+     * Skill Train: Get skill train data for a resume
+     * GET /api/job-search/resumes/{resumeId}/skill-train
+     */
+    @Operation(
+            summary = "Get skill train data",
+            description = "Returns user's skills from resume and top market skills with job counts. " +
+                    "Used to populate the skill train visualization showing career paths."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Skill train data retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = SkillTrainDto.class))),
+            @ApiResponse(responseCode = "500", description = "Failed to fetch skill train data")
+    })
+    @GetMapping("/resumes/{resumeId}/skill-train")
+    public ResponseEntity<SkillTrainDto> getSkillTrain(
+            @Parameter(description = "Resume ID") @PathVariable String resumeId) {
+        log.info("Fetching skill train data for resume: {}", resumeId);
+
+        try {
+            // Step 1: Fetch user's skills from Resume API
+            List<String> userSkills = resumeApiClient.fetchResumeSkills(resumeId);
+            log.info("Fetched {} user skills from resume {}", userSkills.size(), resumeId);
+
+            // Step 2: Get top 50 in-demand skills from Neo4j
+            Map<String, Long> marketSkills = neo4jJobListingService.getTopInDemandSkills(50);
+
+            // Step 3: Build job count map for all skills (user + market)
+            Map<String, Long> jobCountBySkill = new LinkedHashMap<>();
+
+            // Add user skills with job counts
+            for (String skill : userSkills) {
+                Long jobCount = neo4jJobListingService.getJobCountForSkill(skill);
+                jobCountBySkill.put(skill, jobCount);
+            }
+
+            // Add market skills (may overlap with user skills)
+            jobCountBySkill.putAll(marketSkills);
+
+            SkillTrainDto response = SkillTrainDto.builder()
+                    .userSkills(userSkills)
+                    .marketSkills(marketSkills)
+                    .jobCountBySkill(jobCountBySkill)
+                    .build();
+
+            log.info("Skill train data ready: {} user skills, {} market skills",
+                    userSkills.size(), marketSkills.size());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Failed to fetch skill train data for resume {}", resumeId, e);
+            return ResponseEntity.status(500).body(null);
+        }
+    }
+
+    /**
+     * Skill Train: Get skill path exploration data
+     * POST /api/job-search/skill-train/path
+     */
+    @Operation(
+            summary = "Explore skill path",
+            description = "Finds jobs matching ALL selected skills (AND logic) and returns related skills. " +
+                    "Used for interactive skill train path exploration."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Skill path data retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = SkillPathResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "500", description = "Failed to fetch skill path data")
+    })
+    @PostMapping("/skill-train/path")
+    public ResponseEntity<SkillPathResponse> exploreSkillPath(
+            @Valid @RequestBody SkillPathRequest request) {
+        log.info("Exploring skill path for: {}", request.getSkills());
+
+        try {
+            // Step 1: Get jobs matching ALL skills (AND logic)
+            Map<String, Object> jobData = neo4jJobListingService.getJobsBySkills(request.getSkills());
+            @SuppressWarnings("unchecked")
+            List<String> jobIds = (List<String>) jobData.get("jobIds");
+
+            // Step 2: Get related skills (next stations on the train)
+            int maxRelated = request.getMaxRelatedSkills() != null ? request.getMaxRelatedSkills() : 20;
+            Map<String, Long> relatedSkills = neo4jJobListingService.getRelatedSkills(
+                    request.getSkills(), maxRelated);
+
+            SkillPathResponse response = SkillPathResponse.builder()
+                    .selectedSkills(request.getSkills())
+                    .jobCount(jobIds.size())
+                    .relatedSkills(relatedSkills)
+                    .build();
+
+            log.info("Skill path exploration complete: {} jobs, {} related skills",
+                    jobIds.size(), relatedSkills.size());
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Failed to explore skill path for: {}", request.getSkills(), e);
+            return ResponseEntity.status(500).body(null);
+        }
     }
 
     /**

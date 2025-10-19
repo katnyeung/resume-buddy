@@ -398,3 +398,17 @@ export const getJobsByIds = async (jobIds: string[], maxDaysOld: number = 0): Pr
   });
   return response.data;
 };
+
+// Skill Train (interactive skill path exploration)
+export const getSkillTrain = async (resumeId: string): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/resumes/${resumeId}/skill-train`);
+  return response.data;
+};
+
+export const exploreSkillPath = async (skills: string[], maxRelatedSkills: number = 20): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/skill-train/path`, {
+    skills,
+    maxRelatedSkills
+  });
+  return response.data;
+};

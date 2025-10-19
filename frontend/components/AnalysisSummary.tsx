@@ -11,6 +11,7 @@ import {
 } from '@/lib/api';
 import { getCurrentUserId } from '@/lib/userUtils';
 import JobStatusIndicator from './JobStatusIndicator';
+import SkillTrain from './SkillTrain';
 
 interface AnalysisSummaryProps {
   analysis: ResumeAnalysisDto;
@@ -419,28 +420,6 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
               </div>
             )}
 
-            {/* Skills */}
-            {analysis.skills.length > 0 && (
-              <div>
-                <h5 className="font-semibold text-gray-700 mb-2">Skills</h5>
-                <div className="flex flex-wrap gap-2">
-                  {analysis.skills.map((skill) => (
-                    <span
-                      key={skill.id}
-                      className="inline-flex items-center bg-green-100 text-green-800 text-xs px-3 py-1.5 rounded-full font-medium"
-                    >
-                      {skill.skillName}
-                      {skill.category && (
-                        <span className="ml-1.5 px-1.5 py-0.5 bg-green-200 text-green-900 rounded text-[10px]">
-                          {skill.category}
-                        </span>
-                      )}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* Education */}
             {analysis.educations.length > 0 && (
               <div>
@@ -563,6 +542,15 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
             )}
           </div>
         </details>
+
+        {/* Skill Train - Interactive Skill Path Exploration */}
+        {analysis.skills.length > 0 && (
+          <SkillTrain
+            resumeId={resumeId}
+            userSkills={analysis.skills.map(s => s.skillName)}
+            userSkillsWithCategory={analysis.skills}
+          />
+        )}
         </div>
       </div>
     </>

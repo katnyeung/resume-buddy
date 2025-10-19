@@ -249,3 +249,21 @@ export interface TaskResumeLineDto {
   sequence: number;
   text: string;
 }
+
+// Skill Train types
+export interface SkillTrainDto {
+  userSkills: string[];
+  marketSkills: { [key: string]: number };
+  jobCountBySkill: { [key: string]: number };
+}
+
+export interface SkillPathRequest {
+  skills: string[];
+  maxRelatedSkills?: number;
+}
+
+export interface SkillPathResponse {
+  selectedSkills: string[];
+  jobCount: number;
+  relatedSkills: { [key: string]: number };
+}

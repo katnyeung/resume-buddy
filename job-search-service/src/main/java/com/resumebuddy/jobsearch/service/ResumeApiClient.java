@@ -153,4 +153,43 @@ public class ResumeApiClient {
         }
         return experiences;
     }
+
+    /**
+     * Fetch all skills from resume's structured analysis
+     * @param resumeId Resume ID
+     * @return List of skill names
+     */
+    public List<String> fetchResumeSkills(String resumeId) {
+        try {
+            log.info("Fetching all skills from resume: {}", resumeId);
+
+            String analysisUrl = String.format("%s/resumes/%s/structured-analysis", resumeApiBaseUrl, resumeId);
+            HttpEntity<Void> requestEntity = new HttpEntity<>(getAuthHeaders());
+            ResponseEntity<String> responseEntity = restTemplate.exchange(
+                analysisUrl,
+                HttpMethod.GET,
+                requestEntity,
+                String.class
+            );
+            String response = responseEntity.getBody();
+
+            JsonNode root = objectMapper.readTree(response);
+            JsonNode skillsNode = root.path("skills");
+
+            List<String> skillNames = new ArrayList<>();
+            for (JsonNode skillNode : skillsNode) {
+                String skillName = skillNode.path("skillName").asText();
+                if (!skillName.isEmpty()) {
+                    skillNames.add(skillName);
+                }
+            }
+
+            log.info("Fetched {} skills from resume {}", skillNames.size(), resumeId);
+            return skillNames;
+
+        } catch (Exception e) {
+            log.error("Failed to fetch resume skills from resume-api", e);
+            return new ArrayList<>();
+        }
+    }
 }

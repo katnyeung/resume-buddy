@@ -1,8 +1,8 @@
 # Resume Buddy - AI-Powered Resume Enhancement Platform
 
-## 📌 Current State: Phase 11.2 - Neo4j Skill-Based Job Discovery ✅
-**Last Updated**: October 18, 2025
-**Status**: Production-ready MVP with job search, vector matching, graph-based skill discovery, and token credits
+## 📌 Current State: Phase 11.3 - Skill Train (Interactive Career Path Explorer) ✅
+**Last Updated**: October 19, 2025
+**Status**: Production-ready MVP with job search, vector matching, graph-based skill discovery, token credits, and skill train
 
 ## Project Overview
 AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration.
@@ -119,6 +119,14 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 - **Graph-discovered jobs**: Separate table bypassing vector search
 - **Performance**: <100ms Neo4j queries, <50ms MySQL batch fetch
 
+### Skill Train (Phase 11.3)
+- **Interactive career path explorer**: Build skill combinations to explore job opportunities
+- **Visual train track**: Horizontal stations showing skills (owned vs gaps) with job counts
+- **Path building**: Click skills to extend path, see related skills at each level (AND logic)
+- **Backtrack/Reset**: Navigate back or restart exploration
+- **Zero cost**: Reuses existing Neo4j queries, no LLM calls
+- **Placement**: Displayed after Skills section in ATS Analysis Summary page
+
 ## API Endpoints (Key)
 
 **Resume Management** (:8080):
@@ -159,6 +167,12 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 - `POST /api/job-search/admin/rebuild-index` - Rebuild Redis index with line-level prefixes (DESTRUCTIVE)
 - `POST /api/job-search/admin/revectorize/listing-lines?batchSize=50` - Parse job descriptions → lines → batch vectorize
 - `POST /api/job-search/admin/revectorize/profile-lines?batchSize=50` - Re-vectorize existing profile lines
+
+**Skill Train** (:8085 - NEW Phase 11.3):
+- `GET /api/job-search/resumes/{resumeId}/skill-train` - Get skill train data (user skills + market skills + job counts)
+- `POST /api/job-search/skill-train/path` - Explore skill path (AND logic, returns job count + related skills)
+
+**Swagger & Docs**:
 - **Swagger UI**: http://localhost:8085/swagger-ui.html
 - **OpenAPI Docs**: http://localhost:8085/api-docs
 
@@ -386,6 +400,20 @@ Content-Type: application/json
 - **Neo4j queries**: `getJobsBySkills()` (SIZE check for AND), `getRelatedSkills()` (co-occurrence)
 - **Use cases**: Skill discovery, market insights, career planning, deterministic search
 - **Components**: `SkillFilterCloud.tsx`, `SkillDrilldownModal.tsx`, `DateDistributionChart.tsx`
+
+**Phase 11.3 (Oct 19)** - Skill Train (Interactive Career Path Explorer) ✅:
+- **Horizontal train track UI**: Left-to-right skill path visualization in ATS Analysis Summary
+- **Starting stations**: User's existing skills from resume (solid green borders with ✓)
+- **Gap skills**: Market skills user doesn't have (dashed gray borders)
+- **Interactive exploration**: Click skill → see related skills → build path (AND logic)
+- **Job count badges**: Each station shows number of jobs requiring that skill
+- **Path tracking**: Current path displayed with arrow connectors (→) and total job count
+- **Backtrack/Reset**: Navigate back one step or reset to start
+- **2 new endpoints**: `GET /resumes/{id}/skill-train`, `POST /skill-train/path`
+- **Reuses Neo4j queries**: `getJobsBySkills()`, `getRelatedSkills()`, `getTopInDemandSkills()`
+- **Use cases**: Career planning, skill gap identification, learning roadmap, market demand visibility
+- **Components**: `SkillTrain.tsx` (placed after Skills section in AnalysisSummary)
+- **Performance**: <100ms Neo4j queries, no LLM calls, $0 cost
 
 ## Future Enhancements 📋
 1. AI-generated suggestions for adding missing tasks
