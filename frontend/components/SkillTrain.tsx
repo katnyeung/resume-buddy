@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { getSkillTrain, exploreSkillPath } from '@/lib/api';
 import { SkillTrainDto, SkillPathResponse } from '@/lib/types';
+import SkillPathMatrix from './SkillPathMatrix';
 
 interface SkillTrainProps {
   resumeId: string;
@@ -29,6 +30,7 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Load initial skill train data
   useEffect(() => {
@@ -73,7 +75,9 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
       setPathData(pathResponse);
 
       // Build next level stations from related skills
-      const nextStations: TrainStation[] = Object.entries(pathResponse.relatedSkills).map(
+      // Handle case where relatedSkills might be empty or null
+      const relatedSkillsMap = pathResponse.relatedSkills || {};
+      const nextStations: TrainStation[] = Object.entries(relatedSkillsMap).map(
         ([skillName, jobCount]) => ({
           skill: skillName,
           jobCount: jobCount as number,
@@ -86,6 +90,7 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
     } catch (err: any) {
       console.error('Failed to explore skill path:', err);
       setError('Failed to explore skill path');
+      // Don't reset the path on error - keep showing the current state
     } finally {
       setIsLoading(false);
     }
@@ -123,7 +128,8 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
         const pathResponse = await exploreSkillPath(newPath);
         setPathData(pathResponse);
 
-        const nextStations: TrainStation[] = Object.entries(pathResponse.relatedSkills).map(
+        const relatedSkillsMap = pathResponse.relatedSkills || {};
+        const nextStations: TrainStation[] = Object.entries(relatedSkillsMap).map(
           ([skillName, jobCount]) => ({
             skill: skillName,
             jobCount: jobCount as number,
@@ -167,7 +173,7 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
   }
 
   return (
-    <div className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-6 mt-4">
+    <div ref={containerRef} className="bg-gradient-to-r from-indigo-50 to-blue-50 border border-indigo-200 rounded-lg p-6 mt-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
@@ -200,38 +206,112 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
 
       {/* User's Skills Display */}
       {selectedPath.length === 0 && userSkillsWithCategory && userSkillsWithCategory.length > 0 && (
-        <div className="mb-4">
-          <h5 className="font-semibold text-gray-700 mb-2 text-sm">Your Skills</h5>
-          <div className="flex flex-wrap gap-2">
-            {userSkillsWithCategory.map((skill) => (
-              <button
-                key={skill.id}
-                onClick={() => handleSelectSkill(skill.skillName, true)}
-                className="inline-flex items-center bg-green-100 border-2 border-green-500 text-green-800 text-xs px-3 py-1.5 rounded-lg font-medium hover:bg-green-200 transition-all transform hover:scale-105 cursor-pointer"
-                title={`Click to explore jobs with ${skill.skillName}`}
-              >
-                <span className="text-green-600 font-bold mr-1">✓</span>
-                {skill.skillName}
-                {skill.category && (
-                  <span className="ml-1.5 px-1.5 py-0.5 bg-green-200 text-green-900 rounded text-[10px]">
-                    {skill.category}
-                  </span>
-                )}
-                {trainData?.jobCountBySkill[skill.skillName] !== undefined && (
-                  <span className="ml-1.5 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[10px] font-bold">
-                    {trainData.jobCountBySkill[skill.skillName]}
-                  </span>
-                )}
-              </button>
-            ))}
+        <>
+          <div className="mb-4">
+            <h5 className="font-semibold text-gray-700 mb-2 text-sm">Your Skills (sorted by job demand)</h5>
+            <div className="flex flex-wrap gap-2">
+              {[...userSkillsWithCategory]
+                .sort((a, b) => {
+                  const countA = trainData?.jobCountBySkill[a.skillName] || 0;
+                  const countB = trainData?.jobCountBySkill[b.skillName] || 0;
+                  return countB - countA; // Descending order (highest first)
+                })
+                .map((skill) => (
+                  <button
+                    key={skill.id}
+                    onClick={() => handleSelectSkill(skill.skillName, true)}
+                    className="inline-flex items-center bg-green-100 border-2 border-green-500 text-green-800 text-xs px-3 py-1.5 rounded-lg font-medium hover:bg-green-200 transition-all transform hover:scale-105 cursor-pointer"
+                    title={`Click to explore jobs with ${skill.skillName}`}
+                  >
+                    <span className="text-green-600 font-bold mr-1">✓</span>
+                    {skill.skillName}
+                    {skill.category && (
+                      <span className="ml-1.5 px-1.5 py-0.5 bg-green-200 text-green-900 rounded text-[10px]">
+                        {skill.category}
+                      </span>
+                    )}
+                    {trainData?.jobCountBySkill[skill.skillName] !== undefined && (
+                      <span className="ml-1.5 px-1.5 py-0.5 bg-indigo-100 text-indigo-700 rounded text-[10px] font-bold">
+                        {trainData.jobCountBySkill[skill.skillName]}
+                      </span>
+                    )}
+                  </button>
+                ))}
+            </div>
           </div>
-        </div>
+
+          {/* Skill Path Matrix - Shows valuable skill combinations */}
+          <SkillPathMatrix
+            userSkills={trainData.userSkills}
+            onCellClick={async (userSkill, marketSkill, count) => {
+              // Save current scroll position
+              const scrollY = window.scrollY;
+
+              // Start path with user skill first
+              try {
+                setIsLoading(true);
+                setError(null);
+
+                // Start with the user skill (the one they already have)
+                const firstPath = [userSkill];
+                setSelectedPath(firstPath);
+
+                // Fetch related skills for this user skill
+                const firstPathResponse = await exploreSkillPath(firstPath);
+                setPathData(firstPathResponse);
+
+                // Check if market skill is in the related skills
+                const relatedSkillsMap = firstPathResponse.relatedSkills || {};
+                if (relatedSkillsMap[marketSkill] !== undefined) {
+                  // Market skill is available, add it to the path
+                  const secondPath = [userSkill, marketSkill];
+                  setSelectedPath(secondPath);
+
+                  // Fetch next level
+                  const secondPathResponse = await exploreSkillPath(secondPath);
+                  setPathData(secondPathResponse);
+
+                  const nextStations = Object.entries(secondPathResponse.relatedSkills || {}).map(
+                    ([skillName, jobCount]) => ({
+                      skill: skillName,
+                      jobCount: jobCount as number,
+                      isOwned: trainData?.userSkills.includes(skillName) || false,
+                      level: secondPath.length
+                    })
+                  );
+                  setCurrentStations(nextStations);
+                } else {
+                  // Market skill not directly related, just show first level
+                  const nextStations = Object.entries(relatedSkillsMap).map(
+                    ([skillName, jobCount]) => ({
+                      skill: skillName,
+                      jobCount: jobCount as number,
+                      isOwned: trainData?.userSkills.includes(skillName) || false,
+                      level: firstPath.length
+                    })
+                  );
+                  setCurrentStations(nextStations);
+                }
+
+                // Restore scroll position after state updates
+                requestAnimationFrame(() => {
+                  window.scrollTo(0, scrollY);
+                });
+              } catch (err: any) {
+                console.error('Failed to start skill path from matrix:', err);
+                setError('Failed to explore skill path');
+              } finally {
+                setIsLoading(false);
+              }
+            }}
+          />
+        </>
       )}
 
       {/* Description */}
       <p className="text-sm text-gray-600 mb-4">
         {selectedPath.length === 0
-          ? '💡 Click any skill above to explore career paths and see related skills in the job market.'
+          ? '💡 Click skill badges above or matrix cells below to start exploring career paths. The matrix shows which skill combinations are most valuable in the job market.'
           : 'Build your skill path by selecting related skills below. Each combination shows matching job counts.'}
       </p>
 
@@ -251,8 +331,12 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
               </div>
             ))}
             {pathData && (
-              <div className="ml-2 px-2 py-1 bg-green-100 text-green-800 rounded-full text-xs font-bold">
-                {pathData.jobCount} jobs
+              <div className={`ml-2 px-2 py-1 rounded-full text-xs font-bold ${
+                pathData.jobCount === 0
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-green-100 text-green-800'
+              }`}>
+                {pathData.jobCount} {pathData.jobCount === 1 ? 'job' : 'jobs'}
               </div>
             )}
           </div>
@@ -277,7 +361,15 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
         ) : currentStations.length === 0 ? (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
             <p className="text-sm text-yellow-800">
-              🎯 End of the line! No more related skills found for this path.
+              {pathData && pathData.jobCount === 0 ? (
+                <>
+                  ⚠️ No jobs found requiring this skill combination. Try a different path or use the Back button to explore other options.
+                </>
+              ) : (
+                <>
+                  🎯 End of the line! No more related skills found for this path. This is the most specific skill set you can build from here.
+                </>
+              )}
             </p>
           </div>
         ) : (

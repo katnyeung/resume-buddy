@@ -93,17 +93,10 @@ public class JobQueueWorker {
                 return;
             }
 
-            log.info("Processing job {}: type={}, user={}", jobId, job.getJobType(), job.getUserId());
+            log.info("Processing job {}: type={}, user={}, retry={}",
+                jobId, job.getJobType(), job.getUserId(), job.getRetryCount());
 
-            // Deduct credits BEFORE execution
-            userCreditService.deductCredits(
-                job.getUserId(),
-                job.getEstimatedCredits(),
-                jobId,
-                "Job execution: " + job.getJobType()
-            );
-
-            // Execute job
+            // Credits already deducted at queue time - just execute
             Object result = jobExecutor.executeJob(job);
 
             // Calculate actual credits used
@@ -114,14 +107,10 @@ public class JobQueueWorker {
 
             log.info("Job {} completed successfully", jobId);
 
-        } catch (UserCreditService.InsufficientCreditsException e) {
-            log.error("Insufficient credits for job {}: {}", jobId, e.getMessage());
-            jobQueueService.failJob(jobId, e.getMessage(), BigDecimal.ZERO); // No refund (credits weren't deducted)
-
         } catch (Exception e) {
             log.error("Job {} failed with error", jobId, e);
 
-            // Refund credits (they were deducted before execution)
+            // Refund credits (they were deducted at queue time)
             jobQueueService.failJob(
                 jobId,
                 e.getMessage(),

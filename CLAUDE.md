@@ -1,19 +1,20 @@
 # Resume Buddy - AI-Powered Resume Enhancement Platform
 
-## 📌 Current State: Phase 11.3 - Skill Train (Interactive Career Path Explorer) ✅
+## 📌 Current State: Phase 11.4 - Skill Co-occurrence Heatmap ✅ + Interview Practice Service (Experimental)
 **Last Updated**: October 19, 2025
-**Status**: Production-ready MVP with job search, vector matching, graph-based skill discovery, token credits, and skill train
+**Status**: Production-ready MVP with job search, vector matching, graph-based skill discovery, token credits, skill train, and skill heatmap. **NEW**: Experimental interview practice microservice.
 
 ## Project Overview
-AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration.
+AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration. **NEW**: Voice-based interview practice with LangGraph state management.
 
 ## Tech Stack
 - **Backend**:
   - **Resume API** (port 8080): Spring Boot 3.2.1 + Java 17 + MySQL 8.0 + Neo4j 5.x
   - **Job Search Service** (port 8085): Spring Boot 3.2.1 + Java 17 + MySQL 8.0 + Redis Stack + Swagger/OpenAPI
+  - **Interview Practice Service** (port 8086): Python FastAPI + LangGraph + Redis (RedisSaver) + MySQL **(NEW - Experimental)**
 - **Frontend**: Next.js 14 + TypeScript + Lexical Editor + Tailwind CSS
-- **AI/Data**: Grok-4-fast-reasoning (X.AI) + OpenAI Embeddings (text-embedding-3-small) + O*NET Web Services API
-- **Document Parsing**: Docling microservice (Python FastAPI + Docker)
+- **AI/Data**: Grok-4-fast-reasoning (X.AI) + OpenAI Embeddings (text-embedding-3-small) + O*NET Web Services API + OpenAI Whisper (STT) + OpenAI TTS
+- **Document Parsing**: Docling microservice (Python FastAPI + Docker) with optimized OCR (EasyOCR + GPU acceleration)
 - **Vector Search**: Redis Stack with RediSearch + HNSW indexing
 
 ## Key Architecture
@@ -21,25 +22,24 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 ### Service Architecture (Microservices)
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Frontend (Next.js) - Port 3000                       │
-│  - Resume Editor | Job Search UI                     │
-└────────────┬─────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│  Frontend (Next.js) - Port 3000                               │
+│  - Resume Editor | Job Search UI | Interview Practice (TODO) │
+└────────────┬─────────────────────────────────────────────────┘
              │
-      ┌──────┴──────┐
-      │             │
-┌─────▼─────┐  ┌───▼───────────────────────────────┐
-│ Resume API│  │ Job Search Service (NEW)          │
-│ :8080     │  │ :8085 (Swagger UI available)      │
-│           │  │                                   │
-│ MySQL     │  │ - Multi-experience profiles      │
-│ Neo4j     │  │ - Redis vector search            │
-└───────────┘  │ - Skill gap analysis             │
-               │ - HTTP → Resume API              │
-               │                                   │
-               │ MySQL (jobsearch DB)             │
-               │ Redis Stack (vectors)            │
-               └───────────────────────────────────┘
+      ┌──────┴──────┬──────────────┐
+      │             │              │
+┌─────▼─────┐  ┌───▼──────────┐  ┌▼──────────────────────────┐
+│ Resume API│  │ Job Search   │  │ Interview Practice (NEW)  │
+│ :8080     │  │ Service      │  │ :8086 (Experimental)      │
+│           │  │ :8085        │  │                           │
+│ MySQL     │  │              │  │ - Voice Q&A (STT/TTS)     │
+│ Neo4j     │  │ - Profiles   │  │ - LangGraph workflow      │
+└───────────┘  │ - Matching   │  │ - Redis checkpoints       │
+               │ - Skills     │  │                           │
+               │              │  │ Redis (state)             │
+               │ MySQL + Redis│  │ MySQL (analytics)         │
+               └──────────────┘  └───────────────────────────┘
 ```
 
 ### Database Layers
@@ -127,6 +127,17 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 - **Zero cost**: Reuses existing Neo4j queries, no LLM calls
 - **Placement**: Displayed after Skills section in ATS Analysis Summary page
 
+### Skill Co-occurrence Heatmap (Phase 11.4)
+- **2D matrix visualization**: Shows how often skill pairs appear together in job listings
+- **Color-coded intensity**: White (0 jobs) → deep indigo (max co-occurrences)
+- **Interactive cells**: Click any cell to explore jobs requiring both skills
+- **Configurable size**: 10×10, 15×15, 20×20, or 25×25 matrix
+- **Hover tooltips**: Shows skill pair and job count + percentage
+- **Sticky headers**: Vertical skill labels on rows/columns for easy reading
+- **Performance**: <200ms Neo4j query for 20×20 matrix
+- **Zero cost**: Pure graph queries, no LLM calls
+- **Placement**: Job Search page after "Discover Jobs by Skills" section
+
 ## API Endpoints (Key)
 
 **Resume Management** (:8080):
@@ -171,6 +182,9 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 **Skill Train** (:8085 - NEW Phase 11.3):
 - `GET /api/job-search/resumes/{resumeId}/skill-train` - Get skill train data (user skills + market skills + job counts)
 - `POST /api/job-search/skill-train/path` - Explore skill path (AND logic, returns job count + related skills)
+
+**Skill Heatmap** (:8085 - NEW Phase 11.4):
+- `GET /api/job-search/skills/heatmap?topN=20` - Get skill co-occurrence matrix (shows how often skill pairs appear together in jobs)
 
 **Swagger & Docs**:
 - **Swagger UI**: http://localhost:8085/swagger-ui.html
@@ -298,7 +312,7 @@ Content-Type: application/json
 - `domain/model/` - JobSearchProfile, JobListing, JobMatch entities
 - `domain/service/` - JobPostGenerator, SkillMatcher, JobCrawlerService, JobDescriptionParser
 - `application/service/` - JobSearchApplicationService, JobMatchingApplicationService, JobCrawlingApplicationService
-- `service/` - JobAnalysisService (keyword matching), KeywordSkillMatcher (regex-based), Neo4jJobListingService (direct Neo4j indexing)
+- `service/` - JobAnalysisService (keyword matching), KeywordSkillMatcher (regex-based), Neo4jJobListingService (direct Neo4j indexing + skill co-occurrence)
 - `infrastructure/redis/` - RedisVectorService
 - `infrastructure/external/` - GrokLLMClient, VectorEmbeddingService, AdzunaApiClient, ReedApiClient
 - `infrastructure/external/jobsources/` - JobSourceApiClient (interface), AdzunaApiClient, ReedApiClient, JSearchApiClient
@@ -307,12 +321,25 @@ Content-Type: application/json
 - `dto/reed/` - ReedJobDto, ReedSearchResponse
 - `dto/jsearch/` - JSearchJobDto, JSearchSearchResponse
 - `dto/analysis/` - JobAnalysisRequest, JobAnalysisResponse (skill extraction DTOs)
+- `dto/` - SkillHeatmapResponse (co-occurrence matrix)
 - `api/controller/` - JobSearchController, AdminController
+
+**Docling Service (docling-service/)**:
+- `app.py` - FastAPI service with OCR optimizations
+- Dual pipeline configuration:
+  - PDF: Fast text extraction (force_full_page_ocr=False) + OCR fallback
+  - Images (PNG/JPG): Full-page OCR (force_full_page_ocr=True) with 2x scaling
+- EasyOCR with GPU auto-detection, multi-language support (en/fr/de/es)
+- Table structure detection for formatted resume sections
 
 **Frontend**:
 - `JobAnalysisReport.tsx` - Deep analysis UI
 - `LexicalEditor.tsx` - Main editor
-- `AnalysisSummary.tsx` - ATS display
+- `AnalysisSummary.tsx` - ATS display + Skill Train
+- `SkillFilterCloud.tsx` - Top skills tag cloud
+- `SkillDrilldownModal.tsx` - Skill filtering with AND logic
+- `SkillHeatmap.tsx` - Skill co-occurrence matrix (NEW Phase 11.4)
+- `JobMatchingResults.tsx` - Job matching page (integrates all skill discovery features)
 
 ## Key Design Decisions
 
@@ -324,6 +351,7 @@ Content-Type: application/json
 6. **Hybrid Storage**: MySQL (persistence) + Redis (vectors) for optimal performance
 7. **Multi-Experience Profiles**: Aggregate 1-N experiences for comprehensive job search
 8. **Vector-First Matching**: Semantic similarity before rule-based filtering
+9. **Format-Specific OCR**: Separate pipelines for PDFs (fast) vs images (thorough) in Docling service
 
 ## Implementation History (Condensed)
 
@@ -415,6 +443,40 @@ Content-Type: application/json
 - **Components**: `SkillTrain.tsx` (placed after Skills section in AnalysisSummary)
 - **Performance**: <100ms Neo4j queries, no LLM calls, $0 cost
 
+**Phase 11.4 (Oct 19 Evening)** - Skill Co-occurrence Heatmap ✅:
+- **2D matrix visualization**: Interactive heatmap showing skill pair co-occurrences in job market
+- **Color gradient**: rgba(99,102,241,intensity) from 0 (gray) to max (deep indigo)
+- **Configurable size**: Dropdown selector (10×10, 15×15, 20×20, 25×25)
+- **Interactive cells**: Click non-diagonal cells → opens drilldown modal with both skills
+- **Hover tooltips**: Live display of skill1 + skill2 → count (% of total jobs)
+- **Sticky headers**: Vertical skill labels, scrollable grid for large matrices
+- **Legend**: Visual guide showing color scale from 0 to max co-occurrence
+- **Backend**:
+  - Neo4j query: `getSkillCooccurrenceMatrix(topN)` - Two-step Cypher (get top skills → UNWIND pairs → count jobs)
+  - Endpoint: `GET /api/job-search/skills/heatmap?topN=20`
+  - DTO: `SkillHeatmapResponse` (skillNames, cooccurrenceMatrix, maxCooccurrence, totalJobs)
+- **Frontend**:
+  - Component: `SkillHeatmap.tsx` with CSS Grid table
+  - Placement: Job Search page, after SkillFilterCloud
+  - Integration: onCellClick opens SkillDrilldownModal
+- **Performance**: <200ms for 20×20 matrix, symmetric matrix optimization
+- **Cost**: $0 (pure Neo4j graph traversal, no LLM)
+- **Use cases**: Skill combination discovery, market trend analysis, learning path planning
+
+## Sub-Projects
+
+### Interview Practice Service (Port 8086) - **Experimental MVP**
+Voice-based interview simulation with AI feedback. See [interview-practice-service/CLAUDE.md](./interview-practice-service/CLAUDE.md) for details.
+
+**Status**: Core implementation complete, frontend integration pending
+**Tech**: Python FastAPI + LangGraph (RedisSaver) + Grok LLM + OpenAI Whisper/TTS
+**Features**:
+- Session registration (resume + job context)
+- Voice Q&A (3 rounds per session)
+- Real-time answer evaluation
+- Feedback generation
+- Progress tracking (future)
+
 ## Future Enhancements 📋
 1. AI-generated suggestions for adding missing tasks
 2. "Add to resume" button pre-filling editor
@@ -422,3 +484,4 @@ Content-Type: application/json
 4. Candidate comparison queries
 5. Career path visualization
 6. Export to PDF/ATS-friendly formats
+7. **Interview Practice frontend integration**

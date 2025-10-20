@@ -267,3 +267,19 @@ export interface SkillPathResponse {
   jobCount: number;
   relatedSkills: { [key: string]: number };
 }
+
+// Skill Heatmap types
+export interface SkillHeatmapResponse {
+  skillNames: string[];
+  cooccurrenceMatrix: { [skill1: string]: { [skill2: string]: number } };
+  maxCooccurrence: number;
+  totalJobs: number;
+}
+
+// Skill Path Matrix types (for Skill Train)
+export interface SkillPathMatrixResponse {
+  userSkills: string[];
+  marketSkills: string[];
+  cooccurrenceMatrix: { [userSkill: string]: { [marketSkill: string]: number } };
+  maxCooccurrence: number;
+}

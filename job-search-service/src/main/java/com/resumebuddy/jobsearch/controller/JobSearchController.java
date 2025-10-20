@@ -845,6 +845,83 @@ public class JobSearchController {
     }
 
     /**
+     * Skill Train: Get skill path matrix (user skills × market gap skills)
+     * POST /api/job-search/skill-train/matrix
+     */
+    @Operation(
+            summary = "Get skill path matrix",
+            description = "Returns a matrix showing co-occurrence between user's skills (rows) and top market gap skills (columns). " +
+                    "Used for visual career path exploration showing which skill combinations are valuable."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Matrix data retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = com.resumebuddy.jobsearch.dto.SkillPathMatrixResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "500", description = "Failed to build matrix")
+    })
+    @PostMapping("/skill-train/matrix")
+    public ResponseEntity<com.resumebuddy.jobsearch.dto.SkillPathMatrixResponse> getSkillPathMatrix(
+            @Valid @RequestBody SkillPathMatrixRequest request) {
+        log.info("Building skill path matrix for {} user skills, top {} market skills",
+                request.getUserSkills().size(), request.getTopMarketSkills());
+
+        try {
+            Map<String, Object> matrixData = neo4jJobListingService.getSkillPathMatrix(
+                    request.getUserSkills(),
+                    request.getTopMarketSkills() != null ? request.getTopMarketSkills() : 15
+            );
+
+            @SuppressWarnings("unchecked")
+            List<String> userSkills = (List<String>) matrixData.get("userSkills");
+            @SuppressWarnings("unchecked")
+            List<String> marketSkills = (List<String>) matrixData.get("marketSkills");
+            @SuppressWarnings("unchecked")
+            Map<String, Map<String, Long>> cooccurrenceMatrix =
+                    (Map<String, Map<String, Long>>) matrixData.get("cooccurrenceMatrix");
+            Long maxCooccurrence = (Long) matrixData.get("maxCooccurrence");
+
+            com.resumebuddy.jobsearch.dto.SkillPathMatrixResponse response =
+                    com.resumebuddy.jobsearch.dto.SkillPathMatrixResponse.builder()
+                            .userSkills(userSkills)
+                            .marketSkills(marketSkills)
+                            .cooccurrenceMatrix(cooccurrenceMatrix)
+                            .maxCooccurrence(maxCooccurrence)
+                            .build();
+
+            log.info("Skill path matrix built: {}×{} matrix, max co-occurrence: {}",
+                    userSkills.size(), marketSkills.size(), maxCooccurrence);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Failed to build skill path matrix", e);
+            return ResponseEntity.status(500).body(null);
+        }
+    }
+
+    // Request DTO for skill path matrix
+    public static class SkillPathMatrixRequest {
+        private List<String> userSkills;
+        private Integer topMarketSkills; // Default: 15
+
+        public List<String> getUserSkills() {
+            return userSkills;
+        }
+
+        public void setUserSkills(List<String> userSkills) {
+            this.userSkills = userSkills;
+        }
+
+        public Integer getTopMarketSkills() {
+            return topMarketSkills;
+        }
+
+        public void setTopMarketSkills(Integer topMarketSkills) {
+            this.topMarketSkills = topMarketSkills;
+        }
+    }
+
+    /**
      * Skill Drilldown: Get top in-demand skills
      * GET /api/job-search/skills/top?limit=30
      */
@@ -874,6 +951,56 @@ public class JobSearchController {
         } catch (Exception e) {
             log.error("Failed to fetch top skills", e);
             return ResponseEntity.status(500).body(new ArrayList<>());
+        }
+    }
+
+    /**
+     * Skill Heatmap: Get skill co-occurrence matrix
+     * GET /api/job-search/skills/heatmap?topN=20
+     */
+    @Operation(
+            summary = "Get skill co-occurrence heatmap",
+            description = "Returns a matrix showing how often pairs of top skills appear together in jobs. " +
+                    "Used for heatmap visualization showing skill pair demand in the job market."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Heatmap data retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = com.resumebuddy.jobsearch.dto.SkillHeatmapResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Failed to build heatmap")
+    })
+    @GetMapping("/skills/heatmap")
+    public ResponseEntity<com.resumebuddy.jobsearch.dto.SkillHeatmapResponse> getSkillHeatmap(
+            @Parameter(description = "Number of top skills to include in matrix (default: 20)")
+            @RequestParam(defaultValue = "20") int topN) {
+        log.info("Building skill co-occurrence heatmap for top {} skills", topN);
+
+        try {
+            Map<String, Object> matrixData = neo4jJobListingService.getSkillCooccurrenceMatrix(topN);
+
+            @SuppressWarnings("unchecked")
+            List<String> skillNames = (List<String>) matrixData.get("skillNames");
+            @SuppressWarnings("unchecked")
+            Map<String, Map<String, Long>> cooccurrenceMatrix =
+                    (Map<String, Map<String, Long>>) matrixData.get("cooccurrenceMatrix");
+            Long maxCooccurrence = (Long) matrixData.get("maxCooccurrence");
+            Long totalJobs = (Long) matrixData.get("totalJobs");
+
+            com.resumebuddy.jobsearch.dto.SkillHeatmapResponse response =
+                    com.resumebuddy.jobsearch.dto.SkillHeatmapResponse.builder()
+                            .skillNames(skillNames)
+                            .cooccurrenceMatrix(cooccurrenceMatrix)
+                            .maxCooccurrence(maxCooccurrence)
+                            .totalJobs(totalJobs)
+                            .build();
+
+            log.info("Heatmap built: {}x{} matrix, max co-occurrence: {}",
+                    skillNames.size(), skillNames.size(), maxCooccurrence);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            log.error("Failed to build skill heatmap", e);
+            return ResponseEntity.status(500).body(null);
         }
     }
 

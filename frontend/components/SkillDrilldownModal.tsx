@@ -8,6 +8,7 @@ import DateDistributionChart from './DateDistributionChart';
 interface SkillDrilldownModalProps {
   isOpen: boolean;
   initialSkill?: string;
+  initialSkills?: string[]; // Support multiple initial skills (for heatmap)
   onClose: () => void;
   onViewJobs: (jobs: JobListing[], selectedSkills: string[]) => void;
 }
@@ -15,6 +16,7 @@ interface SkillDrilldownModalProps {
 export default function SkillDrilldownModal({
   isOpen,
   initialSkill,
+  initialSkills,
   onClose,
   onViewJobs
 }: SkillDrilldownModalProps) {
@@ -24,11 +26,15 @@ export default function SkillDrilldownModal({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && initialSkill) {
-      setSelectedSkills([initialSkill]);
-      fetchDrilldownData([initialSkill]);
+    if (isOpen) {
+      // Prioritize initialSkills array, fallback to single initialSkill
+      const skillsToLoad = initialSkills || (initialSkill ? [initialSkill] : []);
+      if (skillsToLoad.length > 0) {
+        setSelectedSkills(skillsToLoad);
+        fetchDrilldownData(skillsToLoad);
+      }
     }
-  }, [isOpen, initialSkill]);
+  }, [isOpen, initialSkill, initialSkills]);
 
   const fetchDrilldownData = async (skills: string[]) => {
     if (skills.length === 0) return;

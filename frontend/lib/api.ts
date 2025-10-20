@@ -412,3 +412,18 @@ export const exploreSkillPath = async (skills: string[], maxRelatedSkills: numbe
   });
   return response.data;
 };
+
+// Skill Heatmap (skill co-occurrence matrix visualization)
+export const getSkillHeatmap = async (topN: number = 20): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/skills/heatmap?topN=${topN}`);
+  return response.data;
+};
+
+// Skill Path Matrix (user skills × market gap skills for Skill Train)
+export const getSkillPathMatrix = async (userSkills: string[], topMarketSkills: number = 15): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/skill-train/matrix`, {
+    userSkills,
+    topMarketSkills
+  });
+  return response.data;
+};

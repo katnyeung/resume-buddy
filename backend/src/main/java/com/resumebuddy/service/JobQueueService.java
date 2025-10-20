@@ -39,13 +39,7 @@ public class JobQueueService {
         // Calculate cost
         BigDecimal estimatedCredits = tokenCostCalculator.calculateCost(jobType);
 
-        // Check if user has enough credits
-        if (!userCreditService.hasEnoughCredits(userId, estimatedCredits)) {
-            throw new UserCreditService.InsufficientCreditsException(
-                String.format("Insufficient credits to queue job. Required: %s credits", estimatedCredits));
-        }
-
-        // Create job entry
+        // Create job entry FIRST (before deducting credits, so we have job ID for transaction)
         JobQueueEntry job = new JobQueueEntry();
         job.setId(UUID.randomUUID().toString());
         job.setUserId(userId);
@@ -60,6 +54,16 @@ public class JobQueueService {
             log.error("Failed to serialize input params", e);
             throw new RuntimeException("Failed to serialize job parameters", e);
         }
+
+        // Deduct credits NOW (at queue time, not execution time)
+        // This prevents double-deduction on retries
+        log.info("Deducting {} credits for job {}", estimatedCredits, job.getId());
+        userCreditService.deductCredits(
+            userId,
+            estimatedCredits,
+            job.getId(),
+            "Job queued: " + jobType
+        );
 
         JobQueueEntry saved = jobQueueRepository.save(job);
         log.info("Job queued successfully: id={}, type={}, estimated credits={}",
@@ -165,9 +169,10 @@ public class JobQueueService {
             job.setErrorMessage(String.format("Failed after %d retries: %s",
                 job.getRetryCount(), errorMessage));
 
-            // Refund credits
+            // Refund credits (always deducted at queue time)
             if (creditsToRefund != null && creditsToRefund.compareTo(BigDecimal.ZERO) > 0) {
                 try {
+                    log.info("Refunding {} credits for failed job {}", creditsToRefund, jobId);
                     userCreditService.refundCredits(
                         job.getUserId(),
                         creditsToRefund,

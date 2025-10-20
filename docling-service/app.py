@@ -23,13 +23,52 @@ import html
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-from docling.document_converter import DocumentConverter
+from docling.document_converter import DocumentConverter, PdfFormatOption, ImageFormatOption
 from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions
 
 app = FastAPI(title="Docling Resume Parser", version="1.0.0")
 
-# Initialize converter
-converter = DocumentConverter()
+# Configure PDF pipeline (optimized for digital PDFs with embedded text)
+pdf_pipeline_options = PdfPipelineOptions()
+pdf_pipeline_options.do_ocr = True  # OCR only if text extraction fails
+pdf_pipeline_options.do_table_structure = True  # Detect resume tables/sections
+pdf_pipeline_options.table_structure_options.do_cell_matching = True
+pdf_pipeline_options.images_scale = 2.0  # Better quality for embedded images
+pdf_pipeline_options.ocr_options = EasyOcrOptions(
+    force_full_page_ocr=False,  # Fast text extraction first
+    use_gpu=True,  # Auto-detect GPU, fallback to CPU
+    lang=["en", "fr", "de", "es"],  # Multi-language resume support (EasyOCR codes)
+    confidence_threshold=0.3  # Lower threshold to capture more text (default 0.5)
+)
+
+# Configure IMAGE pipeline (optimized for PNG/JPG screenshots)
+image_pipeline_options = PdfPipelineOptions()
+image_pipeline_options.do_ocr = True
+image_pipeline_options.do_table_structure = True
+image_pipeline_options.table_structure_options.do_cell_matching = True
+image_pipeline_options.images_scale = 2.0  # 2x resolution for small text
+image_pipeline_options.ocr_options = EasyOcrOptions(
+    force_full_page_ocr=True,  # Comprehensive OCR for images
+    use_gpu=True,
+    lang=["en", "fr", "de", "es"],  # EasyOCR language codes
+    confidence_threshold=0.3  # Lower threshold to capture more text (default 0.5)
+)
+
+# Initialize converter with format-specific optimizations
+converter = DocumentConverter(
+    format_options={
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_pipeline_options),
+        InputFormat.IMAGE: PdfFormatOption(pipeline_options=image_pipeline_options),
+    }
+)
+
+logger.info("Docling converter initialized with optimized OCR settings:")
+logger.info("  - PDF: Fast text extraction + OCR fallback")
+logger.info("  - Images: Full-page OCR with 2x scaling")
+logger.info("  - GPU: Auto-detect (fallback to CPU)")
+logger.info("  - Languages: en, fr, de, es (EasyOCR)")
+logger.info("  - Confidence threshold: 0.3 (lower = more text captured)")
 
 @app.get("/health")
 async def health_check():
@@ -80,9 +119,17 @@ async def parse_document(file: UploadFile = File(...)):
         raw_text = doc.export_to_text()
         raw_markdown = doc.export_to_markdown()
 
+        # Debug: Log raw text length for troubleshooting
+        logger.info(f"OCR extracted {len(raw_text)} characters from {file.filename}")
+
         # Decode HTML entities (&amp; -> &, &lt; -> <, etc.)
+        # Apply multiple passes to handle nested/complex entities
         decoded_text = html.unescape(raw_text) if raw_text else ""
         decoded_markdown = html.unescape(raw_markdown) if raw_markdown else ""
+
+        # Additional cleanup for common OCR artifacts
+        decoded_text = decoded_text.replace('&nbsp;', ' ')  # Non-breaking spaces
+        decoded_markdown = decoded_markdown.replace('&nbsp;', ' ')
 
         # Extract structured content
         parsed_data = {
@@ -99,13 +146,17 @@ async def parse_document(file: UploadFile = File(...)):
             "structure": []
         }
 
-        # Extract structural elements
+        # Extract structural elements with better text handling
         if hasattr(doc, 'texts'):
             for element in doc.texts:
                 element_text = element.text if hasattr(element, 'text') else str(element)
+                # Clean up text artifacts
+                cleaned_text = html.unescape(element_text)
+                cleaned_text = cleaned_text.replace('&nbsp;', ' ')
+
                 parsed_data["structure"].append({
                     "type": element.label if hasattr(element, 'label') else 'text',
-                    "text": html.unescape(element_text),
+                    "text": cleaned_text,
                     "confidence": getattr(element, 'confidence', 1.0)
                 })
 
@@ -252,13 +303,17 @@ async def parse_document_from_url(request: FileUrlRequest):
             "structure": []
         }
 
-        # Extract structural elements
+        # Extract structural elements with better text handling
         if hasattr(doc, 'texts'):
             for element in doc.texts:
                 element_text = element.text if hasattr(element, 'text') else str(element)
+                # Clean up text artifacts
+                cleaned_text = html.unescape(element_text)
+                cleaned_text = cleaned_text.replace('&nbsp;', ' ')
+
                 parsed_data["structure"].append({
                     "type": element.label if hasattr(element, 'label') else 'text',
-                    "text": html.unescape(element_text),
+                    "text": cleaned_text,
                     "confidence": getattr(element, 'confidence', 1.0)
                 })
 

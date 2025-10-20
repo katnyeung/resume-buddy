@@ -984,6 +984,47 @@ public class JobAnalysisService {
                     insightsDto.setStrongSignals(signalDtos);
                 }
 
+                // Scan Optimization
+                Map<String, Object> scanOptimization = (Map<String, Object>) recruiterInsights.get("scanOptimization");
+                if (scanOptimization != null) {
+                    JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.ScanOptimizationDto scanDto =
+                            new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.ScanOptimizationDto();
+                    scanDto.setFirst3WordsImpact((String) scanOptimization.get("first3WordsImpact"));
+                    scanDto.setFirst3Words((String) scanOptimization.get("first3Words"));
+                    scanDto.setVisualDensity((String) scanOptimization.get("visualDensity"));
+                    scanDto.setCharacterCount(scanOptimization.get("characterCount") != null ?
+                            ((Number) scanOptimization.get("characterCount")).intValue() : null);
+                    scanDto.setMetricVisibility((String) scanOptimization.get("metricVisibility"));
+                    scanDto.setReadingEffort((String) scanOptimization.get("readingEffort"));
+                    scanDto.setKeywordStrength((String) scanOptimization.get("keywordStrength"));
+                    insightsDto.setScanOptimization(scanDto);
+                }
+
+                // Micro-STARS Balance
+                Map<String, Object> microStarsBalance = (Map<String, Object>) recruiterInsights.get("microStarsBalance");
+                if (microStarsBalance != null) {
+                    JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.MicroStarsBalanceDto balanceDto =
+                            new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.MicroStarsBalanceDto();
+                    balanceDto.setSituationPercent(microStarsBalance.get("situationPercent") != null ?
+                            ((Number) microStarsBalance.get("situationPercent")).intValue() : null);
+                    balanceDto.setTaskPercent(microStarsBalance.get("taskPercent") != null ?
+                            ((Number) microStarsBalance.get("taskPercent")).intValue() : null);
+                    balanceDto.setActionPercent(microStarsBalance.get("actionPercent") != null ?
+                            ((Number) microStarsBalance.get("actionPercent")).intValue() : null);
+                    balanceDto.setResultPercent(microStarsBalance.get("resultPercent") != null ?
+                            ((Number) microStarsBalance.get("resultPercent")).intValue() : null);
+                    balanceDto.setAssessment((String) microStarsBalance.get("assessment"));
+                    balanceDto.setCompressionOpportunity((String) microStarsBalance.get("compressionOpportunity"));
+                    balanceDto.setRewriteSuggestion((String) microStarsBalance.get("rewriteSuggestion"));
+                    insightsDto.setMicroStarsBalance(balanceDto);
+                }
+
+                // Conciseness Score
+                insightsDto.setConcisenessScore(recruiterInsights.get("concisenessScore") != null ?
+                        ((Number) recruiterInsights.get("concisenessScore")).intValue() : null);
+                insightsDto.setConcisenessReasoning((String) recruiterInsights.get("concisenessReasoning"));
+                insightsDto.setScanSurvivability((String) recruiterInsights.get("scanSurvivability"));
+
                 insightsDto.setPotentialQuestions((List<String>) recruiterInsights.get("potentialQuestions"));
                 insightsDto.setStarsAnalysis((List<String>) recruiterInsights.get("starsAnalysis"));
                 insightsDto.setRecruiterAppealScore(
@@ -992,7 +1033,21 @@ public class JobAnalysisService {
                 );
                 insightsDto.setAppealReasoning((String) recruiterInsights.get("appealReasoning"));
                 insightsDto.setBestFitRoles((List<String>) recruiterInsights.get("bestFitRoles"));
-                insightsDto.setRedFlags((List<String>) recruiterInsights.get("redFlags"));
+
+                // Red Flags
+                List<Map<String, Object>> redFlags = (List<Map<String, Object>>) recruiterInsights.get("redFlags");
+                if (redFlags != null) {
+                    List<JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto> redFlagDtos = new ArrayList<>();
+                    for (Map<String, Object> redFlag : redFlags) {
+                        JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto redFlagDto =
+                                new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto();
+                        redFlagDto.setType((String) redFlag.get("type"));
+                        redFlagDto.setSeverity((String) redFlag.get("severity"));
+                        redFlagDto.setDescription((String) redFlag.get("description"));
+                        redFlagDtos.add(redFlagDto);
+                    }
+                    insightsDto.setRedFlags(redFlagDtos);
+                }
 
                 lineMappingDto.setRecruiterInsights(insightsDto);
             }
@@ -1125,12 +1180,55 @@ public class JobAnalysisService {
                     recruiterInsights.put("strongSignals", signals);
                 }
 
+                // Scan Optimization
+                if (insights.getScanOptimization() != null) {
+                    Map<String, Object> scanMap = new HashMap<>();
+                    com.resumebuddy.model.dto.DescriptionLineMappingDto.ScanOptimizationDto scan = insights.getScanOptimization();
+                    scanMap.put("first3WordsImpact", scan.getFirst3WordsImpact());
+                    scanMap.put("first3Words", scan.getFirst3Words());
+                    scanMap.put("visualDensity", scan.getVisualDensity());
+                    scanMap.put("characterCount", scan.getCharacterCount());
+                    scanMap.put("metricVisibility", scan.getMetricVisibility());
+                    scanMap.put("readingEffort", scan.getReadingEffort());
+                    scanMap.put("keywordStrength", scan.getKeywordStrength());
+                    recruiterInsights.put("scanOptimization", scanMap);
+                }
+
+                // Micro-STARS Balance
+                if (insights.getMicroStarsBalance() != null) {
+                    Map<String, Object> balanceMap = new HashMap<>();
+                    com.resumebuddy.model.dto.DescriptionLineMappingDto.MicroStarsBalanceDto balance = insights.getMicroStarsBalance();
+                    balanceMap.put("situationPercent", balance.getSituationPercent());
+                    balanceMap.put("taskPercent", balance.getTaskPercent());
+                    balanceMap.put("actionPercent", balance.getActionPercent());
+                    balanceMap.put("resultPercent", balance.getResultPercent());
+                    balanceMap.put("assessment", balance.getAssessment());
+                    balanceMap.put("compressionOpportunity", balance.getCompressionOpportunity());
+                    balanceMap.put("rewriteSuggestion", balance.getRewriteSuggestion());
+                    recruiterInsights.put("microStarsBalance", balanceMap);
+                }
+
+                recruiterInsights.put("concisenessScore", insights.getConcisenessScore());
+                recruiterInsights.put("concisenessReasoning", insights.getConcisenessReasoning());
+                recruiterInsights.put("scanSurvivability", insights.getScanSurvivability());
                 recruiterInsights.put("potentialQuestions", insights.getPotentialQuestions());
                 recruiterInsights.put("starsAnalysis", insights.getStarsAnalysis());
                 recruiterInsights.put("recruiterAppealScore", insights.getRecruiterAppealScore());
                 recruiterInsights.put("appealReasoning", insights.getAppealReasoning());
                 recruiterInsights.put("bestFitRoles", insights.getBestFitRoles());
-                recruiterInsights.put("redFlags", insights.getRedFlags());
+
+                // Red Flags (convert DTO to Map)
+                if (insights.getRedFlags() != null) {
+                    List<Map<String, Object>> redFlagMaps = new ArrayList<>();
+                    for (com.resumebuddy.model.dto.DescriptionLineMappingDto.RedFlagDto redFlag : insights.getRedFlags()) {
+                        Map<String, Object> redFlagMap = new HashMap<>();
+                        redFlagMap.put("type", redFlag.getType());
+                        redFlagMap.put("severity", redFlag.getSeverity());
+                        redFlagMap.put("description", redFlag.getDescription());
+                        redFlagMaps.add(redFlagMap);
+                    }
+                    recruiterInsights.put("redFlags", redFlagMaps);
+                }
 
                 lineMapping.put("recruiterInsights", recruiterInsights);
             }

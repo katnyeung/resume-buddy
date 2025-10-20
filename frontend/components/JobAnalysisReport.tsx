@@ -309,6 +309,156 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
                         <span>🔍</span> Recruiter Perspective
                       </h4>
 
+                      {/* Scan Optimization */}
+                      {line.recruiterInsights.scanOptimization && (
+                        <div className="mb-4 bg-white border border-indigo-200 rounded p-3">
+                          <p className="text-sm font-semibold text-indigo-900 mb-2">👁️ 6-Second Scan Analysis:</p>
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <span className="font-medium text-gray-700">First 3 Words:</span>
+                              <span className={`ml-2 px-2 py-0.5 rounded ${
+                                line.recruiterInsights.scanOptimization.first3WordsImpact === 'high' ? 'bg-green-100 text-green-800' :
+                                line.recruiterInsights.scanOptimization.first3WordsImpact === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {line.recruiterInsights.scanOptimization.first3WordsImpact}
+                              </span>
+                              <div className="text-gray-600 italic mt-1">"{line.recruiterInsights.scanOptimization.first3Words}"</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">Visual Density:</span>
+                              <span className={`ml-2 px-2 py-0.5 rounded ${
+                                line.recruiterInsights.scanOptimization.visualDensity === 'optimal' ? 'bg-green-100 text-green-800' :
+                                'bg-yellow-100 text-yellow-800'
+                              }`}>
+                                {line.recruiterInsights.scanOptimization.visualDensity}
+                              </span>
+                              <div className="text-gray-600 mt-1">({line.recruiterInsights.scanOptimization.characterCount} chars)</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">Metric Visibility:</span>
+                              <span className={`ml-2 px-2 py-0.5 rounded ${
+                                line.recruiterInsights.scanOptimization.metricVisibility === 'excellent' ? 'bg-green-100 text-green-800' :
+                                line.recruiterInsights.scanOptimization.metricVisibility === 'good' ? 'bg-blue-100 text-blue-800' :
+                                'bg-orange-100 text-orange-800'
+                              }`}>
+                                {line.recruiterInsights.scanOptimization.metricVisibility}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">Reading Effort:</span>
+                              <span className={`ml-2 px-2 py-0.5 rounded ${
+                                line.recruiterInsights.scanOptimization.readingEffort === 'low' ? 'bg-green-100 text-green-800' :
+                                line.recruiterInsights.scanOptimization.readingEffort === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {line.recruiterInsights.scanOptimization.readingEffort}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">Keyword Strength:</span>
+                              <span className={`ml-2 px-2 py-0.5 rounded ${
+                                line.recruiterInsights.scanOptimization.keywordStrength === 'strong' ? 'bg-green-100 text-green-800' :
+                                line.recruiterInsights.scanOptimization.keywordStrength === 'moderate' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {line.recruiterInsights.scanOptimization.keywordStrength}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="font-medium text-gray-700">Scan Survivability:</span>
+                              <span className={`ml-2 px-2 py-0.5 rounded font-semibold ${
+                                line.recruiterInsights.scanSurvivability === 'YES' ? 'bg-green-100 text-green-800' :
+                                line.recruiterInsights.scanSurvivability === 'MAYBE' ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }`}>
+                                {line.recruiterInsights.scanSurvivability}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Micro-STARS Balance */}
+                      {line.recruiterInsights.microStarsBalance && (
+                        <div className="mb-4 bg-white border border-blue-200 rounded p-3">
+                          <p className="text-sm font-semibold text-blue-900 mb-2">⭐ Micro-STARS Balance:</p>
+                          <div className="flex gap-2 mb-2">
+                            <div className="flex-1 bg-gray-100 rounded overflow-hidden h-6 flex">
+                              {line.recruiterInsights.microStarsBalance.situationPercent > 0 && (
+                                <div
+                                  className="bg-yellow-400 flex items-center justify-center text-xs font-semibold"
+                                  style={{ width: `${line.recruiterInsights.microStarsBalance.situationPercent}%` }}
+                                  title={`Situation: ${line.recruiterInsights.microStarsBalance.situationPercent}%`}
+                                >
+                                  {line.recruiterInsights.microStarsBalance.situationPercent > 10 && `S ${line.recruiterInsights.microStarsBalance.situationPercent}%`}
+                                </div>
+                              )}
+                              {line.recruiterInsights.microStarsBalance.taskPercent > 0 && (
+                                <div
+                                  className="bg-orange-400 flex items-center justify-center text-xs font-semibold"
+                                  style={{ width: `${line.recruiterInsights.microStarsBalance.taskPercent}%` }}
+                                  title={`Task: ${line.recruiterInsights.microStarsBalance.taskPercent}%`}
+                                >
+                                  {line.recruiterInsights.microStarsBalance.taskPercent > 10 && `T ${line.recruiterInsights.microStarsBalance.taskPercent}%`}
+                                </div>
+                              )}
+                              {line.recruiterInsights.microStarsBalance.actionPercent > 0 && (
+                                <div
+                                  className="bg-blue-500 flex items-center justify-center text-xs font-semibold text-white"
+                                  style={{ width: `${line.recruiterInsights.microStarsBalance.actionPercent}%` }}
+                                  title={`Action: ${line.recruiterInsights.microStarsBalance.actionPercent}%`}
+                                >
+                                  {line.recruiterInsights.microStarsBalance.actionPercent > 10 && `A ${line.recruiterInsights.microStarsBalance.actionPercent}%`}
+                                </div>
+                              )}
+                              {line.recruiterInsights.microStarsBalance.resultPercent > 0 && (
+                                <div
+                                  className="bg-green-500 flex items-center justify-center text-xs font-semibold text-white"
+                                  style={{ width: `${line.recruiterInsights.microStarsBalance.resultPercent}%` }}
+                                  title={`Result: ${line.recruiterInsights.microStarsBalance.resultPercent}%`}
+                                >
+                                  {line.recruiterInsights.microStarsBalance.resultPercent > 10 && `R ${line.recruiterInsights.microStarsBalance.resultPercent}%`}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-700 mb-1">
+                            <span className="font-medium">Assessment:</span> {line.recruiterInsights.microStarsBalance.assessment}
+                          </p>
+                          {line.recruiterInsights.microStarsBalance.compressionOpportunity && (
+                            <p className="text-xs text-blue-700 mb-1">
+                              <span className="font-medium">Compression:</span> {line.recruiterInsights.microStarsBalance.compressionOpportunity}
+                            </p>
+                          )}
+                          {line.recruiterInsights.microStarsBalance.rewriteSuggestion && (
+                            <div className="mt-2 p-2 bg-blue-50 border-l-4 border-blue-400 rounded">
+                              <p className="text-xs font-medium text-blue-900">💡 Suggested Rewrite:</p>
+                              <p className="text-sm text-blue-800 italic mt-1">"{line.recruiterInsights.microStarsBalance.rewriteSuggestion}"</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Conciseness Score */}
+                      {line.recruiterInsights.concisenessScore !== undefined && (
+                        <div className="mb-3 flex items-center gap-3 p-2 bg-white border border-gray-200 rounded">
+                          <span className={`text-2xl font-bold ${
+                            line.recruiterInsights.concisenessScore >= 8 ? 'text-green-600' :
+                            line.recruiterInsights.concisenessScore >= 5 ? 'text-yellow-600' :
+                            'text-red-600'
+                          }`}>
+                            {line.recruiterInsights.concisenessScore}/10
+                          </span>
+                          <div className="flex-1">
+                            <p className="text-xs font-semibold text-gray-700">Conciseness Score</p>
+                            {line.recruiterInsights.concisenessReasoning && (
+                              <p className="text-xs text-gray-600">{line.recruiterInsights.concisenessReasoning}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Strong Signals */}
                       {line.recruiterInsights.strongSignals && line.recruiterInsights.strongSignals.length > 0 && (
                         <div className="mb-3">
@@ -380,9 +530,19 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
                       {line.recruiterInsights.redFlags && line.recruiterInsights.redFlags.length > 0 && (
                         <div className="mt-3 pt-3 border-t border-red-200">
                           <p className="text-sm font-medium text-red-700 mb-2">🚩 Red Flags:</p>
-                          <div className="space-y-1">
-                            {line.recruiterInsights.redFlags.map((flag: string, i: number) => (
-                              <div key={i} className="text-sm ml-4 text-red-600">• {flag}</div>
+                          <div className="space-y-2">
+                            {line.recruiterInsights.redFlags.map((flag: any, i: number) => (
+                              <div key={i} className="text-sm ml-4">
+                                <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold mr-2 ${
+                                  flag.severity === 'high' ? 'bg-red-100 text-red-800' :
+                                  flag.severity === 'medium' ? 'bg-orange-100 text-orange-800' :
+                                  'bg-yellow-100 text-yellow-800'
+                                }`}>
+                                  {flag.severity?.toUpperCase()}
+                                </span>
+                                <span className="text-red-700 font-medium">{flag.type}:</span>
+                                <span className="text-red-600 ml-1">{flag.description}</span>
+                              </div>
                             ))}
                           </div>
                         </div>

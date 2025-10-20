@@ -5,6 +5,7 @@ import { getMatchingResults, toggleMatchSaved, markMatchApplied, toggleMatchRedf
 import { JobMatchingResultsResponse, JobMatchResult, JobListing } from '@/lib/types';
 import SkillFilterCloud from './SkillFilterCloud';
 import SkillDrilldownModal from './SkillDrilldownModal';
+import SkillHeatmap from './SkillHeatmap';
 
 interface JobMatchingResultsProps {
   profileId: string;
@@ -25,8 +26,18 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
   // Skill drilldown state
   const [isDrilldownModalOpen, setIsDrilldownModalOpen] = useState(false);
   const [selectedSkillForDrilldown, setSelectedSkillForDrilldown] = useState<string | undefined>();
+  const [selectedSkillsForDrilldown, setSelectedSkillsForDrilldown] = useState<string[] | undefined>(); // For heatmap (multiple skills)
   const [graphDiscoveredJobs, setGraphDiscoveredJobs] = useState<JobListing[] | null>(null);
   const [selectedSkillsForDisplay, setSelectedSkillsForDisplay] = useState<string[]>([]);
+
+  // Graph Search collapseable state
+  const [isGraphSearchCollapsed, setIsGraphSearchCollapsed] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('jobMatching_graphSearchCollapsed');
+      return saved ? saved === 'true' : false; // Default to expanded
+    }
+    return false;
+  });
 
   // Load topK and maxDaysOld from localStorage (persist user preferences)
   const [topK, setTopK] = useState(() => {
@@ -57,6 +68,13 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
       localStorage.setItem('jobMatching_maxDaysOld', maxDaysOld.toString());
     }
   }, [maxDaysOld]);
+
+  // Save graph search collapsed state to localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('jobMatching_graphSearchCollapsed', isGraphSearchCollapsed.toString());
+    }
+  }, [isGraphSearchCollapsed]);
 
   // Auto-load existing results from job_match table on mount (fast!)
   // This shows cached results immediately without expensive vector search
@@ -636,14 +654,83 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
 
   return (
     <>
-      {/* Skill Filter Cloud */}
-      <SkillFilterCloud onSkillClick={handleSkillClick} />
+      {/* Graph Search Section - Collapseable */}
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden mb-6">
+        {/* Header */}
+        <button
+          onClick={() => setIsGraphSearchCollapsed(!isGraphSearchCollapsed)}
+          className="w-full px-6 py-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-indigo-200 hover:from-purple-100 hover:to-indigo-100 transition-colors"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <svg className="w-6 h-6 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+              </svg>
+              <div className="text-left">
+                <h3 className="text-lg font-semibold text-gray-900">Graph Search</h3>
+                <p className="text-sm text-gray-600">Discover jobs by skills and explore skill co-occurrences</p>
+              </div>
+            </div>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${isGraphSearchCollapsed ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+        </button>
+
+        {/* Collapseable Content */}
+        {!isGraphSearchCollapsed && (
+          <div className="p-6 space-y-6">
+            {/* Skill Filter Cloud */}
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                Discover Jobs by Skills
+              </h4>
+              <p className="text-xs text-gray-500 mb-3">Click any skill to see related jobs from Neo4j graph</p>
+              <SkillFilterCloud onSkillClick={handleSkillClick} />
+            </div>
+
+            {/* Divider */}
+            <div className="border-t border-gray-200"></div>
+
+            {/* Skill Co-occurrence Heatmap */}
+            <div>
+              <h4 className="text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2">
+                <svg className="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+                Skill Co-occurrence Matrix
+              </h4>
+              <SkillHeatmap
+                onCellClick={(skill1, skill2, count) => {
+                  // Open drilldown modal with both skills selected
+                  setSelectedSkillsForDrilldown([skill1, skill2]);
+                  setSelectedSkillForDrilldown(undefined); // Clear single skill
+                  setIsDrilldownModalOpen(true);
+                }}
+              />
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Skill Drilldown Modal */}
       <SkillDrilldownModal
         isOpen={isDrilldownModalOpen}
         initialSkill={selectedSkillForDrilldown}
-        onClose={() => setIsDrilldownModalOpen(false)}
+        initialSkills={selectedSkillsForDrilldown}
+        onClose={() => {
+          setIsDrilldownModalOpen(false);
+          setSelectedSkillForDrilldown(undefined);
+          setSelectedSkillsForDrilldown(undefined);
+        }}
         onViewJobs={handleViewJobsFromDrilldown}
       />
 
