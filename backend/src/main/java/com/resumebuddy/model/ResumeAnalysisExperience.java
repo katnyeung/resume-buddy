@@ -46,6 +46,12 @@ public class ResumeAnalysisExperience {
     @Column(name = "description", columnDefinition = "TEXT")
     private String description;
 
+    @Column(name = "is_analyzed", nullable = false)
+    private Boolean isAnalyzed = false;
+
+    @Column(name = "analyzed_at")
+    private LocalDateTime analyzedAt;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

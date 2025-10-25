@@ -67,6 +67,14 @@ public class Skill {
     private Set<RelatedToRelationship> relatedTechnologies = new HashSet<>();
 
     /**
+     * Relationships to O*NET tasks
+     * Shows which O*NET tasks require this skill
+     */
+    @Relationship(type = "RELATES_TO_TASK", direction = Relationship.Direction.OUTGOING)
+    @Builder.Default
+    private Set<RelatesToTaskRelationship> relatedTasks = new HashSet<>();
+
+    /**
      * Generate skill ID from normalized name.
      * Example: "Java" → "skill-java"
      */

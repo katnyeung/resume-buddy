@@ -15,6 +15,8 @@ public interface ResumeRepository extends JpaRepository<Resume, String> {
 
     Optional<Resume> findByFilename(String filename);
 
+    List<Resume> findByUserId(String userId);
+
     List<Resume> findByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
     @Query("SELECT r FROM Resume r LEFT JOIN FETCH r.lines WHERE r.id = :id")

@@ -16,4 +16,5 @@ public class AnalysisResultDto {
     private Integer totalLines;
     private Integer analyzedLines;
     private List<LineAnalysisDto> lineAnalyses;
+    private ATSReportDto atsReport;
 }

@@ -12,6 +12,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -46,7 +47,7 @@ public class JobAnalysisController {
         }
     }
 
-    @GetMapping("/{resumeId}/experiences/{experienceId}/job-analysis")
+    @GetMapping("/{resumeId}/experiences/{experienceId}/analysis")
     @Operation(summary = "Get job analysis", description = "Retrieve existing job analysis results")
     public ResponseEntity<JobAnalysisResultDto> getJobAnalysis(
             @PathVariable String resumeId,
@@ -64,6 +65,27 @@ public class JobAnalysisController {
 
         } catch (Exception e) {
             log.error("Error getting job analysis: {}", experienceId, e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/analysis/{analysisId}")
+    @Operation(summary = "Get job analysis by ID", description = "Retrieve job analysis by its unique analysis ID")
+    public ResponseEntity<JobAnalysisResultDto> getJobAnalysisById(
+            @PathVariable String analysisId) {
+
+        log.info("Getting job analysis by ID: {}", analysisId);
+
+        try {
+            JobAnalysisResultDto result = jobAnalysisService.getJobAnalysisById(analysisId);
+            return ResponseEntity.ok(result);
+
+        } catch (RuntimeException e) {
+            log.warn("Job analysis not found with ID: {}", analysisId);
+            return ResponseEntity.notFound().build();
+
+        } catch (Exception e) {
+            log.error("Error getting job analysis by ID: {}", analysisId, e);
             return ResponseEntity.internalServerError().build();
         }
     }
@@ -174,6 +196,51 @@ public class JobAnalysisController {
 
         } catch (Exception e) {
             log.error("Error fetching related occupations", e);
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/{resumeId}/experiences/{experienceId}/skills/{skillName}/task-popularity")
+    @Operation(summary = "Get task-level skill popularity (on-demand)",
+               description = "Fetch task-level popularity data for a specific skill when user clicks on it")
+    public ResponseEntity<Map<String, Object>> getSkillTaskPopularity(
+            @PathVariable String resumeId,
+            @PathVariable String experienceId,
+            @PathVariable String skillName) {
+
+        log.info("Getting task popularity for skill '{}' in experience {}", skillName, experienceId);
+
+        try {
+            Map<String, Object> result = jobAnalysisService.getSkillTaskPopularity(experienceId, skillName);
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            log.error("Error getting task popularity for skill '{}': {}", skillName, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
+    }
+
+    @GetMapping("/{resumeId}/experiences/{experienceId}/tasks/{taskId}/skill-popularity")
+    @Operation(summary = "Get skill popularity for a specific task (PHASE 11.3)",
+               description = "Show which skills other people use to demonstrate this O*NET task")
+    public ResponseEntity<Map<String, Object>> getTaskSkillPopularity(
+            @PathVariable String resumeId,
+            @PathVariable String experienceId,
+            @PathVariable String taskId) {
+
+        log.info("Getting skill popularity for task '{}' in experience {}", taskId, experienceId);
+
+        try {
+            List<Map<String, Object>> skillPopularity = neo4jGraphService.getTaskSkillPopularityAnalysis(experienceId, taskId);
+
+            Map<String, Object> result = new HashMap<>();
+            result.put("taskId", taskId);
+            result.put("skillPopularity", skillPopularity);
+
+            return ResponseEntity.ok(result);
+
+        } catch (Exception e) {
+            log.error("Error getting skill popularity for task '{}': {}", taskId, e.getMessage());
             return ResponseEntity.internalServerError().build();
         }
     }

@@ -47,6 +47,18 @@ public class Resume {
     @Column(name = "status", length = 20)
     private String status; // UPLOADED, PARSING, PARSED, FAILED
 
+    @Column(name = "ats_report", columnDefinition = "LONGTEXT")
+    private String atsReport; // JSON string containing ATS quality report
+
+    @Column(name = "ats_score")
+    private Integer atsScore; // ATS quality score (0-100)
+
+    @Column(name = "ats_analyzed_at")
+    private LocalDateTime atsAnalyzedAt; // Timestamp when ATS analysis was performed
+
+    @Column(name = "user_id", length = 36)
+    private String userId; // Foreign key to users table (nullable for backward compatibility)
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

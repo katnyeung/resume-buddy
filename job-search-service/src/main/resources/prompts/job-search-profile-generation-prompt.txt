@@ -1,0 +1,127 @@
+You are an expert recruiter writing REQUIREMENTS for a job posting based on a candidate's background.
+
+Given the following candidate information from {experienceCount} resume experiences:
+
+{experiences}
+
+**Skills**: {aggregatedSkills}
+
+---
+
+## Your Task:
+
+Generate a structured job profile with:
+1. **Suggested Job Title** - Infer a concise, marketable job title based on the candidate's background
+2. **Location** - Infer the most likely target location (city + country or "Remote")
+3. **Experience Level** - Choose one: "Entry Level", "Mid Level", "Senior", "Lead", or "Executive"
+4. **Requirements** - 8-12 bulleted job requirements
+5. **Skill Proficiency Scores** - Rate each technical skill (0-100) based on experience depth
+
+---
+
+## Part 1: Suggested Job Title
+
+Analyze the candidate's experiences and suggest a concise, marketable job title:
+- Look at their most recent role titles and responsibilities
+- Consider their experience level and skillset
+- Use standard industry job titles (e.g., "Senior Java Developer", "Data Scientist", "Full Stack Engineer")
+- Keep it concise (2-5 words max)
+- Examples: "Senior Software Engineer", "Java Developer", "DevOps Engineer", "Data Scientist"
+
+## Part 2: Location
+
+Analyze the candidate's work history to determine target location:
+- If most recent roles are in the same city → use that city
+- If roles span multiple locations → suggest "Remote" or most common location
+- Format: "City, Country" or "Remote" or "City, State" (for US)
+- Examples: "San Francisco, CA", "London, UK", "Remote", "New York, NY"
+
+## Part 3: Experience Level
+
+Based on:
+- Years of experience: {totalYearsExperience}+ years
+- Job titles (look for Senior, Lead, Principal, Manager keywords)
+- Responsibilities (leading teams, architecture decisions, mentoring)
+
+Choose ONE:
+- **Entry Level** (0-2 years, junior roles)
+- **Mid Level** (3-5 years, solid contributor)
+- **Senior** (6-10 years, senior engineer/architect)
+- **Lead** (10+ years, lead/principal/staff engineer)
+- **Executive** (director, VP, C-level)
+
+## Part 4: Requirements
+
+Generate a **bulleted list of 8-12 job requirements** that would appear in a real job posting. Each requirement should be:
+- **One concise line** (5-15 words max)
+- Written like typical job post requirements
+- Based on what the candidate has actually done
+- Generic enough to match real job posts but specific enough to be meaningful
+
+---
+
+## Example Requirements (use similar style):
+
+• Strong experience with Java, Spring Boot, and microservices architecture
+• 5+ years of backend development in financial services or fintech
+• Proficiency with cloud platforms (AWS, GCP, or Azure)
+• Experience with CI/CD pipelines and DevOps practices
+• Work with relational and NoSQL databases at scale
+• Strong understanding of RESTful API design and implementation
+• Experience leading technical projects and mentoring junior developers
+• Familiarity with containerization (Docker, Kubernetes)
+• Knowledge of message queues (Kafka, RabbitMQ, or similar)
+• Bachelor's degree in Computer Science or equivalent experience
+
+---
+
+## Writing Rules:
+
+1. **Be specific about technologies** the candidate actually used (Java, not just "programming")
+2. **Include years of experience** when relevant (e.g., "5+ years")
+3. **Mention domains** if there's a clear pattern (fintech, healthcare, etc.)
+4. **Use common job post phrases**: "Strong experience with", "Proficiency in", "Knowledge of", "Familiarity with"
+5. **Mix required and nice-to-have** (use "Experience with" for required, "Familiarity with" for nice-to-have)
+6. **One requirement per line** - start each with a bullet point (•)
+7. **NO extra explanations** - just the structured output below
+
+---
+
+## Part 5: Skill Proficiency Scores
+
+For each technical skill mentioned in the experiences, assign a proficiency score (0-100):
+
+**Scoring Guidelines**:
+- **90-100 (Expert)**: Core competency, used extensively across multiple projects, demonstrated leadership
+- **70-89 (Advanced)**: Strong proficiency, used regularly, significant depth
+- **50-69 (Proficient)**: Solid working knowledge, used in production
+- **30-49 (Intermediate)**: Basic experience, used occasionally
+- **10-29 (Beginner)**: Limited exposure, still learning
+
+Consider:
+- Years of usage (inferred from job durations)
+- Frequency across experiences (appears in multiple roles → higher score)
+- Depth of use (architect/lead → higher than just "used")
+- Primary vs secondary skills (core to role → higher score)
+
+## Output Format (JSON):
+
+{
+  "suggestedJobTitle": "Senior Java Developer",
+  "location": "San Francisco, CA",
+  "experienceLevel": "Senior",
+  "requirements": "• Strong experience with Java, Spring Boot, and microservices architecture\n• 5+ years of backend development in financial services or fintech\n• Proficiency with cloud platforms (AWS, GCP, or Azure)\n• Experience with CI/CD pipelines and DevOps practices\n• Work with relational and NoSQL databases at scale\n• Strong understanding of RESTful API design and implementation\n• Experience leading technical projects and mentoring junior developers\n• Familiarity with containerization (Docker, Kubernetes)",
+  "skillProficiencies": {
+    "Java": 95,
+    "Spring Boot": 90,
+    "Microservices": 85,
+    "AWS": 75,
+    "Docker": 80,
+    "Kubernetes": 75,
+    "MySQL": 70,
+    "Redis": 65,
+    "CI/CD": 70
+  }
+}
+
+Generate the structured job profile now (JSON only, no markdown, no explanations):

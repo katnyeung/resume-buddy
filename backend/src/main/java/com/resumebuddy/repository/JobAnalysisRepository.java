@@ -11,8 +11,9 @@ public interface JobAnalysisRepository extends JpaRepository<JobAnalysis, String
 
     /**
      * Find job analysis by resume ID and experience ID
+     * Returns the most recent analysis if multiple exist
      */
-    Optional<JobAnalysis> findByResumeIdAndExperienceId(String resumeId, String experienceId);
+    Optional<JobAnalysis> findFirstByResumeIdAndExperienceIdOrderByCreatedAtDesc(String resumeId, String experienceId);
 
     /**
      * Check if job analysis exists for given resume and experience

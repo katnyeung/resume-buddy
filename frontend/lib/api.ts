@@ -10,6 +10,15 @@ const apiClient = axios.create({
   },
 });
 
+// Add request interceptor to include auth token
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 // Resume Management
 export const uploadResume = async (file: File): Promise<Resume> => {
   const formData = new FormData();
@@ -110,9 +119,20 @@ export const getEditorState = async (id: string): Promise<string | null> => {
   return response.data;
 };
 
-// AI Analysis
+// AI Analysis (Synchronous - Legacy)
 export const analyzeResume = async (id: string): Promise<any> => {
   const response = await apiClient.post(`/resumes/${id}/analyze`);
+  return response.data;
+};
+
+// AI Analysis (Async with Job Queue)
+export const analyzeResumeAsync = async (id: string, userId: string = 'default_user', priority?: number): Promise<any> => {
+  const response = await apiClient.post(`/jobs/resumes/${id}/analyze/async`, null, {
+    params: { priority },
+    headers: {
+      'X-User-Id': userId
+    }
+  });
   return response.data;
 };
 
@@ -135,15 +155,26 @@ export const checkAnalysisExists = async (id: string): Promise<boolean> => {
   return response.data;
 };
 
-// Job Analysis
+// Job Analysis (Synchronous - Legacy)
 export const analyzeJob = async (resumeId: string, experienceId: string): Promise<any> => {
   const response = await apiClient.post(`/resumes/${resumeId}/experiences/${experienceId}/analyze`);
   return response.data;
 };
 
+// Job Analysis (Async with Job Queue)
+export const analyzeJobAsync = async (resumeId: string, experienceId: string, userId: string = 'default_user', priority?: number): Promise<any> => {
+  const response = await apiClient.post(`/jobs/resumes/${resumeId}/experiences/${experienceId}/analyze/async`, null, {
+    params: { priority },
+    headers: {
+      'X-User-Id': userId
+    }
+  });
+  return response.data;
+};
+
 export const getJobAnalysis = async (resumeId: string, experienceId: string): Promise<any> => {
   try {
-    const response = await apiClient.get(`/resumes/${resumeId}/experiences/${experienceId}/job-analysis`);
+    const response = await apiClient.get(`/resumes/${resumeId}/experiences/${experienceId}/analysis`);
     return response.data;
   } catch (error) {
     return null;
@@ -157,4 +188,242 @@ export const checkJobAnalysisExists = async (resumeId: string, experienceId: str
 
 export const deleteJobAnalysis = async (resumeId: string, experienceId: string): Promise<void> => {
   await apiClient.delete(`/resumes/${resumeId}/experiences/${experienceId}/job-analysis`);
+};
+
+// Job Search Service (port 8085)
+const JOB_SEARCH_API_URL = process.env.NEXT_PUBLIC_JOB_SEARCH_API_URL || 'http://localhost:8085/api';
+
+const jobSearchClient = axios.create({
+  baseURL: JOB_SEARCH_API_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Add request interceptor to include auth token
+jobSearchClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('authToken');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+export const createJobSearchProfile = async (resumeId: string, experienceIds: string[]): Promise<any> => {
+  const response = await jobSearchClient.post('/job-search/profiles', {
+    resumeId,
+    experienceIds
+  });
+  return response.data;
+};
+
+export const updateJobPost = async (profileId: string, editedJobPost: string, excludedKeywords?: string[]): Promise<any> => {
+  const response = await jobSearchClient.put(`/job-search/profiles/${profileId}`, {
+    editedJobPost,
+    excludedKeywords: excludedKeywords || []
+  });
+  return response.data;
+};
+
+export const getJobSearchProfilesByResume = async (resumeId: string): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/profiles?resumeId=${resumeId}`);
+  return response.data;
+};
+
+export const getJobSearchProfile = async (profileId: string): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}`);
+  return response.data;
+};
+
+export const searchMatchingJobs = async (profileId: string, topK: number = 20): Promise<any[]> => {
+  const response = await jobSearchClient.post(`/job-search/profiles/${profileId}/search?topK=${topK}`);
+  return response.data;
+};
+
+export const getJobSearchProfileLines = async (profileId: string): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/lines`);
+  return response.data;
+};
+
+export const getProfileSkills = async (profileId: string): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/skills`);
+  return response.data;
+};
+
+export const addProfileSkill = async (profileId: string, skillName: string, skillCategory: string = '', proficiencyScore: number = 50): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/profiles/${profileId}/skills`, {
+    skillName,
+    skillCategory,
+    proficiencyScore
+  });
+  return response.data;
+};
+
+export const updateSkillProficiency = async (profileId: string, skillId: string, proficiencyScore: number): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/profiles/${profileId}/skills/${skillId}/proficiency`, {
+    proficiencyScore
+  });
+  return response.data;
+};
+
+export const removeProfileSkill = async (profileId: string, skillId: string): Promise<void> => {
+  await jobSearchClient.delete(`/job-search/profiles/${profileId}/skills/${skillId}`);
+};
+
+export const updateProfileMetadata = async (profileId: string, location: string, experienceLevel: string, desiredJobTitle?: string): Promise<any> => {
+  const response = await jobSearchClient.put(`/job-search/profiles/${profileId}/metadata`, {
+    location,
+    experienceLevel,
+    desiredJobTitle
+  });
+  return response.data;
+};
+
+export const getMatchingResults = async (profileId: string, topK: number = 20, refresh: boolean = false, maxDaysOld: number = 30): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/matching-results?topK=${topK}&refresh=${refresh}&maxDaysOld=${maxDaysOld}`);
+  return response.data;
+};
+
+export const toggleMatchSaved = async (matchId: string, rating: number): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/save`, {
+    rating
+  });
+  return response.data;
+};
+
+export const markMatchApplied = async (matchId: string): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/apply`);
+  return response.data;
+};
+
+export const toggleMatchRedflag = async (matchId: string, redflag: boolean): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/matches/${matchId}/redflag`, {
+    redflag
+  });
+  return response.data;
+};
+
+export const recordProfileVisit = async (profileId: string): Promise<any> => {
+  const response = await jobSearchClient.patch(`/job-search/profiles/${profileId}/visit`);
+  return response.data;
+};
+
+// Job Queue Management
+export const getJobStatus = async (jobId: string): Promise<any> => {
+  const response = await apiClient.get(`/jobs/${jobId}/status`);
+  return response.data;
+};
+
+export const pollJobUntilComplete = async (
+  jobId: string,
+  onProgress?: (status: any) => void,
+  pollIntervalMs: number = 3000,
+  maxWaitMs: number = 300000 // 5 minutes
+): Promise<any> => {
+  const startTime = Date.now();
+
+  while (true) {
+    const status = await getJobStatus(jobId);
+
+    if (onProgress) {
+      onProgress(status);
+    }
+
+    if (status.status === 'COMPLETED') {
+      return status;
+    }
+
+    if (status.status === 'FAILED') {
+      throw new Error(status.errorMessage || 'Job failed');
+    }
+
+    if (status.status === 'CANCELLED') {
+      throw new Error('Job was cancelled');
+    }
+
+    // Check timeout
+    if (Date.now() - startTime > maxWaitMs) {
+      throw new Error('Job polling timeout exceeded');
+    }
+
+    // Wait before next poll
+    await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+  }
+};
+
+// User Credit Management
+export const getUserCredits = async (userId: string = 'default_user'): Promise<any> => {
+  const response = await apiClient.get(`/users/${userId}/credits`);
+  return response.data;
+};
+
+export const getCreditTransactions = async (userId: string = 'default_user'): Promise<any[]> => {
+  const response = await apiClient.get(`/users/${userId}/credits/transactions`);
+  return response.data;
+};
+
+export const grantCredits = async (userId: string, amount: number, reason: string): Promise<any> => {
+  const response = await apiClient.post(`/users/admin/credits/grant`, {
+    userId,
+    amount,
+    reason
+  });
+  return response.data;
+};
+
+// Job Crawl Activity History
+export const getCrawlActivityHistory = async (limit: number = 5): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/admin/crawl/history?limit=${limit}`);
+  return response.data;
+};
+
+// Skill Drilldown (Neo4j graph-based job discovery)
+export const getTopSkills = async (limit: number = 30): Promise<any[]> => {
+  const response = await jobSearchClient.get(`/job-search/skills/top?limit=${limit}`);
+  return response.data;
+};
+
+export const skillDrilldown = async (skills: string[], maxDaysOld: number = 30): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/skills/drilldown`, {
+    skills,
+    maxDaysOld
+  });
+  return response.data;
+};
+
+export const getJobsByIds = async (jobIds: string[], maxDaysOld: number = 0): Promise<any[]> => {
+  const response = await jobSearchClient.post(`/job-search/jobs/by-ids`, {
+    jobIds,
+    maxDaysOld
+  });
+  return response.data;
+};
+
+// Skill Train (interactive skill path exploration)
+export const getSkillTrain = async (resumeId: string): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/resumes/${resumeId}/skill-train`);
+  return response.data;
+};
+
+export const exploreSkillPath = async (skills: string[], maxRelatedSkills: number = 20): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/skill-train/path`, {
+    skills,
+    maxRelatedSkills
+  });
+  return response.data;
+};
+
+// Skill Heatmap (skill co-occurrence matrix visualization)
+export const getSkillHeatmap = async (topN: number = 20): Promise<any> => {
+  const response = await jobSearchClient.get(`/job-search/skills/heatmap?topN=${topN}`);
+  return response.data;
+};
+
+// Skill Path Matrix (user skills × market gap skills for Skill Train)
+export const getSkillPathMatrix = async (userSkills: string[], topMarketSkills: number = 15): Promise<any> => {
+  const response = await jobSearchClient.post(`/job-search/skill-train/matrix`, {
+    userSkills,
+    topMarketSkills
+  });
+  return response.data;
 };

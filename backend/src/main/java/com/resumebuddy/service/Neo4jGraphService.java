@@ -158,17 +158,16 @@ public class Neo4jGraphService {
 
     /**
      * Clean up existing job data before re-analysis
-     * Deletes all relationships for this JobExperience node to avoid duplicates
+     * Deletes the JobExperience node and all its relationships to avoid duplicates
      */
     private void cleanupExistingJobData(TransactionContext tx, String experienceId) {
         String query = """
             MATCH (je:JobExperience {id: $experienceId})
-            OPTIONAL MATCH (je)-[r]-()
-            DELETE r
+            DETACH DELETE je
             """;
 
         tx.run(query, Values.parameters("experienceId", experienceId));
-        log.debug("Cleaned up existing relationships for experience: {}", experienceId);
+        log.debug("Cleaned up existing JobExperience node and relationships for experience: {}", experienceId);
     }
 
     /**
@@ -1132,6 +1131,40 @@ public class Neo4jGraphService {
     }
 
     /**
+     * Delete all Neo4j data for a resume
+     * Called when user deletes a resume from the UI
+     * Removes all JobExperience nodes, DescriptionLine nodes, and their relationships for this resume
+     */
+    public void deleteResumeFromGraph(String resumeId) {
+        log.info("Deleting all graph data for resume: {}", resumeId);
+
+        try (Session session = neo4jDriver.session()) {
+            session.executeWrite(tx -> {
+                // Delete DescriptionLine nodes connected to JobExperience nodes for this resume
+                String deleteDescriptionLinesQuery = """
+                    MATCH (je:JobExperience {resume_id: $resumeId})-[r:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)
+                    DETACH DELETE dl
+                    """;
+                tx.run(deleteDescriptionLinesQuery, Values.parameters("resumeId", resumeId));
+                log.debug("Deleted DescriptionLine nodes for resume: {}", resumeId);
+
+                // Delete JobExperience nodes and their relationships
+                String deleteJobExperienceQuery = """
+                    MATCH (je:JobExperience {resume_id: $resumeId})
+                    DETACH DELETE je
+                    """;
+                tx.run(deleteJobExperienceQuery, Values.parameters("resumeId", resumeId));
+                log.info("Deleted all JobExperience and DescriptionLine nodes for resume: {}", resumeId);
+
+                return null;
+            });
+        } catch (Exception e) {
+            log.error("Error deleting graph data for resume {}: {}", resumeId, e.getMessage());
+            // Don't throw - allow the resume deletion to continue even if graph cleanup fails
+        }
+    }
+
+    /**
      * Test Neo4j connection
      */
     public boolean testConnection() {
@@ -1621,6 +1654,761 @@ public class Neo4jGraphService {
         } catch (Exception e) {
             log.error("Error fetching O*NET activities/tasks for SOC {}", socCode, e);
             return Map.of("activities", new ArrayList<>(), "tasks", new ArrayList<>());
+        }
+    }
+
+    /**
+     * Store Skill -> ONetTask relationships from LLM analysis
+     * Maps which skills are required for specific O*NET tasks
+     * Called after description line mapping with skill-task mappings from LLM
+     */
+    public void storeSkillToTaskMappings(
+            String experienceId,
+            List<com.resumebuddy.model.dto.DescriptionLineMappingDto.SkillToTaskMappingDto> mappings) {
+
+        log.info("Storing {} skill-to-task mappings for experience {}", mappings.size(), experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            session.executeWrite(tx -> {
+                for (com.resumebuddy.model.dto.DescriptionLineMappingDto.SkillToTaskMappingDto mapping : mappings) {
+                    String skillId = generateSkillId(mapping.getSkillName());
+                    String taskId = mapping.getTaskId();
+
+                    String query = """
+                        MATCH (exp:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(s:Skill {id: $skillId})
+                        MATCH (t:ONetTask {id: $taskId})
+                        MERGE (s)-[r:RELATES_TO_TASK]->(t)
+                        SET r.confidence = $confidence,
+                            r.reasoning = $reasoning,
+                            r.mapped_by = 'LLM',
+                            r.mapped_at = datetime()
+                        RETURN s, r, t
+                        """;
+
+                    tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "skillId", skillId,
+                        "taskId", taskId,
+                        "confidence", mapping.getConfidence(),
+                        "reasoning", mapping.getReasoning()
+                    ));
+
+                    log.debug("Created RELATES_TO_TASK: {} -> {} (confidence: {})",
+                        mapping.getSkillName(), mapping.getTaskName(), mapping.getConfidence());
+                }
+                return null;
+            });
+
+            log.info("Successfully stored {} skill-to-task mappings", mappings.size());
+
+        } catch (Exception e) {
+            log.error("Error storing skill-to-task mappings: {}", e.getMessage());
+            // Don't throw - allow analysis to continue even if this fails
+        }
+    }
+
+    // ==================== DEEP GRAPH ANALYSIS QUERIES (PHASE 6) ====================
+
+    /**
+     * Analyze which skills have strong demonstration evidence vs weak/none
+     * Traverses: Skill -> RELATES_TO_TASK -> ONetTask <- DEMONSTRATES_TASK <- DescriptionLine
+     * Returns skill evidence strength for all skills in a job experience
+     */
+    public List<Map<String, Object>> getSkillDemonstrationAnalysis(String experienceId) {
+        log.info("Analyzing skill demonstration evidence for experience: {}", experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    MATCH (je:JobExperience {id: $experienceId})-[req:REQUIRES_SKILL]->(s:Skill)
+                    OPTIONAL MATCH (s)-[:RELATES_TO_TASK]->(t:ONetTask)
+                    OPTIONAL MATCH (je)-[:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)-[:DEMONSTRATES_TASK]->(t)
+                    WITH s,
+                         count(DISTINCT t) AS tasksLinked,
+                         count(DISTINCT dl) AS linesShowcasing,
+                         collect(DISTINCT dl.text) AS exampleLines,
+                         collect(DISTINCT t.id + '|' + t.name) AS taskNames,
+                         avg(t.importance) AS avgTaskImportance,
+                         req.is_primary AS isPrimary,
+                         s.category AS category
+                    RETURN s.name AS skillName,
+                           category,
+                           tasksLinked,
+                           linesShowcasing,
+                           exampleLines,
+                           taskNames,
+                           avgTaskImportance,
+                           isPrimary,
+                           CASE
+                             WHEN linesShowcasing >= 2 THEN 'STRONG'
+                             WHEN linesShowcasing = 1 THEN 'MODERATE'
+                             WHEN tasksLinked > 0 THEN 'WEAK'
+                             ELSE 'NONE'
+                           END AS evidenceStrength
+                    ORDER BY isPrimary DESC, linesShowcasing DESC
+                    """;
+
+                Result result = tx.run(query, Values.parameters("experienceId", experienceId));
+
+                List<Map<String, Object>> analysis = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> skillAnalysis = new HashMap<>();
+                    skillAnalysis.put("skillName", record.get("skillName").asString());
+                    skillAnalysis.put("category", record.get("category").asString(""));
+                    skillAnalysis.put("tasksLinked", record.get("tasksLinked").asInt());
+                    skillAnalysis.put("linesShowcasing", record.get("linesShowcasing").asInt());
+                    skillAnalysis.put("exampleLines", record.get("exampleLines").asList(org.neo4j.driver.Value::asString));
+                    skillAnalysis.put("taskNames", record.get("taskNames").asList(org.neo4j.driver.Value::asString));
+                    skillAnalysis.put("avgTaskImportance", record.get("avgTaskImportance").isNull() ? 0.0 : record.get("avgTaskImportance").asDouble());
+                    skillAnalysis.put("isPrimary", record.get("isPrimary").asBoolean(false));
+                    skillAnalysis.put("evidenceStrength", record.get("evidenceStrength").asString());
+                    analysis.add(skillAnalysis);
+                }
+
+                log.info("Analyzed {} skills for demonstration evidence", analysis.size());
+                return analysis;
+            });
+        } catch (Exception e) {
+            log.error("Error analyzing skill demonstration for experience {}: {}", experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Score each description line by how many skills it showcases
+     * High-value lines demonstrate multiple technical skills
+     * Traverses: DescriptionLine -> DEMONSTRATES_TASK -> ONetTask <- RELATES_TO_TASK <- Skill
+     */
+    public List<Map<String, Object>> getDescriptionLineValueScores(String experienceId) {
+        log.info("Calculating description line value scores for experience: {}", experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    MATCH (je:JobExperience {id: $experienceId})-[:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)
+                    OPTIONAL MATCH (dl)-[:DEMONSTRATES_TASK]->(t:ONetTask)<-[:RELATES_TO_TASK]-(s:Skill)
+                    WHERE (je)-[:REQUIRES_SKILL]->(s)
+                      AND toLower(dl.text) CONTAINS toLower(s.name)
+                    WITH dl,
+                         collect(DISTINCT s.name) AS skillsShowcased,
+                         count(DISTINCT s) AS skillCount,
+                         dl.impact_level AS impactLevel,
+                         dl.sequence AS sequence,
+                         dl.text AS text
+                    RETURN sequence,
+                           text,
+                           skillsShowcased,
+                           skillCount,
+                           impactLevel,
+                           CASE
+                             WHEN skillCount >= 4 THEN 'EXCELLENT'
+                             WHEN skillCount >= 2 THEN 'GOOD'
+                             WHEN skillCount = 1 THEN 'MODERATE'
+                             ELSE 'LOW'
+                           END AS valueRating
+                    ORDER BY skillCount DESC, sequence ASC
+                    """;
+
+                Result result = tx.run(query, Values.parameters("experienceId", experienceId));
+
+                List<Map<String, Object>> lineValues = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> lineValue = new HashMap<>();
+                    lineValue.put("sequence", record.get("sequence").asInt());
+                    lineValue.put("text", record.get("text").asString());
+                    lineValue.put("skillsShowcased", record.get("skillsShowcased").asList(org.neo4j.driver.Value::asString));
+                    lineValue.put("skillCount", record.get("skillCount").asInt());
+                    lineValue.put("impactLevel", record.get("impactLevel").asString(""));
+                    lineValue.put("valueRating", record.get("valueRating").asString());
+                    lineValues.add(lineValue);
+                }
+
+                log.info("Calculated value scores for {} description lines", lineValues.size());
+                return lineValues;
+            });
+        } catch (Exception e) {
+            log.error("Error calculating line value scores for experience {}: {}", experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Find high-importance tasks that the candidate COULD demonstrate
+     * (they have related skills) but currently DON'T demonstrate
+     * Returns untapped opportunities for resume improvement
+     */
+    public List<Map<String, Object>> getMissingSkillTaskOpportunities(String experienceId, double minImportance) {
+        log.info("Finding missing skill-task opportunities for experience: {} (min importance: {})",
+                experienceId, minImportance);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Find candidate's skills
+                    MATCH (je:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(s:Skill)
+
+                    // Find tasks those skills relate to
+                    MATCH (s)-[:RELATES_TO_TASK]->(t:ONetTask)
+                    WHERE t.importance >= $minImportance
+
+                    // Check if those tasks are already demonstrated
+                    OPTIONAL MATCH (je)-[:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)-[:DEMONSTRATES_TASK]->(t)
+
+                    // Only return tasks NOT yet demonstrated
+                    WITH s, t, dl
+                    WHERE dl IS NULL
+
+                    // Get the occupation context
+                    MATCH (je)-[:MAPS_TO]->(o:Occupation)-[:REQUIRES_TASK]->(t)
+
+                    RETURN DISTINCT
+                           s.name AS skillName,
+                           t.id AS taskId,
+                           t.name AS taskName,
+                           t.importance AS importance,
+                           t.category AS taskCategory,
+                           o.title AS occupationTitle
+                    ORDER BY t.importance DESC
+                    LIMIT 10
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "minImportance", minImportance
+                ));
+
+                List<Map<String, Object>> opportunities = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> opportunity = new HashMap<>();
+                    opportunity.put("skillName", record.get("skillName").asString());
+                    opportunity.put("taskId", record.get("taskId").asString());
+                    opportunity.put("taskName", record.get("taskName").asString());
+                    opportunity.put("importance", record.get("importance").asDouble());
+                    opportunity.put("taskCategory", record.get("taskCategory").asString());
+                    opportunity.put("occupationTitle", record.get("occupationTitle").asString());
+                    opportunities.add(opportunity);
+                }
+
+                log.info("Found {} missing skill-task opportunities", opportunities.size());
+                return opportunities;
+            });
+        } catch (Exception e) {
+            log.error("Error finding missing opportunities for experience {}: {}", experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Find high-importance O*NET tasks/activities NOT demonstrated at all
+     * These are gaps regardless of candidate's skills
+     * Returns top N missing items for each type
+     */
+    public Map<String, List<Map<String, Object>>> getMissingTasksAndActivities(
+            String experienceId,
+            int topN,
+            double minImportance) {
+
+        log.info("Finding missing tasks/activities for experience: {} (top {}, min importance: {})",
+                experienceId, topN, minImportance);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                Map<String, List<Map<String, Object>>> result = new HashMap<>();
+
+                // Query for missing tasks
+                String taskQuery = """
+                    MATCH (je:JobExperience {id: $experienceId})-[:MAPS_TO]->(o:Occupation)-[:REQUIRES_TASK]->(t:ONetTask)
+                    WHERE t.importance >= $minImportance
+                      AND NOT EXISTS {
+                        MATCH (je)-[:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)-[:DEMONSTRATES_TASK]->(t)
+                      }
+                    RETURN DISTINCT t.id AS taskId,
+                                    t.name AS taskName,
+                                    t.importance AS importance,
+                                    t.category AS category
+                    ORDER BY t.importance DESC
+                    LIMIT $topN
+                    """;
+
+                Result taskResult = tx.run(taskQuery, Values.parameters(
+                        "experienceId", experienceId,
+                        "minImportance", minImportance,
+                        "topN", topN
+                ));
+
+                List<Map<String, Object>> missingTasks = new ArrayList<>();
+                while (taskResult.hasNext()) {
+                    Record record = taskResult.next();
+                    Map<String, Object> task = new HashMap<>();
+                    task.put("taskId", record.get("taskId").asString());
+                    task.put("taskName", record.get("taskName").asString());
+                    task.put("importance", record.get("importance").asDouble());
+                    task.put("category", record.get("category").asString());
+                    missingTasks.add(task);
+                }
+
+                // Query for missing activities
+                String activityQuery = """
+                    MATCH (je:JobExperience {id: $experienceId})-[:MAPS_TO]->(o:Occupation)-[:REQUIRES_ACTIVITY]->(a:ONetActivity)
+                    WHERE a.importance >= $minImportance
+                      AND a.importance < 95
+                      AND NOT EXISTS {
+                        MATCH (je)-[:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)-[:DEMONSTRATES_ACTIVITY]->(a)
+                      }
+                    RETURN DISTINCT a.id AS activityId,
+                                    a.name AS activityName,
+                                    a.importance AS importance
+                    ORDER BY a.importance DESC
+                    LIMIT $topN
+                    """;
+
+                Result activityResult = tx.run(activityQuery, Values.parameters(
+                        "experienceId", experienceId,
+                        "minImportance", minImportance,
+                        "topN", topN
+                ));
+
+                List<Map<String, Object>> missingActivities = new ArrayList<>();
+                while (activityResult.hasNext()) {
+                    Record record = activityResult.next();
+                    Map<String, Object> activity = new HashMap<>();
+                    activity.put("activityId", record.get("activityId").asString());
+                    activity.put("activityName", record.get("activityName").asString());
+                    activity.put("importance", record.get("importance").asDouble());
+                    missingActivities.add(activity);
+                }
+
+                result.put("tasks", missingTasks);
+                result.put("activities", missingActivities);
+
+                log.info("Found {} missing tasks and {} missing activities",
+                        missingTasks.size(), missingActivities.size());
+
+                return result;
+            });
+        } catch (Exception e) {
+            log.error("Error finding missing tasks/activities for experience {}: {}", experienceId, e.getMessage());
+            return Map.of("tasks", new ArrayList<>(), "activities", new ArrayList<>());
+        }
+    }
+
+    /**
+     * Find missing skills by category - skills that relate to occupation's required tasks
+     * but the candidate doesn't currently have
+     * Groups by category and limits total results to 40 skills
+     */
+    public List<Map<String, Object>> getMissingSkillsByCategory(String experienceId, int limitPerCategory) {
+        log.info("Finding missing skills by category for experience: {} (limit {} per category)",
+                experienceId, limitPerCategory);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Get occupation's required tasks
+                    MATCH (je:JobExperience {id: $experienceId})-[:MAPS_TO]->(o:Occupation)
+                    MATCH (o)-[:REQUIRES_TASK]->(task:ONetTask)
+
+                    // Find skills that relate to those tasks
+                    MATCH (skill:Skill)-[:RELATES_TO_TASK]->(task)
+
+                    // Filter out skills the candidate already has AND filter out generic domain skills
+                    WHERE NOT EXISTS {
+                      MATCH (je)-[:REQUIRES_SKILL]->(candidateSkill:Skill)
+                      WHERE candidateSkill.name = skill.name
+                    }
+                    AND NOT skill.name IN ['Domain Expertise', 'Domain Knowledge']
+
+                    // Collect task names and calculate metrics
+                    WITH skill.name AS skillName,
+                         skill.category AS category,
+                         collect(DISTINCT task.name)[0..3] AS taskNames,
+                         count(DISTINCT task) AS requiredByTasks,
+                         avg(task.importance) AS avgImportance
+
+                    // Group by category and limit
+                    WITH category,
+                         collect({
+                           skillName: skillName,
+                           requiredByTasks: requiredByTasks,
+                           avgImportance: avgImportance,
+                           taskNames: taskNames
+                         }) AS skillsInCategory
+
+                    UNWIND skillsInCategory[0..$limitPerCategory] AS skill
+
+                    RETURN category,
+                           skill.skillName AS skillName,
+                           skill.requiredByTasks AS requiredByTasks,
+                           skill.avgImportance AS avgImportance,
+                           skill.taskNames AS taskNames
+                    ORDER BY category, skill.avgImportance DESC, skill.requiredByTasks DESC
+                    LIMIT 40
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "limitPerCategory", limitPerCategory
+                ));
+
+                List<Map<String, Object>> missingSkills = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> skillData = new HashMap<>();
+                    skillData.put("skillName", record.get("skillName").asString());
+                    skillData.put("category", record.get("category").asString("Uncategorized"));
+                    skillData.put("requiredByTasks", record.get("requiredByTasks").asInt());
+                    skillData.put("avgImportance", record.get("avgImportance").asDouble());
+                    skillData.put("taskNames", record.get("taskNames").asList(v -> v.asString()));
+                    missingSkills.add(skillData);
+                }
+
+                log.info("Found {} missing skills (max 40 total, filtered out Domain Expertise/Knowledge)",
+                        missingSkills.size());
+                return missingSkills;
+            });
+        } catch (Exception e) {
+            log.error("Error finding missing skills for experience {}: {}", experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    // ==================== TASK DEMONSTRATION ANALYSIS (PHASE 11.3) ====================
+
+    /**
+     * Get task-centric view of how user demonstrates O*NET tasks
+     * For each task, shows which skills relate to it and which lines demonstrate it
+     * Replaces skill-first credibility report with task-first coverage analysis
+     *
+     * @param experienceId Job experience ID
+     * @return List of tasks with their demonstrating skills and lines
+     */
+    public List<Map<String, Object>> getTaskDemonstrationAnalysis(String experienceId) {
+        log.info("Analyzing task demonstration coverage for experience: {}", experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Get all O*NET tasks for this experience's occupations
+                    MATCH (je:JobExperience {id: $experienceId})-[:MAPS_TO]->(o:Occupation)-[:REQUIRES_TASK]->(task:ONetTask)
+
+                    // Find user skills that relate to these tasks
+                    OPTIONAL MATCH (je)-[:REQUIRES_SKILL]->(skill:Skill)-[:RELATES_TO_TASK]->(task)
+
+                    // Find resume lines that demonstrate these tasks
+                    OPTIONAL MATCH (je)-[:HAS_DESCRIPTION_LINE]->(line:DescriptionLine)-[:DEMONSTRATES_TASK]->(task)
+
+                    WITH task,
+                         collect(DISTINCT {
+                           skillName: skill.name,
+                           category: skill.category,
+                           skillId: skill.id,
+                           isPrimary: EXISTS((je)-[:REQUIRES_SKILL {is_primary: true}]->(skill))
+                         }) as skillsRaw,
+                         collect(DISTINCT {
+                           lineId: line.id,
+                           sequence: line.sequence,
+                           text: line.text
+                         }) as linesRaw
+
+                    // Filter out null skills/lines
+                    WITH task,
+                         [s IN skillsRaw WHERE s.skillName IS NOT NULL] as skills,
+                         [l IN linesRaw WHERE l.lineId IS NOT NULL] as lines
+
+                    // Calculate skill count for each skill (how many lines per skill)
+                    UNWIND skills AS skill
+                    OPTIONAL MATCH (je:JobExperience {id: $experienceId})-[:HAS_DESCRIPTION_LINE]->(dl:DescriptionLine)-[:DEMONSTRATES_TASK]->(task)
+                    WHERE toLower(dl.text) CONTAINS toLower(skill.skillName)
+                    WITH task, skill, lines,
+                         count(DISTINCT dl) as linesForSkill,
+                         collect(DISTINCT skills) as allSkills
+
+                    WITH task, lines,
+                         collect(DISTINCT {
+                           skillName: skill.skillName,
+                           category: skill.category,
+                           isPrimary: skill.isPrimary,
+                           lineCount: linesForSkill
+                         }) as skillsWithCounts,
+                         allSkills[0] as allSkillsList
+
+                    RETURN task.id as taskId,
+                           task.name as taskName,
+                           task.importance as importance,
+                           task.category as taskCategory,
+                           size(skillsWithCounts) as skillCount,
+                           size(lines) as lineCount,
+                           skillsWithCounts as skills,
+                           lines,
+                           CASE
+                             WHEN size(skillsWithCounts) >= 4 THEN 'STRONG'
+                             WHEN size(skillsWithCounts) >= 2 THEN 'MODERATE'
+                             WHEN size(skillsWithCounts) >= 1 THEN 'WEAK'
+                             ELSE 'NONE'
+                           END as coverageStrength
+                    ORDER BY task.importance DESC
+                    """;
+
+                Result result = tx.run(query, Values.parameters("experienceId", experienceId));
+
+                List<Map<String, Object>> taskAnalysis = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> taskData = new HashMap<>();
+
+                    taskData.put("taskId", record.get("taskId").asString());
+                    taskData.put("taskName", record.get("taskName").asString());
+                    taskData.put("importance", record.get("importance").asDouble());
+                    taskData.put("taskCategory", record.get("taskCategory").asString(""));
+                    taskData.put("coverageStrength", record.get("coverageStrength").asString());
+                    taskData.put("skillCount", record.get("skillCount").asInt());
+                    taskData.put("lineCount", record.get("lineCount").asInt());
+
+                    // Parse skills list
+                    List<Map<String, Object>> skills = record.get("skills").asList(v -> {
+                        Map<String, Object> skillMap = new HashMap<>();
+                        skillMap.put("skillName", v.get("skillName").asString(""));
+                        skillMap.put("category", v.get("category").asString(""));
+                        skillMap.put("isPrimary", v.get("isPrimary").asBoolean(false));
+                        skillMap.put("lineCount", v.get("lineCount").asInt(0));
+                        return skillMap;
+                    });
+                    taskData.put("skills", skills);
+
+                    // Parse lines list
+                    List<Map<String, Object>> lines = record.get("lines").asList(v -> {
+                        Map<String, Object> lineMap = new HashMap<>();
+                        lineMap.put("lineId", v.get("lineId").asString(""));
+                        lineMap.put("sequence", v.get("sequence").asInt(0));
+                        lineMap.put("text", v.get("text").asString(""));
+                        return lineMap;
+                    });
+                    taskData.put("lines", lines);
+
+                    taskAnalysis.add(taskData);
+                }
+
+                log.info("Found {} tasks with demonstration analysis", taskAnalysis.size());
+                return taskAnalysis;
+            });
+        } catch (Exception e) {
+            log.error("Error analyzing task demonstrations for experience {}: {}", experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    // ==================== TASK-LEVEL SKILL POPULARITY ANALYSIS (PHASE 6.5) ====================
+
+    /**
+     * Get task-level skill popularity analysis for a specific O*NET task
+     * Shows all skills that can accomplish this task and how many people use each skill
+     * Also indicates whether the current user has each skill
+     *
+     * @param experienceId Current user's job experience ID
+     * @param taskId O*NET task ID
+     * @return List of skills with popularity counts and user ownership flag
+     */
+    public List<Map<String, Object>> getTaskSkillPopularityAnalysis(String experienceId, String taskId) {
+        log.info("Analyzing skill popularity for task {} in experience {}", taskId, experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Get the task
+                    MATCH (task:ONetTask {id: $taskId})
+
+                    // Find all skills that relate to this task
+                    MATCH (skill:Skill)-[:RELATES_TO_TASK]->(task)
+
+                    // Count how many JobExperiences use each skill
+                    MATCH (je:JobExperience)-[:REQUIRES_SKILL]->(skill)
+                    WITH task, skill,
+                         count(DISTINCT je) AS jobCount,
+                         count(DISTINCT je.resume_id) AS resumeCount
+
+                    // Check if current user has this skill
+                    OPTIONAL MATCH (userJe:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(skill)
+
+                    RETURN skill.name AS skillName,
+                           skill.category AS skillCategory,
+                           resumeCount AS peopleWithSkill,
+                           (userJe IS NOT NULL) AS userHasSkill
+                    ORDER BY resumeCount DESC
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "taskId", taskId
+                ));
+
+                List<Map<String, Object>> skillPopularity = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> skillData = new HashMap<>();
+                    skillData.put("skillName", record.get("skillName").asString());
+                    skillData.put("skillCategory", record.get("skillCategory").asString(""));
+                    skillData.put("peopleWithSkill", record.get("peopleWithSkill").asInt());
+                    skillData.put("userHasSkill", record.get("userHasSkill").asBoolean());
+                    skillPopularity.add(skillData);
+                }
+
+                log.info("Found {} skills for task {}, {} professionals total",
+                        skillPopularity.size(), taskId,
+                        skillPopularity.stream().mapToInt(s -> (Integer) s.get("peopleWithSkill")).sum());
+
+                return skillPopularity;
+            });
+        } catch (Exception e) {
+            log.error("Error analyzing skill popularity for task {} in experience {}: {}",
+                    taskId, experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Get skill co-occurrence analysis for a specific task and user skill
+     * Shows which OTHER skills are commonly paired with the user's skill
+     * Example: "72% of Spring Boot users also have Docker"
+     *
+     * @param experienceId Current user's job experience ID
+     * @param taskId O*NET task ID
+     * @param userSkill The skill the user has for this task
+     * @return List of co-occurring skills with percentages and counts
+     */
+    public List<Map<String, Object>> getTaskSkillCooccurrence(String experienceId, String taskId, String userSkill) {
+        log.info("Analyzing skill co-occurrence for {} on task {} in experience {}",
+                userSkill, taskId, experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Find JobExperiences that use this skill for this task
+                    MATCH (skill:Skill {name: $userSkill})-[:RELATES_TO_TASK]->(task:ONetTask {id: $taskId})
+                    MATCH (je:JobExperience)-[:REQUIRES_SKILL]->(skill)
+
+                    // Find other skills these JobExperiences have
+                    MATCH (je)-[:REQUIRES_SKILL]->(coSkill:Skill)
+                    WHERE coSkill <> skill
+
+                    // Count co-occurrence
+                    WITH coSkill,
+                         count(DISTINCT je) AS coCount,
+                         count(DISTINCT je.resume_id) AS resumeCount
+
+                    // Calculate percentage
+                    MATCH (allJe:JobExperience)-[:REQUIRES_SKILL]->(skill:Skill {name: $userSkill})
+                    WITH coSkill,
+                         resumeCount,
+                         count(DISTINCT allJe.resume_id) AS totalWithUserSkill,
+                         (resumeCount * 100.0 / count(DISTINCT allJe.resume_id)) AS cooccurrencePercentage
+
+                    // Check if current user has this co-occurring skill
+                    OPTIONAL MATCH (userJe:JobExperience {id: $experienceId})-[:REQUIRES_SKILL]->(coSkill)
+
+                    RETURN coSkill.name AS skillName,
+                           coSkill.category AS category,
+                           resumeCount AS peopleCount,
+                           cooccurrencePercentage AS percentage,
+                           (userJe IS NOT NULL) AS userHasSkill
+                    ORDER BY cooccurrencePercentage DESC
+                    LIMIT 10
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "taskId", taskId,
+                        "userSkill", userSkill
+                ));
+
+                List<Map<String, Object>> cooccurrence = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> coSkillData = new HashMap<>();
+                    coSkillData.put("skillName", record.get("skillName").asString());
+                    coSkillData.put("category", record.get("category").asString(""));
+                    coSkillData.put("peopleCount", record.get("peopleCount").asInt());
+                    coSkillData.put("percentage", record.get("percentage").asDouble());
+                    coSkillData.put("userHasSkill", record.get("userHasSkill").asBoolean());
+                    cooccurrence.add(coSkillData);
+                }
+
+                log.info("Found {} co-occurring skills for {} on task {}",
+                        cooccurrence.size(), userSkill, taskId);
+
+                return cooccurrence;
+            });
+        } catch (Exception e) {
+            log.error("Error analyzing skill co-occurrence for {} on task {} in experience {}: {}",
+                    userSkill, taskId, experienceId, e.getMessage());
+            return new ArrayList<>();
+        }
+    }
+
+    /**
+     * Find skills for a specific task that the user doesn't have (but others do)
+     * Shows competitive gaps - skills commonly used for this task that user is missing
+     *
+     * @param experienceId Current user's job experience ID
+     * @param taskId O*NET task ID
+     * @return List of missing skills with popularity counts
+     */
+    public List<Map<String, Object>> getTaskMissingSkillsAnalysis(String experienceId, String taskId) {
+        log.info("Finding missing skills for task {} in experience {}", taskId, experienceId);
+
+        try (Session session = neo4jDriver.session()) {
+            return session.executeRead(tx -> {
+                String query = """
+                    // Get the task and related skills
+                    MATCH (task:ONetTask {id: $taskId})
+                    MATCH (skill:Skill)-[:RELATES_TO_TASK]->(task)
+
+                    // Count popularity
+                    MATCH (je:JobExperience)-[:REQUIRES_SKILL]->(skill)
+                    WITH task, skill, count(DISTINCT je.resume_id) AS resumeCount
+
+                    // Check if user has this skill
+                    MATCH (userJe:JobExperience {id: $experienceId})
+                    WHERE NOT EXISTS {
+                      MATCH (userJe)-[:REQUIRES_SKILL]->(userSkill:Skill)
+                      WHERE userSkill.name = skill.name
+                    }
+
+                    RETURN skill.name AS skillName,
+                           skill.category AS category,
+                           resumeCount AS peopleWithSkill,
+                           task.importance AS taskImportance
+                    ORDER BY resumeCount DESC, taskImportance DESC
+                    LIMIT 5
+                    """;
+
+                Result result = tx.run(query, Values.parameters(
+                        "experienceId", experienceId,
+                        "taskId", taskId
+                ));
+
+                List<Map<String, Object>> missingSkills = new ArrayList<>();
+                while (result.hasNext()) {
+                    Record record = result.next();
+                    Map<String, Object> missingSkillData = new HashMap<>();
+                    missingSkillData.put("skillName", record.get("skillName").asString());
+                    missingSkillData.put("category", record.get("category").asString(""));
+                    missingSkillData.put("peopleWithSkill", record.get("peopleWithSkill").asInt());
+                    missingSkillData.put("taskImportance", record.get("taskImportance").asDouble());
+                    missingSkills.add(missingSkillData);
+                }
+
+                log.info("Found {} missing skills for task {} in experience {}",
+                        missingSkills.size(), taskId, experienceId);
+
+                return missingSkills;
+            });
+        } catch (Exception e) {
+            log.error("Error finding missing skills for task {} in experience {}: {}",
+                    taskId, experienceId, e.getMessage());
+            return new ArrayList<>();
         }
     }
 }

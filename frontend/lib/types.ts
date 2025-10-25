@@ -4,6 +4,9 @@ export interface Resume {
   contentType: string;
   fileSize: number;
   status: string;
+  atsReport?: string; // JSON string containing ATS quality report
+  atsScore?: number;
+  atsAnalyzedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -44,12 +47,23 @@ export interface AnalysisGroup {
   endLine: number;
 }
 
+export interface ATSReport {
+  score: number;
+  summary: string;
+  strengths: string[];
+  improvements: string[];
+  contentBalance: 'sparse' | 'balanced' | 'verbose';
+  readability: 'poor' | 'fair' | 'good' | 'excellent';
+  sectionOrganization: 'poor' | 'fair' | 'good' | 'excellent';
+}
+
 export interface AnalysisResultDto {
   resumeId: string;
   analyzedAt: string;
   totalLines: number;
   analyzedLines: number;
   lineAnalyses: LineAnalysisDto[];
+  atsReport?: ATSReport;
 }
 
 export interface LineAnalysisDto {
@@ -87,6 +101,9 @@ export interface ExperienceDto {
   startDate?: string;
   endDate?: string;
   description?: string;
+  isAnalyzed?: boolean;
+  analyzedAt?: string;
+  analysisId?: string;  // Latest job analysis ID
 }
 
 export interface SkillDto {
@@ -143,4 +160,126 @@ export interface WorkActivity {
   name: string;
   category: string;
   importance: number;
+}
+
+// Job Matching types
+export interface JobMatchResult {
+  matchId: string;
+  profileId: string;
+  listingId: string;
+  similarityScore: number;
+  matchLevel: 'STRONG' | 'GOOD' | 'MODERATE';
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  url: string;
+  salaryRange?: string;
+  postedDate: string;
+  fetchedAt: string; // When we fetched this job from the source
+  matchedSkills: string[];
+  missingSkills: string[];
+  skillMatchPercentage: number;
+  weightedSkillScore: number;
+  isSaved: number; // 0-3 star rating (0 = not saved, 1-3 = saved with priority)
+  isApplied: boolean;
+  isRedflag: boolean;
+  flaggedAt?: string;
+  matchedNegativeKeywords?: string[]; // Deal-breaker keywords found in this job
+}
+
+export interface JobMatchingResultsResponse {
+  profileId: string;
+  totalMatches: number;
+  profileSummary: string;
+  matches: JobMatchResult[];
+}
+
+// Skill Drilldown types (Neo4j graph-based job discovery)
+export interface SkillCooccurrence {
+  skillName: string;
+  jobCount: number;
+}
+
+export interface SkillDrilldownResponse {
+  totalJobs: number;
+  jobIds: string[];
+  dateDistribution: Record<string, number>;
+  relatedSkills: SkillCooccurrence[];
+}
+
+export interface JobListing {
+  id: string;
+  source: string;
+  title: string;
+  company: string;
+  location: string;
+  description: string;
+  url: string;
+  salaryRange?: string;
+  contractType?: string;
+  postedDate?: string;
+  expiresDate?: string;
+  fetchedAt: string;
+  extractedSkills?: string; // JSON string
+}
+
+// Task Demonstration Analysis (Phase 11.3) - Task-first credibility view
+export interface TaskDemonstration {
+  taskId: string;
+  taskName: string;
+  importance: number;
+  taskCategory: string;
+  coverageStrength: 'STRONG' | 'MODERATE' | 'WEAK' | 'NONE';
+  skillCount: number;
+  lineCount: number;
+  skills: SkillCoveringTask[];
+  lines: TaskResumeLineDto[];
+}
+
+export interface SkillCoveringTask {
+  skillName: string;
+  category: string;
+  isPrimary: boolean;
+  lineCount: number; // how many lines demonstrate this task via this skill
+}
+
+export interface TaskResumeLineDto {
+  lineId: string;
+  sequence: number;
+  text: string;
+}
+
+// Skill Train types
+export interface SkillTrainDto {
+  userSkills: string[];
+  marketSkills: { [key: string]: number };
+  jobCountBySkill: { [key: string]: number };
+}
+
+export interface SkillPathRequest {
+  skills: string[];
+  maxRelatedSkills?: number;
+}
+
+export interface SkillPathResponse {
+  selectedSkills: string[];
+  jobCount: number;
+  relatedSkills: { [key: string]: number };
+}
+
+// Skill Heatmap types
+export interface SkillHeatmapResponse {
+  skillNames: string[];
+  cooccurrenceMatrix: { [skill1: string]: { [skill2: string]: number } };
+  maxCooccurrence: number;
+  totalJobs: number;
+}
+
+// Skill Path Matrix types (for Skill Train)
+export interface SkillPathMatrixResponse {
+  userSkills: string[];
+  marketSkills: string[];
+  cooccurrenceMatrix: { [userSkill: string]: { [marketSkill: string]: number } };
+  maxCooccurrence: number;
 }
