@@ -18,7 +18,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -44,6 +46,7 @@ public class JobSearchController {
     private final Neo4jJobListingService neo4jJobListingService;
     private final JobListingRepository jobListingRepository;
     private final com.resumebuddy.jobsearch.service.ResumeApiClient resumeApiClient;
+    private final com.resumebuddy.jobsearch.repository.CrawlActivityLogRepository crawlActivityLogRepository;
 
     /**
      * Create job search profile from selected experiences
@@ -955,6 +958,91 @@ public class JobSearchController {
     }
 
     /**
+     * Skill Drilldown: Get top skills grouped by category
+     * GET /api/job-search/skills/top-by-category?perCategory=10
+     */
+    @Operation(
+            summary = "Get top skills by category",
+            description = "Returns top N skills per category from Neo4j graph. " +
+                    "Skills are automatically categorized into both technical and non-technical categories: " +
+                    "Programming, Frameworks & Tools, Cloud & Infrastructure, Data & AI, " +
+                    "Leadership & Management, Business & Strategy, Communication & Soft Skills, Domain Expertise, and Other. " +
+                    "Used for organized skill tag cloud display suitable for all job types."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Skills retrieved successfully"),
+            @ApiResponse(responseCode = "500", description = "Failed to fetch skills")
+    })
+    @GetMapping("/skills/top-by-category")
+    public ResponseEntity<Map<String, List<SkillCooccurrence>>> getTopSkillsByCategory(
+            @Parameter(description = "Number of top skills per category") @RequestParam(defaultValue = "10") int perCategory) {
+        log.info("Fetching top {} skills per category", perCategory);
+
+        try {
+            Map<String, Long> allSkills = neo4jJobListingService.getTopInDemandSkills(200); // Fetch more to categorize
+
+            // Categorize skills using inclusive keyword matching (technical + non-technical)
+            Map<String, List<SkillCooccurrence>> categorized = new LinkedHashMap<>();
+            // Technical categories
+            categorized.put("Programming", new ArrayList<>());
+            categorized.put("Frameworks & Tools", new ArrayList<>());
+            categorized.put("Cloud & Infrastructure", new ArrayList<>());
+            categorized.put("Data & AI", new ArrayList<>());
+            // Non-technical categories
+            categorized.put("Leadership & Management", new ArrayList<>());
+            categorized.put("Business & Strategy", new ArrayList<>());
+            categorized.put("Communication & Soft Skills", new ArrayList<>());
+            categorized.put("Domain Expertise", new ArrayList<>());
+            categorized.put("Other", new ArrayList<>());
+
+            for (Map.Entry<String, Long> entry : allSkills.entrySet()) {
+                String skill = entry.getKey().toLowerCase();
+                SkillCooccurrence skillData = new SkillCooccurrence(entry.getKey(), entry.getValue());
+
+                // Technical categories
+                if (skill.matches(".*(java|python|javascript|typescript|go|rust|c\\+\\+|c#|kotlin|swift|ruby|php|scala|programming|coding|development).*")) {
+                    categorized.get("Programming").add(skillData);
+                } else if (skill.matches(".*(spring|react|angular|vue|django|flask|express|nestjs|laravel|rails|framework|library|sdk|api|rest|graphql).*")) {
+                    categorized.get("Frameworks & Tools").add(skillData);
+                } else if (skill.matches(".*(aws|azure|gcp|cloud|kubernetes|docker|terraform|jenkins|gitlab|ci/cd|devops|ansible|infrastructure|deployment).*")) {
+                    categorized.get("Cloud & Infrastructure").add(skillData);
+                } else if (skill.matches(".*(ai|machine learning|ml|deep learning|tensorflow|pytorch|nlp|data science|analytics|sql|database|mysql|postgresql|mongodb|redis|big data|tableau|power bi).*")) {
+                    categorized.get("Data & AI").add(skillData);
+                // Non-technical categories
+                } else if (skill.matches(".*(leadership|management|team lead|project management|agile|scrum|stakeholder|mentor|coaching|people management).*")) {
+                    categorized.get("Leadership & Management").add(skillData);
+                } else if (skill.matches(".*(strategy|business|planning|analysis|product|marketing|sales|finance|accounting|operations|consulting|negotiation).*")) {
+                    categorized.get("Business & Strategy").add(skillData);
+                } else if (skill.matches(".*(communication|presentation|writing|documentation|collaboration|teamwork|problem solving|critical thinking|creativity).*")) {
+                    categorized.get("Communication & Soft Skills").add(skillData);
+                } else if (skill.matches(".*(healthcare|medical|legal|education|retail|manufacturing|logistics|supply chain|engineering|design|architecture).*")) {
+                    categorized.get("Domain Expertise").add(skillData);
+                } else {
+                    categorized.get("Other").add(skillData);
+                }
+            }
+
+            // Limit each category to perCategory skills
+            Map<String, List<SkillCooccurrence>> result = new LinkedHashMap<>();
+            for (Map.Entry<String, List<SkillCooccurrence>> entry : categorized.entrySet()) {
+                List<SkillCooccurrence> limited = entry.getValue().stream()
+                        .sorted((s1, s2) -> Long.compare(s2.getJobCount(), s1.getJobCount()))
+                        .limit(perCategory)
+                        .collect(Collectors.toList());
+
+                if (!limited.isEmpty()) {
+                    result.put(entry.getKey(), limited);
+                }
+            }
+
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Failed to fetch categorized skills", e);
+            return ResponseEntity.status(500).body(new LinkedHashMap<>());
+        }
+    }
+
+    /**
      * Skill Heatmap: Get skill co-occurrence matrix
      * GET /api/job-search/skills/heatmap?topN=20
      */
@@ -1120,6 +1208,40 @@ public class JobSearchController {
 
         public void setRedflag(boolean redflag) {
             this.redflag = redflag;
+        }
+    }
+
+    /**
+     * Get recent crawl activity history
+     * GET /api/job-search/crawl/history
+     */
+    @Operation(
+            summary = "Get recent crawl activity history",
+            description = "Returns the most recent job crawling activities for user visibility. " +
+                    "Shows when job boards were last updated and how many jobs were fetched/saved. " +
+                    "Public endpoint for transparency - no authentication required."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "History retrieved successfully"),
+            @ApiResponse(responseCode = "500", description = "Failed to retrieve history")
+    })
+    @GetMapping("/crawl/history")
+    public ResponseEntity<List<com.resumebuddy.jobsearch.domain.CrawlActivityLog>> getCrawlHistory(
+            @Parameter(description = "Number of recent activities to return (default: 5)")
+            @RequestParam(defaultValue = "5") int limit) {
+
+        log.info("Fetching crawl activity history (limit: {})", limit);
+
+        try {
+            // Use Pageable to control the limit
+            List<com.resumebuddy.jobsearch.domain.CrawlActivityLog> history = crawlActivityLogRepository.findAllByOrderByCrawledAtDesc(
+                    org.springframework.data.domain.PageRequest.of(0, limit)
+            );
+            log.info("Retrieved {} crawl activity records", history.size());
+            return ResponseEntity.ok(history);
+        } catch (Exception e) {
+            log.error("Failed to fetch crawl activity history", e);
+            return ResponseEntity.status(500).body(new ArrayList<>());
         }
     }
 }

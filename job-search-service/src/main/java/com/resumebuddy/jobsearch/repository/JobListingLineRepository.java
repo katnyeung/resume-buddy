@@ -27,4 +27,9 @@ public interface JobListingLineRepository extends JpaRepository<JobListingLine, 
      * Count lines for a specific job listing
      */
     long countByListingId(String listingId);
+
+    /**
+     * Batch fetch lines by IDs (for vector search optimization)
+     */
+    List<JobListingLine> findByIdIn(List<String> ids);
 }

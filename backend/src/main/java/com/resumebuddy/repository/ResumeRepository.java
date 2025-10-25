@@ -24,4 +24,6 @@ public interface ResumeRepository extends JpaRepository<Resume, String> {
 
     @Query("SELECT r FROM Resume r LEFT JOIN FETCH r.lines LEFT JOIN FETCH r.suggestions WHERE r.id = :id")
     Optional<Resume> findByIdWithLinesAndSuggestions(@Param("id") String id);
+
+    List<Resume> findByStatusAndUpdatedAtBefore(String status, LocalDateTime cutoffDate);
 }

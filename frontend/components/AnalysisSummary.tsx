@@ -7,7 +7,8 @@ import {
   createJobSearchProfile,
   getJobSearchProfilesByResume,
   getStructuredAnalysis,
-  analyzeJobAsync
+  analyzeJobAsync,
+  checkActiveJobForExperience
 } from '@/lib/api';
 import { getCurrentUserId } from '@/lib/userUtils';
 import JobStatusIndicator from './JobStatusIndicator';
@@ -54,6 +55,27 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
     };
     loadProfile();
   }, [resumeId]);
+
+  // Check for active jobs on mount to prevent duplicate submissions after page refresh
+  useEffect(() => {
+    const checkActiveJobs = async () => {
+      const activeJobIds: Record<string, string> = {};
+
+      for (const exp of localAnalysis.experiences) {
+        const jobId = await checkActiveJobForExperience(resumeId, exp.id);
+        if (jobId) {
+          console.log(`Found active job ${jobId} for experience ${exp.id}`);
+          activeJobIds[exp.id] = jobId;
+        }
+      }
+
+      if (Object.keys(activeJobIds).length > 0) {
+        setJobAnalysisJobIds(activeJobIds);
+      }
+    };
+
+    checkActiveJobs();
+  }, [resumeId, localAnalysis.experiences]);
 
   const handleViewAnalysis = (analysisId: string) => {
     router.push(`/analysis/${analysisId}`);
@@ -547,8 +569,8 @@ export default function AnalysisSummary({ analysis, resumeId, onAnalyzeJob, onFi
         {analysis.skills.length > 0 && (
           <SkillTrain
             resumeId={resumeId}
-            userSkills={analysis.skills.map(s => s.skillName)}
-            userSkillsWithCategory={analysis.skills}
+            userSkills={analysis.skills.map(s => s.skillName).filter((name): name is string => name !== undefined)}
+            userSkillsWithCategory={analysis.skills.filter(s => s.skillName !== undefined && s.id !== undefined) as { id: string; skillName: string; category?: string }[]}
           />
         )}
         </div>

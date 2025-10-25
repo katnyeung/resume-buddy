@@ -1,7 +1,6 @@
 package com.resumebuddy.jobsearch.controller;
 
 import com.resumebuddy.jobsearch.application.service.JobCrawlingApplicationService;
-import com.resumebuddy.jobsearch.domain.CrawlActivityLog;
 import com.resumebuddy.jobsearch.domain.JobListing;
 import com.resumebuddy.jobsearch.domain.JobListingLine;
 import com.resumebuddy.jobsearch.domain.JobSearchProfile;
@@ -11,7 +10,6 @@ import com.resumebuddy.jobsearch.dto.analysis.JobAnalysisRequest;
 import com.resumebuddy.jobsearch.dto.analysis.JobAnalysisResponse;
 import com.resumebuddy.jobsearch.dto.crawl.JobCrawlRequest;
 import com.resumebuddy.jobsearch.dto.crawl.JobCrawlResponse;
-import com.resumebuddy.jobsearch.repository.CrawlActivityLogRepository;
 import com.resumebuddy.jobsearch.repository.JobListingLineRepository;
 import com.resumebuddy.jobsearch.repository.JobListingRepository;
 import com.resumebuddy.jobsearch.repository.JobSearchProfileRepository;
@@ -28,6 +26,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import org.springframework.security.access.prepost.PreAuthorize;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -49,6 +48,7 @@ import java.util.List;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 @Tag(name = "Admin", description = "Administrative operations for job crawling and maintenance")
+@PreAuthorize("hasRole('ADMIN')")
 public class AdminController {
 
     private final JobCrawlingApplicationService jobCrawlingService;
@@ -61,7 +61,6 @@ public class AdminController {
     private final VectorEmbeddingService vectorEmbeddingService;
     private final JobDescriptionParser jobDescriptionParser;
     private final JobAnalysisService jobAnalysisService;
-    private final CrawlActivityLogRepository crawlActivityLogRepository;
 
     @Value("${app.job-crawling.max-days-old:7}")
     private int maxDaysOld;
@@ -111,6 +110,38 @@ public class AdminController {
 
         JobCrawlRequest request = new JobCrawlRequest();
         request.setSource("REED");
+        request.setKeywords(keywords);
+        request.setLocation(location);
+        request.setMaxResults(maxResults);
+        request.setMaxDaysOld(maxDaysOld);
+        request.setPage(1);
+
+        JobCrawlResponse response = jobCrawlingService.crawlJobs(request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Crawl Adzuna jobs with web scraping for full descriptions
+     * POST /api/job-search/admin/crawl/adzuna
+     */
+    @Operation(
+            summary = "Crawl Adzuna jobs (UK multi-board aggregator with web scraping)",
+            description = "Fetches jobs from Adzuna API with web scraping for full descriptions. " +
+                    "Adzuna aggregates from nijobs, cv-library, totaljobs, reed, and others. " +
+                    "Uses two-stage fetch: API search + scraping redirect URLs. " +
+                    "Default parameters optimized for UK job search. Full descriptions take ~40-50 seconds for 50 jobs."
+    )
+    @PostMapping("/crawl/adzuna")
+    public ResponseEntity<JobCrawlResponse> crawlAdzuna(
+            @Parameter(description = "Job keywords/title") @RequestParam(defaultValue = "java developer") String keywords,
+            @Parameter(description = "Location (format: 'gb:London' or 'London')") @RequestParam(defaultValue = "gb:London") String location,
+            @Parameter(description = "Max jobs to fetch") @RequestParam(defaultValue = "50") Integer maxResults,
+            @Parameter(description = "Jobs from last N days") @RequestParam(defaultValue = "7") Integer maxDaysOld) {
+
+        log.info("Adzuna crawl triggered - keywords: {}, location: {}, maxResults: {}", keywords, location, maxResults);
+
+        JobCrawlRequest request = new JobCrawlRequest();
+        request.setSource("ADZUNA");
         request.setKeywords(keywords);
         request.setLocation(location);
         request.setMaxResults(maxResults);
@@ -432,295 +463,14 @@ public class AdminController {
     }
 
     /**
-     * Re-vectorize all profile lines from database
-     * POST /api/job-search/admin/revectorize/profile-lines
-     */
-    @Operation(
-            summary = "Re-vectorize all profile lines",
-            description = "Rebuilds Redis vector cache for all job search profile lines. " +
-                    "Useful after Redis cleanup or index changes. Processes all profiles in batches."
-    )
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Re-vectorization completed",
-                    content = @Content(schema = @Schema(implementation = LineRevectorizeResponse.class))),
-            @ApiResponse(responseCode = "500", description = "Re-vectorization failed")
-    })
-    @PostMapping("/revectorize/profile-lines")
-    @org.springframework.transaction.annotation.Transactional
-    public ResponseEntity<LineRevectorizeResponse> revectorizeProfileLines(
-            @Parameter(description = "Batch size for processing (default: 50)")
-            @RequestParam(defaultValue = "50") int batchSize) {
-
-        log.info("Starting re-vectorization of all profile lines (batch size: {})", batchSize);
-        long startTime = System.currentTimeMillis();
-
-        try {
-            List<JobSearchProfile> allProfiles = profileRepository.findAll();
-            log.info("Found {} profiles to re-vectorize lines", allProfiles.size());
-
-            int processedProfiles = 0;
-            int totalLinesCreated = 0;
-            int failedProfiles = 0;
-            List<String> failedIds = new ArrayList<>();
-
-            // Process in batches to avoid memory issues
-            for (int i = 0; i < allProfiles.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, allProfiles.size());
-                List<JobSearchProfile> batch = allProfiles.subList(i, end);
-
-                log.info("Processing batch {}/{} ({} profiles)",
-                        (i / batchSize) + 1,
-                        (allProfiles.size() + batchSize - 1) / batchSize,
-                        batch.size());
-
-                // Collect all lines for this batch
-                List<com.resumebuddy.jobsearch.domain.JobSearchProfileLine> allLines = new ArrayList<>();
-                List<String> allLineContents = new ArrayList<>();
-
-                for (JobSearchProfile profile : batch) {
-                    try {
-                        // Get existing profile lines
-                        List<com.resumebuddy.jobsearch.domain.JobSearchProfileLine> profileLines =
-                                profileLineRepository.findByProfileIdOrderByLineNumber(profile.getId());
-
-                        if (profileLines.isEmpty()) {
-                            log.warn("No lines found for profile: {}", profile.getId());
-                            continue;
-                        }
-
-                        // Collect lines for batch vectorization
-                        for (com.resumebuddy.jobsearch.domain.JobSearchProfileLine line : profileLines) {
-                            allLines.add(line);
-                            allLineContents.add(line.getLineContent());
-                        }
-
-                        log.debug("Found {} lines for profile: {}", profileLines.size(), profile.getId());
-
-                    } catch (Exception e) {
-                        log.error("Failed to get lines for profile: {}", profile.getId(), e);
-                        failedProfiles++;
-                        failedIds.add(profile.getId());
-                    }
-                }
-
-                // Batch vectorize all lines
-                if (!allLines.isEmpty()) {
-                    try {
-                        log.info("Generating embeddings for {} lines from batch", allLines.size());
-                        List<float[]> lineEmbeddings = vectorEmbeddingService.generateEmbeddings(allLineContents);
-
-                        if (lineEmbeddings.size() != allLines.size()) {
-                            log.error("Mismatch: {} lines but {} embeddings", allLines.size(), lineEmbeddings.size());
-                        } else {
-                            // Store line vectors in Redis
-                            for (int j = 0; j < allLines.size(); j++) {
-                                try {
-                                    com.resumebuddy.jobsearch.domain.JobSearchProfileLine line = allLines.get(j);
-                                    float[] embedding = lineEmbeddings.get(j);
-
-                                    // Store vector in Redis (reuse existing key or create new)
-                                    String redisKey = line.getRedisVectorKey();
-                                    if (redisKey == null || redisKey.isEmpty()) {
-                                        redisKey = "profile:line:" + line.getId();
-                                        line.setRedisVectorKey(redisKey);
-                                    }
-
-                                    redisVectorService.storeVector(redisKey, embedding);
-
-                                } catch (Exception e) {
-                                    log.error("Failed to store line vector: {}", allLines.get(j).getLineContent(), e);
-                                }
-                            }
-
-                            totalLinesCreated += allLines.size();
-                            processedProfiles += batch.size() - failedProfiles;
-                        }
-                    } catch (Exception e) {
-                        log.error("Failed to batch vectorize lines for batch", e);
-                    }
-                }
-
-                log.info("Batch completed: {}/{} profiles processed, {} lines vectorized",
-                        processedProfiles, allProfiles.size(), totalLinesCreated);
-            }
-
-            long processingTime = System.currentTimeMillis() - startTime;
-            LineRevectorizeResponse response = new LineRevectorizeResponse(
-                    allProfiles.size(),
-                    processedProfiles,
-                    failedProfiles,
-                    totalLinesCreated,
-                    failedIds,
-                    processingTime
-            );
-
-            log.info("Profile line re-vectorization completed: {}/{} profiles successful, {} lines vectorized, {}ms",
-                    processedProfiles, allProfiles.size(), totalLinesCreated, processingTime);
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Profile line re-vectorization failed", e);
-            long processingTime = System.currentTimeMillis() - startTime;
-            LineRevectorizeResponse response = new LineRevectorizeResponse(
-                    0, 0, 0, 0, new ArrayList<>(), processingTime
-            );
-            response.setMessage("Failed: " + e.getMessage());
-            return ResponseEntity.status(500).body(response);
-        }
-    }
-
-    /**
-     * Re-vectorize all job listing lines from database
-     * POST /api/job-search/admin/revectorize/listing-lines
-     */
-    @Operation(
-            summary = "Re-vectorize all job listing lines",
-            description = "Parses all job descriptions into lines and rebuilds Redis vector cache for line-by-line matching. " +
-                    "This will DELETE existing lines and create new ones. Processes all listings in batches."
-    )
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Re-vectorization completed",
-                    content = @Content(schema = @Schema(implementation = LineRevectorizeResponse.class))),
-            @ApiResponse(responseCode = "500", description = "Re-vectorization failed")
-    })
-    @PostMapping("/revectorize/listing-lines")
-    @org.springframework.transaction.annotation.Transactional
-    public ResponseEntity<LineRevectorizeResponse> revectorizeListingLines(
-            @Parameter(description = "Batch size for processing (default: 50)")
-            @RequestParam(defaultValue = "50") int batchSize) {
-
-        log.info("Starting re-vectorization of all job listing lines (batch size: {})", batchSize);
-        long startTime = System.currentTimeMillis();
-
-        try {
-            List<JobListing> allListings = jobListingRepository.findAll();
-            log.info("Found {} job listings to parse and vectorize lines", allListings.size());
-
-            int processedListings = 0;
-            int totalLinesCreated = 0;
-            int failedListings = 0;
-            List<String> failedIds = new ArrayList<>();
-
-            // Process in batches to avoid memory issues
-            for (int i = 0; i < allListings.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, allListings.size());
-                List<JobListing> batch = allListings.subList(i, end);
-
-                log.info("Processing batch {}/{} ({} listings)",
-                        (i / batchSize) + 1,
-                        (allListings.size() + batchSize - 1) / batchSize,
-                        batch.size());
-
-                // Collect all lines for this batch
-                List<JobListingLine> allLines = new ArrayList<>();
-                List<String> allLineContents = new ArrayList<>();
-
-                for (JobListing listing : batch) {
-                    try {
-                        // Delete existing lines for this listing
-                        jobListingLineRepository.deleteByListingId(listing.getId());
-
-                        // Parse description into lines
-                        List<String> parsedLines = jobDescriptionParser.parseDescription(listing.getDescription());
-
-                        // Create JobListingLine entities
-                        for (int lineNum = 0; lineNum < parsedLines.size(); lineNum++) {
-                            JobListingLine line = new JobListingLine();
-                            line.setListingId(listing.getId());
-                            line.setLineNumber(lineNum + 1);
-                            line.setLineContent(parsedLines.get(lineNum));
-
-                            allLines.add(line);
-                            allLineContents.add(parsedLines.get(lineNum));
-                        }
-
-                        log.debug("Parsed {} lines for listing: {}", parsedLines.size(), listing.getTitle());
-
-                    } catch (Exception e) {
-                        log.error("Failed to parse description for listing: {}", listing.getId(), e);
-                        failedListings++;
-                        failedIds.add(listing.getId());
-                    }
-                }
-
-                // Save all lines to MySQL first to get IDs
-                if (!allLines.isEmpty()) {
-                    List<JobListingLine> savedLines = jobListingLineRepository.saveAll(allLines);
-                    log.info("Saved {} lines to MySQL, now generating embeddings", savedLines.size());
-
-                    try {
-                        List<float[]> lineEmbeddings = vectorEmbeddingService.generateEmbeddings(allLineContents);
-
-                        if (lineEmbeddings.size() != savedLines.size()) {
-                            log.error("Mismatch: {} lines but {} embeddings", savedLines.size(), lineEmbeddings.size());
-                        } else {
-                            // Store line vectors in Redis using database IDs
-                            for (int j = 0; j < savedLines.size(); j++) {
-                                try {
-                                    JobListingLine line = savedLines.get(j);
-                                    float[] embedding = lineEmbeddings.get(j);
-
-                                    // CRITICAL: Use database ID in Redis key so matching can find the line
-                                    String redisKey = "listing:line:" + line.getId();
-                                    redisVectorService.storeVector(redisKey, embedding);
-
-                                    // Update line with Redis key
-                                    line.setRedisVectorKey(redisKey);
-                                } catch (Exception e) {
-                                    log.error("Failed to store line vector: {}", savedLines.get(j).getLineContent(), e);
-                                }
-                            }
-
-                            // Batch update redis keys
-                            jobListingLineRepository.saveAll(savedLines);
-                            totalLinesCreated += savedLines.size();
-                            processedListings += batch.size() - failedListings;
-                        }
-                    } catch (Exception e) {
-                        log.error("Failed to batch vectorize lines for batch", e);
-                    }
-                }
-
-                log.info("Batch completed: {}/{} listings processed, {} lines created",
-                        processedListings, allListings.size(), totalLinesCreated);
-            }
-
-            long processingTime = System.currentTimeMillis() - startTime;
-            LineRevectorizeResponse response = new LineRevectorizeResponse(
-                    allListings.size(),
-                    processedListings,
-                    failedListings,
-                    totalLinesCreated,
-                    failedIds,
-                    processingTime
-            );
-
-            log.info("Line re-vectorization completed: {}/{} listings successful, {} lines created, {}ms",
-                    processedListings, allListings.size(), totalLinesCreated, processingTime);
-
-            return ResponseEntity.ok(response);
-
-        } catch (Exception e) {
-            log.error("Line re-vectorization failed", e);
-            long processingTime = System.currentTimeMillis() - startTime;
-            LineRevectorizeResponse response = new LineRevectorizeResponse(
-                    0, 0, 0, 0, new ArrayList<>(), processingTime
-            );
-            response.setMessage("Failed: " + e.getMessage());
-            return ResponseEntity.status(500).body(response);
-        }
-    }
-
-    /**
      * Rebuild Redis index with line-level prefixes
      * POST /api/job-search/admin/rebuild-index
      */
     @Operation(
             summary = "Rebuild Redis vector index (DESTRUCTIVE)",
             description = "Drops existing Redis vector index and recreates it with correct line-level prefixes " +
-                    "(profile:line:, listing:line:). This will make all old full-document vectors unsearchable. " +
-                    "You MUST run /revectorize/listing-lines and /revectorize/profile-lines after this to rebuild line vectors."
+                    "(profile:line:, listing:line:). This will make all vectors temporarily unsearchable. " +
+                    "After rebuilding the index, re-vectorize recent data: POST /admin/revectorize/listing-lines?daysBack=14"
     )
     @ApiResponses(value = {
             @ApiResponse(responseCode = "200", description = "Index rebuilt successfully"),
@@ -738,7 +488,7 @@ public class AdminController {
             long processingTime = System.currentTimeMillis() - startTime;
             RebuildIndexResponse response = new RebuildIndexResponse(
                     "success",
-                    "Index rebuilt successfully with line-level prefixes. Run /revectorize/listing-lines and /revectorize/profile-lines to rebuild vectors.",
+                    "Index rebuilt successfully with line-level prefixes. Re-vectorize recent data: POST /admin/revectorize/listing-lines?daysBack=14",
                     processingTime
             );
 
@@ -788,35 +538,131 @@ public class AdminController {
     }
 
     /**
-     * Get recent crawl activity history
-     * GET /api/job-search/admin/crawl/history
+     * Re-vectorize job listing lines (disaster recovery after Redis failure)
+     * POST /api/job-search/admin/revectorize/listing-lines
      */
     @Operation(
-            summary = "Get recent crawl activity history",
-            description = "Returns the most recent job crawling activities for user visibility. " +
-                    "Shows when job boards were last updated and how many jobs were fetched/saved."
+            summary = "Re-vectorize job listing lines",
+            description = "Regenerates vector embeddings for job listing lines using OpenAI API. " +
+                    "Used for disaster recovery after Redis data loss. " +
+                    "Filters by days back to limit OpenAI costs (~$0.10 for 14 days). " +
+                    "Processes lines in batches to avoid rate limits."
     )
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "History retrieved successfully"),
-            @ApiResponse(responseCode = "500", description = "Failed to retrieve history")
+            @ApiResponse(responseCode = "200", description = "Re-vectorization completed",
+                    content = @Content(schema = @Schema(implementation = RevectorizeResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Re-vectorization failed")
     })
-    @GetMapping("/crawl/history")
-    public ResponseEntity<List<CrawlActivityLog>> getCrawlHistory(
-            @Parameter(description = "Number of recent activities to return (default: 5)")
-            @RequestParam(defaultValue = "5") int limit) {
+    @PostMapping("/revectorize/listing-lines")
+    public ResponseEntity<RevectorizeResponse> revectorizeListingLines(
+            @Parameter(description = "Only re-vectorize listings from last N days (default: 14)")
+            @RequestParam(defaultValue = "14") int daysBack,
+            @Parameter(description = "Batch size for OpenAI API calls (default: 50)")
+            @RequestParam(defaultValue = "50") int batchSize) {
 
-        log.info("Fetching crawl activity history (limit: {})", limit);
+        log.info("=== Starting re-vectorization of listing lines (daysBack: {}, batchSize: {}) ===", daysBack, batchSize);
+        long startTime = System.currentTimeMillis();
 
         try {
-            // Use Pageable to control the limit
-            List<CrawlActivityLog> history = crawlActivityLogRepository.findAllByOrderByCrawledAtDesc(
-                    PageRequest.of(0, limit)
+            // Get all listing lines from the last N days
+            java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(daysBack);
+            log.info("Fetching listing lines created after {}", cutoffDate);
+
+            // Get all lines (we'll filter by listing date later via join)
+            List<JobListingLine> allLines = jobListingLineRepository.findAll();
+            log.info("Found {} total listing lines in database", allLines.size());
+
+            // Filter by listing fetched date
+            List<JobListingLine> recentLines = allLines.stream()
+                    .filter(line -> {
+                        try {
+                            JobListing listing = jobListingRepository.findById(line.getListingId()).orElse(null);
+                            return listing != null && listing.getFetchedAt() != null &&
+                                   listing.getFetchedAt().isAfter(cutoffDate);
+                        } catch (Exception e) {
+                            log.warn("Failed to check listing date for line {}: {}", line.getId(), e.getMessage());
+                            return false;
+                        }
+                    })
+                    .toList();
+
+            log.info("Filtered to {} lines from last {} days", recentLines.size(), daysBack);
+
+            if (recentLines.isEmpty()) {
+                RevectorizeResponse response = new RevectorizeResponse(
+                        "listing-lines", 0, 0, 0, new ArrayList<>(), 0L,
+                        "No listing lines found from last " + daysBack + " days"
+                );
+                return ResponseEntity.ok(response);
+            }
+
+            int processed = 0;
+            int failed = 0;
+            List<String> failedIds = new ArrayList<>();
+
+            // Process in batches
+            for (int i = 0; i < recentLines.size(); i += batchSize) {
+                int end = Math.min(i + batchSize, recentLines.size());
+                List<JobListingLine> batch = recentLines.subList(i, end);
+
+                log.info("Processing batch {}/{} ({} lines)", (i / batchSize) + 1,
+                        (recentLines.size() + batchSize - 1) / batchSize, batch.size());
+
+                // Collect texts for batch embedding
+                List<String> texts = batch.stream()
+                        .map(JobListingLine::getLineContent)
+                        .toList();
+
+                try {
+                    // Generate embeddings in batch
+                    List<float[]> embeddings = vectorEmbeddingService.generateEmbeddings(texts);
+
+                    // Store each embedding
+                    for (int j = 0; j < batch.size(); j++) {
+                        JobListingLine line = batch.get(j);
+                        float[] embedding = embeddings.get(j);
+
+                        try {
+                            redisVectorService.storeJobListingLineVector(line.getId(), embedding);
+                            processed++;
+                        } catch (Exception e) {
+                            log.error("Failed to store vector for line {}: {}", line.getId(), e.getMessage());
+                            failed++;
+                            failedIds.add(line.getId());
+                        }
+                    }
+
+                    // Rate limiting: sleep 1 second between batches
+                    if (end < recentLines.size()) {
+                        Thread.sleep(1000);
+                    }
+
+                } catch (Exception e) {
+                    log.error("Failed to generate embeddings for batch: {}", e.getMessage());
+                    failed += batch.size();
+                    batch.forEach(line -> failedIds.add(line.getId()));
+                }
+            }
+
+            long processingTime = System.currentTimeMillis() - startTime;
+            RevectorizeResponse response = new RevectorizeResponse(
+                    "listing-lines", recentLines.size(), processed, failed, failedIds, processingTime
             );
-            log.info("Retrieved {} crawl activity records", history.size());
-            return ResponseEntity.ok(history);
+
+            log.info("=== Re-vectorization completed - Processed: {}/{}, Failed: {}, Time: {}ms ===",
+                    processed, recentLines.size(), failed, processingTime);
+
+            return ResponseEntity.ok(response);
+
         } catch (Exception e) {
-            log.error("Failed to fetch crawl activity history", e);
-            return ResponseEntity.status(500).body(new ArrayList<>());
+            long processingTime = System.currentTimeMillis() - startTime;
+            log.error("Re-vectorization failed: {}", e.getMessage(), e);
+
+            RevectorizeResponse response = new RevectorizeResponse(
+                    "listing-lines", 0, 0, 0, new ArrayList<>(), processingTime,
+                    "Failed: " + e.getMessage()
+            );
+            return ResponseEntity.status(500).body(response);
         }
     }
 

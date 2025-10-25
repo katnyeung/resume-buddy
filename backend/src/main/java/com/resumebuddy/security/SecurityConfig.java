@@ -2,6 +2,7 @@ package com.resumebuddy.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -18,6 +19,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Bean
@@ -37,9 +39,10 @@ public class SecurityConfig {
                 // Configure CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource()))
 
-                // Configure session management (stateless)
+                // Configure session management
+                // Use IF_REQUIRED to allow sessions for OAuth2 while keeping JWT stateless
                 .sessionManagement(session -> session
-                        .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+                        .sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED)
                 )
 
                 // Configure authorization
@@ -69,7 +72,11 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("http://localhost:*")); // Allow any localhost port
+        configuration.setAllowedOriginPatterns(List.of(
+            "http://localhost:*",           // Local development
+            "https://resumebuddy.cv",       // Production domain
+            "https://www.resumebuddy.cv"    // Production www subdomain
+        ));
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);

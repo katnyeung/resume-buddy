@@ -8,11 +8,13 @@ import CrawlActivityHistory from '@/components/CrawlActivityHistory';
 import AppHeader from '@/components/AppHeader';
 import Link from 'next/link';
 import { getJobSearchProfile } from '@/lib/api';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function JobSearchPage() {
   const params = useParams();
   const profileId = params.profileId as string;
   const [resumeId, setResumeId] = useState<string | null>(null);
+  const { isAuthenticated, isLoading } = useAuth();
 
   // Fetch profile to get resumeId
   useEffect(() => {
@@ -38,6 +40,21 @@ export default function JobSearchPage() {
     };
     fetchProfile();
   }, [profileId]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Verifying authentication...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return null; // Will redirect via useAuth hook
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">

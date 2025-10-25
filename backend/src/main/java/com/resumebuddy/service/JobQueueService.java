@@ -235,4 +235,33 @@ public class JobQueueService {
         log.debug("User {} processing: {}, max: {}, can process more: {}", userId, processing, maxPerUser, canProcess);
         return canProcess;
     }
+
+    /**
+     * Check if there's an active job (QUEUED or PROCESSING) for a specific resume + experience
+     */
+    @Transactional(readOnly = true)
+    public Optional<JobQueueEntry> findActiveJobForExperience(String resumeId, String experienceId) {
+        log.debug("Checking for active job: resumeId={}, experienceId={}", resumeId, experienceId);
+
+        List<JobQueueEntry> activeJobs = jobQueueRepository.findActiveJobsByType(JobType.JOB_EXPERIENCE_ANALYSIS);
+
+        for (JobQueueEntry job : activeJobs) {
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> params = objectMapper.readValue(job.getInputParams(), Map.class);
+                String jobResumeId = (String) params.get("resumeId");
+                String jobExperienceId = (String) params.get("experienceId");
+
+                if (resumeId.equals(jobResumeId) && experienceId.equals(jobExperienceId)) {
+                    log.debug("Found active job {} for resumeId={}, experienceId={}", job.getId(), resumeId, experienceId);
+                    return Optional.of(job);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse inputParams for job {}", job.getId(), e);
+            }
+        }
+
+        log.debug("No active job found for resumeId={}, experienceId={}", resumeId, experienceId);
+        return Optional.empty();
+    }
 }

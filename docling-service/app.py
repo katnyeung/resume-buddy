@@ -7,7 +7,7 @@ FastAPI service that provides document parsing via HTTP
 import os
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import tempfile
@@ -16,8 +16,9 @@ from pathlib import Path
 import json
 import requests
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import html
+import base64
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -346,6 +347,132 @@ async def parse_document_from_url(request: FileUrlRequest):
             os.unlink(temp_file_path)
         except:
             pass
+
+class RunPodInput(BaseModel):
+    """RunPod serverless input format"""
+    file_base64: Optional[str] = None
+    file_url: Optional[str] = None
+    filename: Optional[str] = None
+    content_type: Optional[str] = None
+
+class RunPodRequest(BaseModel):
+    """RunPod serverless request wrapper"""
+    input: RunPodInput
+
+@app.post("/runsync")
+async def runpod_handler(request: RunPodRequest):
+    """
+    RunPod serverless handler endpoint
+    Accepts input in RunPod format: {"input": {"file_base64": "...", "filename": "..."}}
+    or {"input": {"file_url": "https://..."}}
+    """
+    logger.info("RunPod handler received request")
+
+    try:
+        input_data = request.input
+
+        # Handle file URL input
+        if input_data.file_url:
+            logger.info(f"Processing file from URL: {input_data.file_url}")
+
+            # Fetch file from URL
+            response = requests.get(input_data.file_url, timeout=30)
+            response.raise_for_status()
+
+            content = response.content
+            content_type = response.headers.get('content-type', 'application/pdf')
+            filename = input_data.filename or "document.pdf"
+
+        # Handle base64 input
+        elif input_data.file_base64:
+            logger.info(f"Processing base64 file: {input_data.filename}")
+
+            # Decode base64
+            content = base64.b64decode(input_data.file_base64)
+            content_type = input_data.content_type or "application/pdf"
+            filename = input_data.filename or "document.pdf"
+
+        else:
+            raise HTTPException(status_code=400, detail="Either file_base64 or file_url must be provided")
+
+        # Validate file type
+        allowed_types = [
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain",
+            "image/jpeg",
+            "image/jpg",
+            "image/png"
+        ]
+        if content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {content_type}"
+            )
+
+        # Determine file extension
+        extension_map = {
+            "application/pdf": ".pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
+            "text/plain": ".txt",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png"
+        }
+        file_extension = extension_map.get(content_type, Path(filename).suffix or ".pdf")
+
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+
+        logger.info(f"Saved temporary file: {temp_file_path}")
+
+        try:
+            # Parse with Docling
+            logger.info("Starting Docling conversion...")
+            result = converter.convert(temp_file_path)
+            doc = result.document
+            logger.info("Docling conversion completed successfully")
+
+            # Extract text and decode HTML entities
+            raw_text = doc.export_to_text()
+            raw_markdown = doc.export_to_markdown()
+
+            decoded_text = html.unescape(raw_text) if raw_text else ""
+            decoded_markdown = html.unescape(raw_markdown) if raw_markdown else ""
+
+            # Build response
+            output = {
+                "text": decoded_text,
+                "markdown": decoded_markdown,
+                "content_type": content_type,
+                "filename": filename,
+                "metadata": {
+                    "title": getattr(doc, 'title', ''),
+                    "pages": len(doc.pages) if hasattr(doc, 'pages') else 1,
+                    "word_count": len(decoded_text.split()) if decoded_text else 0
+                }
+            }
+
+            logger.info(f"Successfully parsed document: {filename} ({len(decoded_text)} chars)")
+
+            # Return in RunPod format
+            return JSONResponse(content={"output": output})
+
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(temp_file_path)
+            except:
+                pass
+
+    except Exception as e:
+        logger.error(f"Error in RunPod handler: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error parsing document: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn

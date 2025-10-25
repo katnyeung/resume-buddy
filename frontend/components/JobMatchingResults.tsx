@@ -693,7 +693,6 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                 </svg>
                 Discover Jobs by Skills
               </h4>
-              <p className="text-xs text-gray-500 mb-3">Click any skill to see related jobs from Neo4j graph</p>
               <SkillFilterCloud onSkillClick={handleSkillClick} />
             </div>
 

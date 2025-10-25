@@ -15,7 +15,11 @@ import java.util.Map;
 
 /**
  * Infrastructure: Adzuna API Client
- * Fetches job listings from Adzuna job board API
+ * Fetches job listings from Adzuna job board API with web scraping for full descriptions
+ *
+ * Two-stage fetch (same pattern as Reed):
+ * 1. API search - Get job list with truncated descriptions
+ * 2. Web scraping - Follow redirect_url to partner sites for full descriptions
  */
 @Component
 @Slf4j
@@ -23,6 +27,7 @@ import java.util.Map;
 public class AdzunaApiClient implements JobSourceApiClient {
 
     private final RestClient restClient;
+    private final AdzunaWebScraperService scraperService;
 
     @Value("${app.job-crawling.adzuna.app-id}")
     private String appId;
@@ -125,7 +130,52 @@ public class AdzunaApiClient implements JobSourceApiClient {
             log.info("Fetched {} jobs from Adzuna (total count: {})",
                     response.getResults().size(), response.getCount());
 
-            return response.getResults();
+            // Two-stage fetch: Scrape full descriptions from redirect URLs (same pattern as Reed)
+            List<AdzunaJobDto> enrichedJobs = new java.util.ArrayList<>();
+            int jobCount = 0;
+            int successfulScrapes = 0;
+
+            for (AdzunaJobDto job : response.getResults()) {
+                try {
+                    jobCount++;
+                    log.debug("Scraping full description {}/{}: {} (ID: {})",
+                            jobCount, response.getResults().size(), job.getTitle(), job.getId());
+
+                    // Scrape full description from partner site
+                    String fullDescription = scraperService.scrapeJobDescription(job.getRedirectUrl());
+
+                    if (fullDescription != null && !fullDescription.isEmpty()) {
+                        String originalDesc = job.getDescription();
+                        job.setDescription(fullDescription);
+                        successfulScrapes++;
+                        log.debug("Replaced truncated description ({} chars) with full description ({} chars)",
+                                originalDesc != null ? originalDesc.length() : 0, fullDescription.length());
+                    } else {
+                        log.warn("Scraping failed for job {}, keeping API description", job.getId());
+                    }
+
+                    enrichedJobs.add(job);
+
+                    // Rate limiting: 800ms delay between scrapes (same as Reed's 500ms)
+                    if (jobCount < response.getResults().size()) {
+                        Thread.sleep(800);
+                    }
+
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    log.error("Scraping interrupted for job {}", job.getId());
+                    enrichedJobs.add(job); // Keep job with API description
+                    break;
+                } catch (Exception e) {
+                    log.error("Failed to scrape job {}: {}", job.getId(), e.getMessage());
+                    enrichedJobs.add(job); // Keep job with API description
+                }
+            }
+
+            log.info("Successfully scraped full descriptions for {}/{} Adzuna jobs",
+                    successfulScrapes, response.getResults().size());
+
+            return enrichedJobs;
 
         } catch (Exception e) {
             log.error("CRITICAL: Adzuna API request failed - stopping job search process. Error: {}", e.getMessage(), e);

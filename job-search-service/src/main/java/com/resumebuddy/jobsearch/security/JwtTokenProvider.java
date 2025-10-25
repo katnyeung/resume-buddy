@@ -19,6 +19,11 @@ public class JwtTokenProvider {
     private String jwtSecret;
 
     private SecretKey getSigningKey() {
+        // Debug: Log JWT secret info
+        logger.debug("JWT Secret length: {} chars, starts with: {}",
+            jwtSecret.length(),
+            jwtSecret.substring(0, Math.min(20, jwtSecret.length())));
+
         byte[] keyBytes = jwtSecret.getBytes(StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(keyBytes);
     }
@@ -34,6 +39,17 @@ public class JwtTokenProvider {
                 .getPayload();
 
         return claims.getSubject();
+    }
+
+    /**
+     * Get all claims from JWT token
+     */
+    public Claims getClaims(String token) {
+        return Jwts.parser()
+                .verifyWith(getSigningKey())
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
     }
 
     /**

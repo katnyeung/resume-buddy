@@ -82,29 +82,32 @@ export default function JobStatusIndicator({
     );
   }
 
-  const statusColor = {
+  const statusColors: Record<string, string> = {
     QUEUED: 'yellow',
     PROCESSING: 'blue',
     COMPLETED: 'green',
     FAILED: 'red',
     CANCELLED: 'gray'
-  }[status.status] || 'gray';
+  };
+  const statusColor = statusColors[status.status] || 'gray';
 
-  const statusIcon = {
+  const statusIcons: Record<string, string> = {
     QUEUED: '⏳',
     PROCESSING: '⚙️',
     COMPLETED: '✅',
     FAILED: '❌',
     CANCELLED: '🚫'
-  }[status.status] || '❓';
+  };
+  const statusIcon = statusIcons[status.status] || '❓';
 
-  const statusText = {
+  const statusTexts: Record<string, string> = {
     QUEUED: 'Queued',
     PROCESSING: 'Processing',
     COMPLETED: 'Completed',
     FAILED: 'Failed',
     CANCELLED: 'Cancelled'
-  }[status.status] || status.status;
+  };
+  const statusText = statusTexts[status.status] || status.status;
 
   return (
     <div className={`p-4 rounded-lg border bg-${statusColor}-50 border-${statusColor}-200 dark:bg-${statusColor}-900/20 dark:border-${statusColor}-800`}>

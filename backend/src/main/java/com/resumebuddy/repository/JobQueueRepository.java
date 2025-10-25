@@ -32,4 +32,7 @@ public interface JobQueueRepository extends JpaRepository<JobQueueEntry, String>
 
     @Query("SELECT COUNT(j) FROM JobQueueEntry j WHERE j.status = 'QUEUED' AND j.queuedAt < (SELECT jq.queuedAt FROM JobQueueEntry jq WHERE jq.id = :jobId)")
     int countQueuedJobsBefore(@Param("jobId") String jobId);
+
+    @Query("SELECT j FROM JobQueueEntry j WHERE j.status IN ('QUEUED', 'PROCESSING') AND j.jobType = :jobType ORDER BY j.queuedAt DESC")
+    List<JobQueueEntry> findActiveJobsByType(@Param("jobType") JobQueueEntry.JobType jobType);
 }

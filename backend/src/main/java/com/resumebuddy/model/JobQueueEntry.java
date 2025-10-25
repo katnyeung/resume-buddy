@@ -18,11 +18,11 @@ public class JobQueueEntry {
     private String userId;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "job_type", nullable = false)
+    @Column(name = "job_type", nullable = false, length = 50)
     private JobType jobType;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", nullable = false)
+    @Column(name = "status", nullable = false, length = 50)
     private JobStatus status = JobStatus.QUEUED;
 
     @Column(name = "priority", nullable = false)
@@ -31,7 +31,7 @@ public class JobQueueEntry {
     @Column(name = "input_params", nullable = false, columnDefinition = "TEXT")
     private String inputParams;
 
-    @Column(name = "result_data", columnDefinition = "LONGTEXT")
+    @Column(name = "result_data", columnDefinition = "TEXT")
     private String resultData;
 
     @Column(name = "retry_count", nullable = false)

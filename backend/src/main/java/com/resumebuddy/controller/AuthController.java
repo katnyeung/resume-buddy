@@ -21,6 +21,7 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
+@CrossOrigin(origins = {"http://localhost:3000", "https://resumebuddy.cv", "https://www.resumebuddy.cv"})
 public class AuthController {
 
     private static final Logger logger = LoggerFactory.getLogger(AuthController.class);
@@ -43,13 +44,14 @@ public class AuthController {
                     request.getFullName()
             );
 
-            String token = jwtTokenProvider.generateToken(user.getId());
+            String token = jwtTokenProvider.generateToken(user);
 
             AuthResponse response = new AuthResponse(
                     token,
                     user.getId(),
                     user.getEmail(),
-                    user.getFullName()
+                    user.getFullName(),
+                    user.getRole()
             );
 
             return ResponseEntity.ok(response);
@@ -74,7 +76,8 @@ public class AuthController {
                     token,
                     user.getId(),
                     user.getEmail(),
-                    user.getFullName()
+                    user.getFullName(),
+                    user.getRole()
             );
 
             return ResponseEntity.ok(response);

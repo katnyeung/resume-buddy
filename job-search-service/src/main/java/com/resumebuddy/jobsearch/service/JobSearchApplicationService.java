@@ -371,17 +371,14 @@ public class JobSearchApplicationService {
                 // Save first to get ID
                 profileLine = profileLineRepository.save(profileLine);
 
-                // Store vector embedding in Redis
-                String redisKey = "profile:line:" + profileLine.getId();
-                redisVectorService.storeVector(redisKey, embeddings.get(i));
+                // Store vector embedding in BOTH Redis AND MySQL
+                // This method saves to Redis immediately and updates MySQL with vector_embedding
+                redisVectorService.storeProfileLineVector(profileLine.getId(), embeddings.get(i));
 
-                // Update with redis key
-                profileLine.setRedisVectorKey(redisKey);
                 profileLines.add(profileLine);
             }
 
-            // Batch save all profile lines with redis keys
-            profileLineRepository.saveAll(profileLines);
+            log.info("Stored {} profile line vectors in Redis + MySQL for backup", profileLines.size());
             log.info("Vectorized {} mock job post lines for profile: {} using batch API", profileLines.size(), profileId);
 
         } catch (Exception e) {

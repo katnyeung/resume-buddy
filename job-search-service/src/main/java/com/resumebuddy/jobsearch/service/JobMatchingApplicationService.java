@@ -100,14 +100,31 @@ public class JobMatchingApplicationService {
 
                     // Search for top-K similar job lines across ALL jobs
                     // Use larger multiplier to ensure we cover more unique job listings
-                    // Each job has ~5-20 lines, so topK * 10 ensures broad coverage
-                    // Special case: if analyzing all, search up to 50,000 results (covers all job lines)
-                    int searchLimit = analyzeAll ? 50000 : topK * 10;
+                    // Each job has ~5-20 lines, so we need to search more line matches than topK jobs
+                    // Redis LIMIT maximum is 10,000 (hard limit in RediSearch)
+                    // With 10-15 lines/job average, topK * 20 gives good coverage
+                    // Special case: if analyzing all, search up to 10,000 results (Redis max)
+                    int searchLimit = analyzeAll ? 10000 : Math.min(topK * 20, 10000);
                     List<RedisVectorService.VectorSearchResult> lineMatches =
                             redisVectorService.vectorSearch(profileLine.getRedisVectorKey(), searchLimit);
 
                     // Reduced verbosity - only log line match counts at DEBUG level
                     log.debug("Profile line #{} found {} matches", profileLine.getLineNumber(), lineMatches.size());
+
+                    // OPTIMIZATION: Collect all line IDs first, then batch fetch
+                    List<String> lineIds = new ArrayList<>();
+                    for (RedisVectorService.VectorSearchResult lineMatch : lineMatches) {
+                        String matchedLineKey = lineMatch.getKey();
+                        if (matchedLineKey.startsWith("listing:line:")) {
+                            String lineId = matchedLineKey.replace("listing:line:", "");
+                            lineIds.add(lineId);
+                        }
+                    }
+
+                    // Batch fetch all job listing lines in one query
+                    List<JobListingLine> jobLines = listingLineRepository.findByIdIn(lineIds);
+                    java.util.Map<String, JobListingLine> jobLineMap = jobLines.stream()
+                            .collect(java.util.stream.Collectors.toMap(JobListingLine::getId, line -> line));
 
                     // Group matches by listing ID and track best match text
                     for (RedisVectorService.VectorSearchResult lineMatch : lineMatches) {
@@ -120,8 +137,8 @@ public class JobMatchingApplicationService {
 
                         String lineId = matchedLineKey.replace("listing:line:", "");
 
-                        // Find which listing this line belongs to
-                        JobListingLine jobLine = listingLineRepository.findById(lineId).orElse(null);
+                        // Lookup from batch-fetched map (O(1) instead of N queries)
+                        JobListingLine jobLine = jobLineMap.get(lineId);
                         if (jobLine != null) {
                             String listingId = jobLine.getListingId();
                             double score = lineMatch.getScore();
@@ -216,42 +233,34 @@ public class JobMatchingApplicationService {
             // Delete old matches without user actions (preserve saved/applied/red-flagged)
             matchRepository.deleteNonSavedByProfileId(profileId);
 
+            // OPTIMIZATION: Batch fetch all listings and existing matches upfront
+            List<String> listingIds = topKListings.stream()
+                    .map(ls -> ls.listingId)
+                    .collect(java.util.stream.Collectors.toList());
+
+            List<JobListing> listings = listingRepository.findByIdIn(listingIds);
+            java.util.Map<String, JobListing> listingMap = listings.stream()
+                    .collect(java.util.stream.Collectors.toMap(JobListing::getId, listing -> listing));
+
+            List<JobMatch> existingMatches = matchRepository.findByProfileIdOrderBySimilarityScoreDesc(profileId);
+            java.util.Map<String, JobMatch> existingMatchMap = existingMatches.stream()
+                    .collect(java.util.stream.Collectors.toMap(JobMatch::getListingId, match -> match));
+
             // STAGE 2: Process top-K with skill validation
             List<JobMatch> matches = new ArrayList<>();
+            List<JobMatch> matchesToSave = new ArrayList<>();
+
             for (ListingScore listingScore : topKListings) {
                 try {
-                    // Check if a match already exists for this profile+listing combination
-                    JobMatch existingMatch = matchRepository.findByProfileIdAndListingId(profileId, listingScore.listingId);
-                    if (existingMatch != null) {
-                        // Update scores but preserve user actions (saved/applied/red-flagged)
-                        log.debug("Updating existing match for listing: {} (saved={}, applied={}, redflag={})",
-                                listingScore.listingId, existingMatch.getIsSaved(),
-                                existingMatch.getIsApplied(), existingMatch.getIsRedflag());
-
-                        // Fetch listing and recalculate skill gap for updated scores
-                        JobListing listing = listingRepository.findById(listingScore.listingId).orElse(null);
-                        if (listing != null) {
-                            SkillGap skillGap = skillMatcher.analyzeSkillGapWithProficiency(
-                                    skillProficiencies,
-                                    listing.getDescription()
-                            );
-
-                            // Update similarity score and skill gaps, preserve user actions
-                            existingMatch.setSimilarityScore(BigDecimal.valueOf(listingScore.score));
-                            existingMatch.setSkillGaps(skillMatcher.skillGapToJson(skillGap));
-                            matchRepository.save(existingMatch);
-                        }
-
-                        matches.add(existingMatch);
-                        continue;
-                    }
-
-                    // Fetch listing from MySQL
-                    JobListing listing = listingRepository.findById(listingScore.listingId).orElse(null);
+                    // Lookup listing from batch-fetched map
+                    JobListing listing = listingMap.get(listingScore.listingId);
                     if (listing == null) {
-                        log.warn("Listing not found in MySQL: {}", listingScore.listingId);
+                        log.warn("Listing not found in PostgreSQL: {}", listingScore.listingId);
                         continue;
                     }
+
+                    // Check if a match already exists from batch-fetched map
+                    JobMatch existingMatch = existingMatchMap.get(listingScore.listingId);
 
                     // STAGE 2: Skill keyword matching with proficiency weighting
                     SkillGap skillGap = skillMatcher.analyzeSkillGapWithProficiency(
@@ -259,38 +268,36 @@ public class JobMatchingApplicationService {
                             listing.getDescription()
                     );
 
-                    // Calculate combined score (logging disabled - too verbose for 1000+ matches)
-                    double vectorScore = listingScore.score;
-                    double weightedSkillScore = skillGap.getWeightedScore();
-                    double combinedScore = (vectorScore * 0.6) + (weightedSkillScore / 100.0 * 0.4);
+                    if (existingMatch != null) {
+                        // Update scores but preserve user actions (saved/applied/red-flagged)
+                        log.debug("Updating existing match for listing: {} (saved={}, applied={}, redflag={})",
+                                listingScore.listingId, existingMatch.getIsSaved(),
+                                existingMatch.getIsApplied(), existingMatch.getIsRedflag());
 
-                    // Disabled verbose match logging - generates 1000+ log lines
-                    // Uncomment below for debugging specific match issues
-                    /*
-                    log.debug("MATCH - {}: HybridVector={} (MAX={}, AVG={}, COV={}%), Skill={}%, Combined={}, Matches={}",
-                            listing.getTitle(),
-                            String.format("%.3f", vectorScore),
-                            String.format("%.3f", listingScore.maxScore),
-                            String.format("%.3f", listingScore.avgTop3),
-                            String.format("%.1f", listingScore.coverage * 100),
-                            String.format("%.1f", weightedSkillScore),
-                            String.format("%.3f", combinedScore),
-                            listingScore.matchCount);
-                    */
-
-                    // Create JobMatch
-                    JobMatch match = new JobMatch();
-                    match.setProfileId(profileId);
-                    match.setListingId(listingScore.listingId);
-                    match.setSimilarityScore(BigDecimal.valueOf(listingScore.score));
-                    match.setSkillGaps(skillMatcher.skillGapToJson(skillGap));
-
-                    match = matchRepository.save(match);
-                    matches.add(match);
+                        existingMatch.setSimilarityScore(BigDecimal.valueOf(listingScore.score));
+                        existingMatch.setSkillGaps(skillMatcher.skillGapToJson(skillGap));
+                        matchesToSave.add(existingMatch);
+                        matches.add(existingMatch);
+                    } else {
+                        // Create new JobMatch
+                        JobMatch match = new JobMatch();
+                        match.setProfileId(profileId);
+                        match.setListingId(listingScore.listingId);
+                        match.setSimilarityScore(BigDecimal.valueOf(listingScore.score));
+                        match.setSkillGaps(skillMatcher.skillGapToJson(skillGap));
+                        matchesToSave.add(match);
+                        matches.add(match);
+                    }
 
                 } catch (Exception e) {
                     log.error("Failed to process job match", e);
                 }
+            }
+
+            // Batch save all matches at once
+            if (!matchesToSave.isEmpty()) {
+                matchRepository.saveAll(matchesToSave);
+                log.info("Batch saved {} job matches", matchesToSave.size());
             }
 
             // STAGE 3: Re-rank by combining vector similarity + weighted skill score
@@ -306,14 +313,21 @@ public class JobMatchingApplicationService {
                 return Double.compare(scoreB, scoreA); // Descending
             });
 
-            // Update similarity scores with combined score for better sorting in API
+            // Update similarity scores with combined score for better sorting in API (batch operation)
+            List<JobMatch> matchesToUpdate = new ArrayList<>();
             for (int i = 0; i < matches.size(); i++) {
                 JobMatch match = matches.get(i);
                 SkillGap gap = skillMatcher.jsonToSkillGap(match.getSkillGaps());
                 double vectorScore = match.getSimilarityScore().doubleValue();
                 double combinedScore = (vectorScore * 0.6) + (gap.getWeightedScore() / 100.0 * 0.4);
                 match.setSimilarityScore(BigDecimal.valueOf(combinedScore));
-                matchRepository.save(match);
+                matchesToUpdate.add(match);
+            }
+
+            // Batch update all matches with combined scores
+            if (!matchesToUpdate.isEmpty()) {
+                matchRepository.saveAll(matchesToUpdate);
+                log.info("Batch updated {} matches with combined scores", matchesToUpdate.size());
             }
 
             log.info("=== Matching complete: Created {} job matches (re-ranked by combined score) ===", matches.size());
@@ -355,13 +369,30 @@ public class JobMatchingApplicationService {
 
     /**
      * Get matches with enriched job listing data
+     * OPTIMIZED: Batch fetch job listings to avoid N+1 query problem
      */
     public List<JobMatchWithListing> getMatchesWithListings(String profileId) {
         List<JobMatch> matches = matchRepository.findByProfileIdOrderBySimilarityScoreDesc(profileId);
-        List<JobMatchWithListing> enrichedMatches = new ArrayList<>();
 
+        if (matches.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // OPTIMIZATION: Batch fetch all job listings in one query
+        List<String> listingIds = matches.stream()
+                .map(JobMatch::getListingId)
+                .collect(java.util.stream.Collectors.toList());
+
+        List<JobListing> listings = listingRepository.findByIdIn(listingIds);
+
+        // Create a map for O(1) lookup
+        java.util.Map<String, JobListing> listingMap = listings.stream()
+                .collect(java.util.stream.Collectors.toMap(JobListing::getId, listing -> listing));
+
+        // Build enriched matches
+        List<JobMatchWithListing> enrichedMatches = new ArrayList<>();
         for (JobMatch match : matches) {
-            JobListing listing = listingRepository.findById(match.getListingId()).orElse(null);
+            JobListing listing = listingMap.get(match.getListingId());
             if (listing != null) {
                 SkillGap skillGap = skillMatcher.jsonToSkillGap(match.getSkillGaps());
                 enrichedMatches.add(new JobMatchWithListing(match, listing, skillGap));
@@ -386,6 +417,13 @@ public class JobMatchingApplicationService {
         try {
             log.info("Getting or creating matching results for profile: {} (topK: {}, forceRefresh: {}, maxDaysOld: {})",
                     profileId, topK, forceRefresh, maxDaysOld);
+
+            // STEP 0: Check if there are any job listings in the database
+            long totalListings = listingRepository.count();
+            if (totalListings == 0) {
+                log.warn("No job listings in database - returning empty results for profile: {}", profileId);
+                return new ArrayList<>();
+            }
 
             // STEP 1: Clean up expired matches based on retention policy (7/14/20 days)
             int deletedCount = cleanupExpiredMatches(profileId);

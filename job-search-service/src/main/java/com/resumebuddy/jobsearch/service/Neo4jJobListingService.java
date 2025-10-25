@@ -177,7 +177,8 @@ public class Neo4jJobListingService {
                 return result.stream()
                         .collect(java.util.stream.Collectors.toMap(
                                 record -> record.get("skillName").asString(),
-                                record -> record.get("jobCount").asLong()
+                                record -> record.get("jobCount").asLong(),
+                                (count1, count2) -> count1 + count2 // Merge duplicates by summing counts
                         ));
             });
         } catch (Exception e) {

@@ -1,10 +1,16 @@
-# Core FastAPI dependencies
+# Core FastAPI dependencies (for local testing)
 fastapi
 uvicorn
 python-multipart
 
+# RunPod serverless handler
+runpod
+
 # Docling for document processing
 docling
+
+# OCR engines
+easyocr
 
 # Basic utilities
 requests

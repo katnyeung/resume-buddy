@@ -20,6 +20,12 @@ export default function CreditBalance({ userId = 'default_user', compact = false
       const data = await getUserCredits(userId);
       setCredits(data);
     } catch (err: any) {
+      // Silently ignore 401 errors (token expired - interceptor will redirect)
+      if (err.response?.status === 401 || err.code === 'ERR_NETWORK') {
+        // Don't log or show error - user is being redirected to login
+        return;
+      }
+
       console.error('Failed to fetch credits:', err);
       // Don't show error for first load - just log it
       if (credits) {
@@ -170,7 +176,7 @@ export default function CreditBalance({ userId = 'default_user', compact = false
         <div className="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
           <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
             <div className="font-medium mb-1">Cost per analysis:</div>
-            <div>• Resume analysis: 100 credits</div>
+            <div>• Resume analysis: 50 credits</div>
             <div>• Job experience: 50 credits</div>
             <div>• Job profile: 25 credits</div>
           </div>

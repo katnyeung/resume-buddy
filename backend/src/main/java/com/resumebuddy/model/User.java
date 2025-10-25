@@ -38,6 +38,9 @@ public class User {
     @Column(name = "auth_provider", nullable = false, length = 20)
     private AuthProvider authProvider = AuthProvider.EMAIL;
 
+    @Column(name = "role", nullable = false, length = 20)
+    private String role = "USER"; // Default role: USER, can be ADMIN
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

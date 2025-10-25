@@ -39,6 +39,9 @@ public class JobListingLine {
     /**
      * Redis key for the vector embedding of this specific line
      * Format: "listing:line:{id}"
+     *
+     * NOTE: Vector embeddings are stored ONLY in Redis (not PostgreSQL)
+     * If Redis fails, re-vectorize recent jobs (14 days) via OpenAI API
      */
     @Column(name = "redis_vector_key", length = 100)
     private String redisVectorKey;

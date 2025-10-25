@@ -19,6 +19,35 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// Add response interceptor to handle token expiration
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Check if error is due to expired token
+    if (error.response?.status === 401) {
+      const errorData = error.response?.data;
+
+      // Check if it's a TOKEN_EXPIRED error or any 401 (session expired)
+      if (errorData?.error === 'TOKEN_EXPIRED' || !errorData || typeof errorData === 'string') {
+        console.warn('Session expired, redirecting to login...');
+
+        // Clear local storage
+        localStorage.removeItem('authToken');
+        localStorage.removeItem('user');
+
+        // Redirect to login page immediately (don't wait for promise rejection)
+        if (typeof window !== 'undefined') {
+          window.location.href = '/login?expired=true';
+        }
+
+        // Don't reject the promise to prevent error messages from showing
+        return new Promise(() => {}); // Never resolves, but redirect happens first
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Resume Management
 export const uploadResume = async (file: File): Promise<Resume> => {
   const formData = new FormData();
@@ -191,7 +220,10 @@ export const deleteJobAnalysis = async (resumeId: string, experienceId: string):
 };
 
 // Job Search Service (port 8085)
-const JOB_SEARCH_API_URL = process.env.NEXT_PUBLIC_JOB_SEARCH_API_URL || 'http://localhost:8085/api';
+// TEMPORARY: Hardcoded for production deployment debugging
+const JOB_SEARCH_API_URL = typeof window !== 'undefined'
+  ? 'https://resumebuddy.cv/api'
+  : (process.env.NEXT_PUBLIC_JOB_SEARCH_API_URL || 'https://resumebuddy.cv/api');
 
 const jobSearchClient = axios.create({
   baseURL: JOB_SEARCH_API_URL,
@@ -314,6 +346,18 @@ export const getJobStatus = async (jobId: string): Promise<any> => {
   return response.data;
 };
 
+export const checkActiveJobForExperience = async (resumeId: string, experienceId: string): Promise<string | null> => {
+  try {
+    const response = await apiClient.get(`/jobs/check-active`, {
+      params: { resumeId, experienceId }
+    });
+    return response.data.jobId || null;
+  } catch (error) {
+    console.error('Failed to check active job:', error);
+    return null;
+  }
+};
+
 export const pollJobUntilComplete = async (
   jobId: string,
   onProgress?: (status: any) => void,
@@ -371,15 +415,20 @@ export const grantCredits = async (userId: string, amount: number, reason: strin
   return response.data;
 };
 
-// Job Crawl Activity History
+// Job Crawl Activity History (public endpoint - no auth required)
 export const getCrawlActivityHistory = async (limit: number = 5): Promise<any[]> => {
-  const response = await jobSearchClient.get(`/job-search/admin/crawl/history?limit=${limit}`);
+  const response = await jobSearchClient.get(`/job-search/crawl/history?limit=${limit}`);
   return response.data;
 };
 
 // Skill Drilldown (Neo4j graph-based job discovery)
-export const getTopSkills = async (limit: number = 30): Promise<any[]> => {
+export const getTopSkills = async (limit: number = 50): Promise<any[]> => {
   const response = await jobSearchClient.get(`/job-search/skills/top?limit=${limit}`);
+  return response.data;
+};
+
+export const getTopSkillsByCategory = async (perCategory: number = 10): Promise<Record<string, any[]>> => {
+  const response = await jobSearchClient.get(`/job-search/skills/top-by-category?perCategory=${perCategory}`);
   return response.data;
 };
 
