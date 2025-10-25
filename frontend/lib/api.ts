@@ -358,6 +358,16 @@ export const checkActiveJobForExperience = async (resumeId: string, experienceId
   }
 };
 
+export const checkActiveJobForResume = async (resumeId: string): Promise<string | null> => {
+  try {
+    const response = await apiClient.get(`/jobs/resumes/${resumeId}/check-active`);
+    return response.data.jobId || null;
+  } catch (error) {
+    console.error('Failed to check active resume job:', error);
+    return null;
+  }
+};
+
 export const pollJobUntilComplete = async (
   jobId: string,
   onProgress?: (status: any) => void,

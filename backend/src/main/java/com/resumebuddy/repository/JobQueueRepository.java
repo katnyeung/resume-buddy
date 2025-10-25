@@ -35,4 +35,7 @@ public interface JobQueueRepository extends JpaRepository<JobQueueEntry, String>
 
     @Query("SELECT j FROM JobQueueEntry j WHERE j.status IN ('QUEUED', 'PROCESSING') AND j.jobType = :jobType ORDER BY j.queuedAt DESC")
     List<JobQueueEntry> findActiveJobsByType(@Param("jobType") JobQueueEntry.JobType jobType);
+
+    @Query("SELECT j FROM JobQueueEntry j WHERE j.status IN ('QUEUED', 'PROCESSING') AND j.jobType = :jobType AND j.inputParams LIKE %:resumeIdPattern% ORDER BY j.queuedAt DESC")
+    List<JobQueueEntry> findActiveJobsByTypeAndResumeId(@Param("jobType") JobQueueEntry.JobType jobType, @Param("resumeIdPattern") String resumeIdPattern);
 }

@@ -17,7 +17,7 @@ import { TRANSFORMERS } from '@lexical/markdown';
 import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import { getResumeLines, saveEditorState, getEditorState, analyzeResume, analyzeResumeAsync, getResume, getStructuredAnalysis, analyzeJob, analyzeJobAsync } from '@/lib/api';
+import { getResumeLines, saveEditorState, getEditorState, analyzeResume, analyzeResumeAsync, getResume, getStructuredAnalysis, analyzeJob, analyzeJobAsync, checkActiveJobForResume } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
 import { getCurrentUserId } from '@/lib/userUtils';
 import { ResumeLine, ResumeAnalysisDto, ATSReport } from '@/lib/types';
@@ -52,6 +52,15 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       try {
         setLoading(true);
         setIsLoaded(false);
+
+        // Check if there's an active resume analysis job
+        const activeJobId = await checkActiveJobForResume(resumeId);
+        if (activeJobId) {
+          console.log('Found active resume analysis job:', activeJobId);
+          setResumeAnalysisJobId(activeJobId);
+          setAnalyzing(true);
+          setAnalysisStatus('Resuming active analysis job...');
+        }
 
         // Check resume status first
         const resume = await getResume(resumeId);
@@ -448,6 +457,21 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       {/* Lexical Editor - key prop forces remount when editorState changes */}
       <LexicalComposer key={resumeId} initialConfig={initialConfig}>
         <div className={`relative bg-white border-x ${analyzedLines.length > 0 ? '' : 'border-t'} border-b ${analyzedLines.length > 0 ? '' : 'rounded-b-lg'}`}>
+          {/* Raw Text Notice - Only show before first analysis */}
+          {!structuredAnalysis && (
+            <div className="bg-blue-50 border-b border-blue-200 px-4 py-2.5">
+              <div className="flex items-start gap-2">
+                <svg className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="text-sm text-blue-900">
+                  <strong className="font-semibold">Raw Parsed Text:</strong> This is the text extracted directly from your PDF by our parser.
+                  You may see formatting issues (dates/locations misaligned, line breaks in wrong places).
+                  <strong className="font-semibold ml-1">Feel free to edit and fix any errors before clicking "Analyze".</strong>
+                </div>
+              </div>
+            </div>
+          )}
           <ToolbarPlugin onSave={handleSave} saving={saving} />
           <RichTextPlugin
             contentEditable={

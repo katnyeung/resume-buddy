@@ -160,6 +160,22 @@ public class JobQueueController {
         }
     }
 
+    /**
+     * Check if there's an active resume analysis job for a specific resume
+     */
+    @GetMapping("/resumes/{resumeId}/check-active")
+    public ResponseEntity<Map<String, String>> checkActiveResumeAnalysisJob(
+            @PathVariable String resumeId) {
+        try {
+            return jobQueueService.findActiveJobForResume(resumeId)
+                .map(job -> ResponseEntity.ok(Map.of("jobId", job.getId())))
+                .orElse(ResponseEntity.ok(Map.of()));
+        } catch (Exception e) {
+            log.error("Failed to check active resume analysis job", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
     private EnqueueJobResponseDto createErrorResponse(String message) {
         EnqueueJobResponseDto response = new EnqueueJobResponseDto();
         response.setMessage("Error: " + message);
