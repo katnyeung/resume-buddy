@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-from api.routes import sessions
+from api.routes import sessions, streaming
 from domain.services.email_scheduler import start_scheduler, stop_scheduler
 
 # Load environment variables
@@ -48,6 +48,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(sessions.router)
+app.include_router(streaming.router)  # WebSocket streaming endpoints
 
 
 @app.get("/health")

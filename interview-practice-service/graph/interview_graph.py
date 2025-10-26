@@ -47,12 +47,38 @@ async def generate_question(state: InterviewState) -> dict:
     # Build context from resume
     resume_summary = ""
     if state.get("resume_data"):
-        resume_summary = f"Candidate's background: {json.dumps(state['resume_data'], indent=2)}"
+        resume = state["resume_data"]
+        experiences = resume.get("structuredData", {}).get("experiences", [])
+        skills = resume.get("structuredData", {}).get("skills", [])
+
+        if experiences:
+            resume_summary = "**Candidate's Experience:**\n"
+            for exp in experiences[:3]:  # Top 3 most recent
+                company = exp.get("company", "Unknown Company")
+                title = exp.get("title", "Unknown Role")
+                duration = exp.get("duration", "")
+                responsibilities = exp.get("responsibilities", [])[:3]  # Top 3 responsibilities
+
+                resume_summary += f"- **{title}** at {company} ({duration})\n"
+                for resp in responsibilities:
+                    resume_summary += f"  • {resp}\n"
+
+            # Add skills
+            if skills:
+                skill_list = ", ".join([s.get("name", s) if isinstance(s, dict) else str(s) for s in skills[:10]])
+                resume_summary += f"\n**Key Skills:** {skill_list}\n"
 
     # Build context from job
     job_summary = ""
     if state.get("job_data"):
-        job_summary = f"Target role: {json.dumps(state['job_data'], indent=2)}"
+        job = state["job_data"]
+        job_title = job.get("title", "Unknown Role")
+        job_company = job.get("company", "Unknown Company")
+        job_description = job.get("description", "")[:500]  # First 500 chars
+
+        job_summary = f"**Target Role:**\n{job_title} at {job_company}\n"
+        if job_description:
+            job_summary += f"Description: {job_description}...\n"
 
     # Previous conversation context
     prev_questions = [
