@@ -122,6 +122,44 @@ public class JobSearchController {
     }
 
     /**
+     * Get job listing by ID
+     * GET /api/job-search/listings/{id}
+     * Used by interview-practice-service to fetch job details
+     */
+    @Operation(summary = "Get job listing", description = "Retrieves a job listing by ID")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Job listing retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "Job listing not found")
+    })
+    @GetMapping("/listings/{id}")
+    public ResponseEntity<Map<String, Object>> getJobListing(
+            @Parameter(description = "Job Listing ID") @PathVariable String id) {
+        log.info("Fetching job listing: {}", id);
+
+        Optional<JobListing> jobListingOpt = jobListingRepository.findById(id);
+        if (jobListingOpt.isEmpty()) {
+            log.warn("Job listing not found: {}", id);
+            return ResponseEntity.notFound().build();
+        }
+
+        JobListing job = jobListingOpt.get();
+
+        // Return simplified DTO for interview service
+        Map<String, Object> response = new HashMap<>();
+        response.put("id", job.getId());
+        response.put("jobTitle", job.getTitle());
+        response.put("companyName", job.getCompany());
+        response.put("location", job.getLocation());
+        response.put("description", job.getDescription());
+        response.put("salaryRange", job.getSalaryRange());
+        response.put("contractType", job.getContractType());
+        response.put("postedDate", job.getPostedDate());
+        response.put("url", job.getUrl());
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * Get all profiles for a resume
      * GET /api/job-search/profiles?resumeId={resumeId}
      */

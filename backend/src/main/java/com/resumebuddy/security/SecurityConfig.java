@@ -31,6 +31,7 @@ public class SecurityConfig {
     public SecurityFilterChain securityFilterChain(
             HttpSecurity http,
             JwtAuthenticationFilter jwtAuthenticationFilter,
+            ApiKeyAuthenticationFilter apiKeyAuthenticationFilter,
             OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler) throws Exception {
         http
                 // Disable CSRF for stateless JWT authentication
@@ -50,6 +51,7 @@ public class SecurityConfig {
                         // Public endpoints
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/resumes/*/file").permitAll() // Allow Docling service to fetch files
+                        .requestMatchers("/api/payments/webhook").permitAll() // Stripe webhook (verified by signature)
                         .requestMatchers("/oauth2/**").permitAll()
                         .requestMatchers("/login/oauth2/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**", "/swagger-ui.html").permitAll()
@@ -63,7 +65,9 @@ public class SecurityConfig {
                         .successHandler(oAuth2LoginSuccessHandler)
                 )
 
-                // Add JWT filter before UsernamePasswordAuthenticationFilter
+                // Add API Key filter first (for service-to-service auth)
+                .addFilterBefore(apiKeyAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // Add JWT filter (for user auth)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

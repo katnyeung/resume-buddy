@@ -1,8 +1,8 @@
 # Resume Buddy - AI-Powered Resume Enhancement Platform
 
-## 📌 Current State: Phase 11.15 - Production Ready MVP
+## 📌 Current State: Phase 11.17 - Stripe Payment Integration
 **Last Updated**: October 25, 2025
-**Status**: Production-ready with PostgreSQL (Neon), RunPod GPU parsing, auto file cleanup, 3-LLM optimized job analysis, client-side auth guards
+**Status**: Production-ready with Stripe payments, user profile management, PostgreSQL (Neon), RunPod GPU parsing, auto file cleanup, 3-LLM optimized job analysis, client-side auth guards
 
 ## Project Overview
 AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration.
@@ -40,12 +40,15 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 
 ### Production Features
 - **User credits system**: Token-based billing with ACID transactions
-- **Async job queue**: MySQL-based queue with @Scheduled worker
+- **Stripe payment integration**: Buy credits (£2/200, £5/500, £8/1000) via Stripe Checkout (prices exclude tax)
+- **User profile management**: Edit name, view transaction history, soft-delete account
+- **Async job queue**: PostgreSQL-based queue with @Scheduled worker
 - **Auto file cleanup**: Deletes parsed files after 7 days (saves disk space)
 - **RunPod GPU support**: Serverless OCR for resume parsing
+- **Google OAuth2 login**: Auto user creation/linking, JWT token generation
 
 ## Database Layers
-1. **PostgreSQL/Neon (resumebuddy)**: Resumes, analysis, user credits, job queue
+1. **PostgreSQL/Neon (resumebuddy)**: Resumes, analysis, user credits, job queue, payment records
 2. **PostgreSQL/Neon (jobsearch)**: Profiles, job listings, matches, crawl logs
 3. **Neo4j**: Job/occupation/skill graph with O*NET taxonomy
 4. **Redis**: Vector embeddings (1536-dim) with HNSW indexing
@@ -97,6 +100,12 @@ app:
     cleanup:
       enabled: true
       retention-days: 7
+stripe:
+  api-key: ${STRIPE_SECRET_KEY}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET}
+  price-id-200: ${STRIPE_PRICE_ID_200}
+  price-id-500: ${STRIPE_PRICE_ID_500}
+  price-id-1000: ${STRIPE_PRICE_ID_1000}
 ```
 
 ### Frontend (.env.local)
@@ -120,6 +129,17 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 - `POST /api/jobs/resumes/{id}/analyze/async` - Queue resume analysis
 - `GET /api/jobs/{jobId}/status` - Poll status (QUEUED/PROCESSING/COMPLETED/FAILED)
 
+**Stripe Payments** (:8080):
+- `POST /api/payments/create-checkout-session` - Create Stripe Checkout session
+- `POST /api/payments/webhook` - Stripe webhook (signature verified)
+- `GET /api/payments/success?session_id=xxx` - Verify payment status
+
+**User Profile** (:8080):
+- `GET /api/users/{userId}/profile` - Get full profile with credits
+- `PUT /api/users/{userId}/profile/name` - Update full name
+- `DELETE /api/users/{userId}/account` - Soft delete account
+- `GET /api/users/{userId}/profile/transactions` - Transaction history
+
 **Job Search** (:8085):
 - `POST /api/job-search/profiles` - Create profile from experiences
 - `GET /api/job-search/profiles/{id}/matching-results?topK=20&refresh=false` - Get matches
@@ -141,8 +161,10 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 - `JobAnalysisService.java` - Main orchestrator (3 LLM calls)
 - `Neo4jGraphService.java` - Graph queries + skill mapping
 - `UserCreditService.java` - Token credit management
-- `FileCleanupService.java` - Auto file cleanup (NEW)
-- `RunPodDoclingService.java` - RunPod GPU integration (NEW)
+- `StripePaymentService.java` - Stripe Checkout + webhook handling
+- `UserProfileService.java` - Profile management + soft delete
+- `FileCleanupService.java` - Auto file cleanup
+- `RunPodDoclingService.java` - RunPod GPU integration
 
 **Job Search Service (job-search-service/)**:
 - `domain/service/` - JobPostGenerator, SkillMatcher, JobCrawlerService
@@ -158,7 +180,9 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 - `SkillFilterCloud.tsx` - Top skills tag cloud
 - `SkillHeatmap.tsx` - Co-occurrence matrix
 - `JobMatchingResults.tsx` - Job matching page
-- `hooks/useAuth.ts` - Client-side authentication guard (NEW)
+- `app/credits/page.tsx` - Credit purchase page with 3 packages
+- `app/profile/page.tsx` - User profile + transaction history
+- `hooks/useAuth.ts` - Client-side authentication guard
 
 ## Neo4j Graph Structure
 
@@ -209,11 +233,74 @@ cd frontend && ../deploy-frontend.sh
 
 ## Recent Updates
 
-### Phase 11.15 (Oct 25) - Client-Side Auth Guards ✅ [CRITICAL SECURITY FIX]
+### Phase 11.17 (Oct 25) - Stripe Payment Integration ✅
+**Complete credit purchase system with Stripe Checkout:**
+
+**Backend (Java/Spring Boot):**
+- Added `stripe-java` dependency (v25.13.0) to pom.xml
+- Created `payment_records` table to track all Stripe transactions
+- Added `deleted_at` column to `users` table for soft deletion
+- `PaymentRecord` entity with status tracking (PENDING/COMPLETED/FAILED/REFUNDED)
+- `PaymentPackage` enum defining 3 credit packages (200/$1, 500/$4, 1000/$8)
+- `StripePaymentService`: Creates Checkout sessions, handles webhooks, grants credits
+- `StripePaymentController`: Create session, webhook endpoint (no auth), verify payment
+- `UserProfileService`: Get profile, update name, soft delete, transaction history
+- `UserProfileController`: Profile CRUD endpoints
+- Whitelisted `/api/payments/webhook` in SecurityConfig (Stripe signature verification)
+- Added Stripe configuration to application.yml (API keys, webhook secret, price IDs)
+
+**Frontend (Next.js/TypeScript):**
+- `/credits` page: 3 credit packages with pricing, features, Stripe redirect
+- `/credits/success` page: Payment verification, success/pending/failed states
+- `/profile` page: Edit name, view credits, transaction history table, delete account modal
+- Updated `CreditBalance` component: Clickable badge → redirects to /credits
+- Updated `AppHeader`: Added profile icon button
+- Added API functions: `createCheckoutSession`, `verifyPaymentSuccess`, `getUserProfile`, `updateUserName`, `deleteAccount`, `getTransactionHistory`
+
+**Payment Flow:**
+1. User clicks credit badge → /credits page
+2. Selects package → frontend calls `POST /api/payments/create-checkout-session`
+3. Backend creates Stripe session, saves PENDING payment record
+4. Frontend redirects to Stripe Checkout (hosted page)
+5. User completes payment on Stripe
+6. Stripe redirects to `/credits/success?session_id=xxx`
+7. **Asynchronously:** Stripe webhook → backend verifies signature → grants credits
+8. Payment record updated to COMPLETED
+9. Frontend success page polls to verify credits added
+
+**Setup Requirements:**
+- Create 3 products in Stripe Dashboard with Price IDs
+- Configure webhook endpoint: `https://resumebuddy.cv/api/payments/webhook`
+- Set environment variables: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, price IDs
+- Run SQL migrations: `add_soft_delete_column.sql`, `create_payment_records_table.sql`
+
+### Phase 11.16 (Oct 25) - Resume Analysis Job Check Fix ✅
+**Prevent Duplicate Analysis Jobs on Page Refresh:**
+- Added active job detection on LexicalEditor page load (same pattern as job experience analysis)
+- Backend: `GET /api/jobs/resumes/{resumeId}/check-active` endpoint checks for QUEUED/PROCESSING jobs
+- Frontend: On mount, checks for active job and auto-resumes JobStatusIndicator if found
+- Prevents double-charging (50 credits → 100 credits) when user refreshes during analysis
+- User sees continuous job progress indicator even after refresh
+
+**UI Improvement:**
+- Added blue info banner explaining raw parsed text from Docling (shows before first analysis)
+- Users now understand they're viewing raw PDF extraction and can edit before "Analyze"
+- Banner disappears after first analysis to avoid clutter
+
+### Phase 11.15 (Oct 25) - Security Fixes ✅ [CRITICAL]
+**Client-Side Auth Guards:**
 - Added `useAuth()` hook for authentication verification
 - Protected routes now redirect to login if unauthenticated
 - Applied to: `/resume/[id]`, `/job-search/[profileId]`, `/analysis/[analysisId]`
 - Previously pages were accessible without auth (APIs returned 403 but UI rendered)
+
+**Google OAuth2 Login Fix:**
+- Fixed redirect_uri_mismatch error - OAuth2 endpoints served at root (not /api prefix)
+- Set `OAUTH2_REDIRECT_URI=https://resumebuddy.cv/login/oauth2/code/google` in production .env
+- Added `server.forward-headers-strategy: framework` for reverse proxy support
+- OAuth2 flow: auto creates new users OR links Google to existing email accounts
+- Generates initial credits for new Google users
+- **Required in Google Cloud Console**: Add `https://resumebuddy.cv/login/oauth2/code/google` to Authorized Redirect URIs
 
 ### Phase 11.14 (Oct 22) - File Cleanup System ✅
 - Auto-deletes parsed resume files after 7 days (saves disk space)

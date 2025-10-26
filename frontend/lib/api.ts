@@ -425,6 +425,42 @@ export const grantCredits = async (userId: string, amount: number, reason: strin
   return response.data;
 };
 
+// Stripe Payment Management
+export const createCheckoutSession = async (packageId: string): Promise<any> => {
+  const response = await apiClient.post('/payments/create-checkout-session', {
+    packageId
+  });
+  return response.data;
+};
+
+export const verifyPaymentSuccess = async (sessionId: string): Promise<any> => {
+  const response = await apiClient.get(`/payments/success?session_id=${sessionId}`);
+  return response.data;
+};
+
+// User Profile Management
+export const getUserProfile = async (userId: string): Promise<any> => {
+  const response = await apiClient.get(`/users/${userId}/profile`);
+  return response.data;
+};
+
+export const updateUserName = async (userId: string, fullName: string): Promise<any> => {
+  const response = await apiClient.put(`/users/${userId}/profile/name`, {
+    fullName
+  });
+  return response.data;
+};
+
+export const deleteAccount = async (userId: string): Promise<any> => {
+  const response = await apiClient.delete(`/users/${userId}/account`);
+  return response.data;
+};
+
+export const getTransactionHistory = async (userId: string): Promise<any[]> => {
+  const response = await apiClient.get(`/users/${userId}/profile/transactions`);
+  return response.data;
+};
+
 // Job Crawl Activity History (public endpoint - no auth required)
 export const getCrawlActivityHistory = async (limit: number = 5): Promise<any[]> => {
   const response = await jobSearchClient.get(`/job-search/crawl/history?limit=${limit}`);

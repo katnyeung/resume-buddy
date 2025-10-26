@@ -49,8 +49,18 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     public enum AuthProvider {
         EMAIL,
         GOOGLE
+    }
+
+    /**
+     * Check if user account is deleted
+     */
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 }

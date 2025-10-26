@@ -69,14 +69,15 @@ export default function CreditBalance({ userId = 'default_user', compact = false
   if (compact) {
     return (
       <div
-        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium cursor-pointer ${
+        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium cursor-pointer hover:opacity-80 transition-opacity ${
           isCritical
             ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200'
             : isLow
             ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200'
             : 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200'
         }`}
-        title={`Total: ${parseFloat(credits.totalCredits || 0).toFixed(0)} | Used: ${parseFloat(credits.usedCredits || 0).toFixed(0)} | Available: ${available.toFixed(0)}`}
+        title={`Click to buy credits | Total: ${parseFloat(credits.totalCredits || 0).toFixed(0)} | Used: ${parseFloat(credits.usedCredits || 0).toFixed(0)} | Available: ${available.toFixed(0)}`}
+        onClick={() => window.location.href = '/credits'}
       >
         <svg
           className="w-4 h-4"
