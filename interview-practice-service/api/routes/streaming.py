@@ -15,7 +15,7 @@ from infrastructure.websocket.vad import VoiceActivityDetector
 from infrastructure.websocket.connection_manager import manager
 from infrastructure.clients.openai_client import text_to_speech, transcribe_audio
 from domain.agents.interrupt_agent import InterruptAgent
-from graph.interview_graph import generate_question, evaluate_answer
+from domain.services.question_evaluation import generate_question, evaluate_answer
 
 
 router = APIRouter(prefix="/ws/interview", tags=["websocket"])
@@ -167,354 +167,343 @@ async def stream_interview_round(
             "score": 0.0
         }
 
-        from graph.interview_graph import build_interview_graph
-        from infrastructure.redis_client import get_async_redis_checkpointer
+        # Generate question
+        result = await generate_question(initial_state)
+        question_text = result["question"]
 
-        async with get_async_redis_checkpointer() as checkpointer:
-            graph = build_interview_graph(checkpointer)
-            thread_id = f"{session_id}_round_{round_number}"
-            config = {"configurable": {"thread_id": thread_id}}
+        # Generate TTS for question
+        import tempfile
+        question_audio_path = os.path.join(tempfile.gettempdir(), f"question_{session_id}_{round_number}.mp3")
+        await text_to_speech(question_text, question_audio_path)
 
-            # Generate question
-            result = await generate_question(initial_state)
-            question_text = result["question"]
+        # Read audio file and encode
+        with open(question_audio_path, "rb") as f:
+            question_audio_base64 = base64.b64encode(f.read()).decode()
 
-            # Generate TTS for question
-            import tempfile
-            question_audio_path = os.path.join(tempfile.gettempdir(), f"question_{session_id}_{round_number}.mp3")
-            await text_to_speech(question_text, question_audio_path)
+        # Send question to client (client should pause recording during playback)
+        await websocket.send_json({
+            "type": "question",
+            "text": question_text,
+            "audio_base64": question_audio_base64,
+            "pause_recording": True  # Tell client to stop recording during playback
+        })
 
-            # Read audio file and encode
-            with open(question_audio_path, "rb") as f:
-                question_audio_base64 = base64.b64encode(f.read()).decode()
+        # Listen for user's answer
+        full_transcript = ""
+        start_time = time.time()
+        chunks_received = 0
+        failed_transcriptions = 0
+        MAX_FAILED_TRANSCRIPTIONS = 3
+        is_recording_active = True  # Flag to track if we should accept audio chunks
 
-            # Send question to client (client should pause recording during playback)
-            await websocket.send_json({
-                "type": "question",
-                "text": question_text,
-                "audio_base64": question_audio_base64,
-                "pause_recording": True  # Tell client to stop recording during playback
-            })
+        # Set a maximum recording time (3 minutes - enough for a thorough answer)
+        MAX_RECORDING_TIME = 180
 
-            # Listen for user's answer
-            full_transcript = ""
-            start_time = time.time()
-            chunks_received = 0
-            failed_transcriptions = 0
-            MAX_FAILED_TRANSCRIPTIONS = 3
-            is_recording_active = True  # Flag to track if we should accept audio chunks
+        try:
+            while True:
+                # Check if max time exceeded
+                elapsed = time.time() - start_time
+                if elapsed > MAX_RECORDING_TIME:
+                    print(f"[WebSocket] Max recording time reached, ending answer")
+                    break
 
-            # Set a maximum recording time (3 minutes - enough for a thorough answer)
-            MAX_RECORDING_TIME = 180
-
-            try:
-                while True:
-                    # Check if max time exceeded
-                    elapsed = time.time() - start_time
-                    if elapsed > MAX_RECORDING_TIME:
-                        print(f"[WebSocket] Max recording time reached, ending answer")
+                # Check if user stopped speaking (no transcription for SILENCE_TIMEOUT seconds)
+                # ONLY check if we're actively recording (not during interrupts)
+                if is_recording_active and last_transcription_time is not None:
+                    time_since_last_transcription = time.time() - last_transcription_time
+                    if time_since_last_transcription > SILENCE_TIMEOUT and full_transcript:
+                        print(f"[WebSocket] No transcription for {SILENCE_TIMEOUT}s, user finished speaking")
                         break
 
-                    # Check if user stopped speaking (no transcription for SILENCE_TIMEOUT seconds)
-                    # ONLY check if we're actively recording (not during interrupts)
-                    if is_recording_active and last_transcription_time is not None:
-                        time_since_last_transcription = time.time() - last_transcription_time
-                        if time_since_last_transcription > SILENCE_TIMEOUT and full_transcript:
-                            print(f"[WebSocket] No transcription for {SILENCE_TIMEOUT}s, user finished speaking")
-                            break
+                # Receive audio chunk from client (with timeout)
+                try:
+                    data = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    # No data received for 1 second, check if speech ended
+                    if vad.is_speech_ended():
+                        print(f"[WebSocket] Speech ended (timeout + VAD)")
+                        break
+                    continue
+                except RuntimeError as e:
+                    # Client disconnected
+                    if "disconnect" in str(e).lower():
+                        print(f"[WebSocket] Client disconnected gracefully")
+                        break
+                    raise
 
-                    # Receive audio chunk from client (with timeout)
-                    try:
-                        data = await asyncio.wait_for(websocket.receive(), timeout=1.0)
-                    except asyncio.TimeoutError:
-                        # No data received for 1 second, check if speech ended
-                        if vad.is_speech_ended():
-                            print(f"[WebSocket] Speech ended (timeout + VAD)")
-                            break
+                if "bytes" in data:
+                    # Only accept audio chunks if recording is active
+                    if not is_recording_active:
+                        # Silently ignore chunks during interrupt (reduces log spam)
                         continue
-                    except RuntimeError as e:
-                        # Client disconnected
-                        if "disconnect" in str(e).lower():
-                            print(f"[WebSocket] Client disconnected gracefully")
-                            break
-                        raise
 
-                    if "bytes" in data:
-                        # Only accept audio chunks if recording is active
-                        if not is_recording_active:
-                            # Silently ignore chunks during interrupt (reduces log spam)
-                            continue
+                    audio_chunk = data["bytes"]
+                    audio_buffer.append(audio_chunk)
+                    chunks_received += 1
 
-                        audio_chunk = data["bytes"]
-                        audio_buffer.append(audio_chunk)
-                        chunks_received += 1
+                    # Process VAD
+                    is_speech = vad.process_frame(audio_chunk)
 
-                        # Process VAD
-                        is_speech = vad.process_frame(audio_chunk)
+                    # Transcribe every 10 seconds of audio (longer chunks are more reliable for WebM)
+                    buffer_duration = audio_buffer.duration_seconds()
+                    if buffer_duration >= 10.0:
+                        print(f"[WebSocket] Buffer reached {buffer_duration:.1f}s, transcribing...")
 
-                        # Transcribe every 10 seconds of audio (longer chunks are more reliable for WebM)
-                        buffer_duration = audio_buffer.duration_seconds()
-                        if buffer_duration >= 10.0:
-                            print(f"[WebSocket] Buffer reached {buffer_duration:.1f}s, transcribing...")
+                        # Save buffer to temp file for transcription
+                        temp_audio_path = os.path.join(
+                            tempfile.gettempdir(),
+                            f"chunk_{session_id}_{round_number}_{time.time()}.webm"
+                        )
+                        buffer_data = audio_buffer.get_audio()
+                        print(f"[WebSocket] Buffer size: {len(buffer_data)} bytes")
 
-                            # Save buffer to temp file for transcription
-                            temp_audio_path = os.path.join(
-                                tempfile.gettempdir(),
-                                f"chunk_{session_id}_{round_number}_{time.time()}.webm"
-                            )
-                            buffer_data = audio_buffer.get_audio()
-                            print(f"[WebSocket] Buffer size: {len(buffer_data)} bytes")
+                        with open(temp_audio_path, "wb") as f:
+                            f.write(buffer_data)
 
-                            with open(temp_audio_path, "wb") as f:
-                                f.write(buffer_data)
+                        # IMPORTANT: Clear buffer immediately after saving to prevent duplicate transcriptions
+                        # We have the data saved to disk, buffer can be cleared now
+                        audio_buffer.clear()
+                        print(f"[WebSocket] Cleared buffer after saving to disk")
 
-                            # IMPORTANT: Clear buffer immediately after saving to prevent duplicate transcriptions
-                            # We have the data saved to disk, buffer can be cleared now
-                            audio_buffer.clear()
-                            print(f"[WebSocket] Cleared buffer after saving to disk")
+                        # Transcribe chunk (skip validation for streaming fragments)
+                        try:
+                            chunk_transcript = await transcribe_audio(temp_audio_path, skip_validation=True)
 
-                            # Transcribe chunk (skip validation for streaming fragments)
-                            try:
-                                chunk_transcript = await transcribe_audio(temp_audio_path, skip_validation=True)
+                            if chunk_transcript:  # Only process if we got actual text
+                                full_transcript += " " + chunk_transcript
+                                failed_transcriptions = 0  # Reset failure counter
+                                last_transcription_time = time.time()  # Update last transcription time (for VAD)
+                                print(f"[WebSocket] Updated last transcription time (for silence detection)")
 
-                                if chunk_transcript:  # Only process if we got actual text
-                                    full_transcript += " " + chunk_transcript
-                                    failed_transcriptions = 0  # Reset failure counter
-                                    last_transcription_time = time.time()  # Update last transcription time (for VAD)
-                                    print(f"[WebSocket] Updated last transcription time (for silence detection)")
+                                # Send live transcript to client
+                                await websocket.send_json({
+                                    "type": "transcript",
+                                    "text": chunk_transcript
+                                })
 
-                                    # Send live transcript to client
-                                    await websocket.send_json({
-                                        "type": "transcript",
-                                        "text": chunk_transcript
-                                    })
+                                # Check for interrupt ONLY if we have meaningful transcript (>10 words)
+                                word_count = len(full_transcript.split())
+                                did_interrupt = False  # Track if we actually interrupted
 
-                                    # Check for interrupt ONLY if we have meaningful transcript (>10 words)
-                                    word_count = len(full_transcript.split())
-                                    did_interrupt = False  # Track if we actually interrupted
+                                if word_count > 10:
+                                    current_time = time.time()
+                                    duration_seconds = current_time - start_time
+                                    time_since_last_interrupt = current_time - last_interrupt_time
 
-                                    if word_count > 10:
-                                        current_time = time.time()
-                                        duration_seconds = current_time - start_time
-                                        time_since_last_interrupt = current_time - last_interrupt_time
+                                    # Check for interrupt (every 30s minimum between interrupts - give user time to incorporate feedback)
+                                    if time_since_last_interrupt >= 30.0:
+                                        print(f"[WebSocket] Checking for interrupt (transcript: {word_count} words)")
 
-                                        # Check for interrupt (every 30s minimum between interrupts - give user time to incorporate feedback)
-                                        if time_since_last_interrupt >= 30.0:
-                                            print(f"[WebSocket] Checking for interrupt (transcript: {word_count} words)")
+                                        # Tell client AI is thinking (user can see indicator)
+                                        await websocket.send_json({
+                                            "type": "ai_thinking",
+                                            "message": "AI is analyzing your answer..."
+                                        })
 
-                                            # Tell client AI is thinking (user can see indicator)
+                                        # Analyze for interrupt
+                                        decision = await interrupt_agent.analyze(
+                                            transcript=full_transcript,
+                                            question=question_text,
+                                            interview_type=session.interview_type,
+                                            difficulty_level=session.difficulty_level,
+                                            interrupt_level=session.interrupt_level,
+                                            duration_seconds=duration_seconds
+                                        )
+
+                                        if decision["should_interrupt"]:
+                                            print(f"[WebSocket] AI decided to interrupt: {decision['reason']}")
+                                            did_interrupt = True  # Mark that we interrupted
+
+                                            # Clear buffer - client will restart MediaRecorder with fresh WebM stream
+                                            audio_buffer.clear()
+                                            print(f"[WebSocket] Cleared buffer (interrupting - client will restart with fresh WebM stream)")
+
+                                            # Generate interrupt TTS
+                                            interrupt_audio_path = os.path.join(
+                                                tempfile.gettempdir(),
+                                                f"interrupt_{session_id}_{round_number}_{time.time()}.mp3"
+                                            )
+                                            await text_to_speech(decision["feedback_text"], interrupt_audio_path)
+
+                                            with open(interrupt_audio_path, "rb") as f:
+                                                interrupt_audio_base64 = base64.b64encode(f.read()).decode()
+
+                                            # Send interrupt to client (restart recording after playback)
                                             await websocket.send_json({
-                                                "type": "ai_thinking",
-                                                "message": "AI is analyzing your answer..."
+                                                "type": "interrupt",
+                                                "text": decision["feedback_text"],
+                                                "reason": decision["reason"],
+                                                "interrupt_type": decision["interrupt_type"],
+                                                "audio_base64": interrupt_audio_base64,
+                                                "restart_recording": True  # Tell client to stop/start fresh after interrupt
                                             })
 
-                                            # Analyze for interrupt
-                                            decision = await interrupt_agent.analyze(
-                                                transcript=full_transcript,
-                                                question=question_text,
-                                                interview_type=session.interview_type,
-                                                difficulty_level=session.difficulty_level,
-                                                interrupt_level=session.interrupt_level,
-                                                duration_seconds=duration_seconds
-                                            )
+                                            last_interrupt_time = current_time
 
-                                            if decision["should_interrupt"]:
-                                                print(f"[WebSocket] AI decided to interrupt: {decision['reason']}")
-                                                did_interrupt = True  # Mark that we interrupted
+                                            # Stop accepting audio chunks during interrupt
+                                            is_recording_active = False
+                                            print(f"[WebSocket] Disabled audio chunk acceptance during interrupt")
 
-                                                # Clear buffer - client will restart MediaRecorder with fresh WebM stream
-                                                audio_buffer.clear()
-                                                print(f"[WebSocket] Cleared buffer (interrupting - client will restart with fresh WebM stream)")
+                                            # Reset timers after interrupt so user can continue answering
+                                            start_time = time.time()
+                                            last_transcription_time = None  # Reset to None - wait for next transcription
+                                            print(f"[WebSocket] Reset recording timer after interrupt")
+                                        else:
+                                            # AI decided NOT to interrupt
+                                            # Just update the timestamp
+                                            last_interrupt_time = current_time
+                                            print(f"[WebSocket] AI decided not to interrupt, will check again in 30s")
 
-                                                # Generate interrupt TTS
-                                                interrupt_audio_path = os.path.join(
-                                                    tempfile.gettempdir(),
-                                                    f"interrupt_{session_id}_{round_number}_{time.time()}.mp3"
-                                                )
-                                                await text_to_speech(decision["feedback_text"], interrupt_audio_path)
+                                            # DON'T reset start_time - let the full answer continue until naturally complete
 
-                                                with open(interrupt_audio_path, "rb") as f:
-                                                    interrupt_audio_base64 = base64.b64encode(f.read()).decode()
-
-                                                # Send interrupt to client (restart recording after playback)
-                                                await websocket.send_json({
-                                                    "type": "interrupt",
-                                                    "text": decision["feedback_text"],
-                                                    "reason": decision["reason"],
-                                                    "interrupt_type": decision["interrupt_type"],
-                                                    "audio_base64": interrupt_audio_base64,
-                                                    "restart_recording": True  # Tell client to stop/start fresh after interrupt
-                                                })
-
-                                                last_interrupt_time = current_time
-
-                                                # Stop accepting audio chunks during interrupt
-                                                is_recording_active = False
-                                                print(f"[WebSocket] Disabled audio chunk acceptance during interrupt")
-
-                                                # Reset timers after interrupt so user can continue answering
-                                                start_time = time.time()
-                                                last_transcription_time = None  # Reset to None - wait for next transcription
-                                                print(f"[WebSocket] Reset recording timer after interrupt")
-                                            else:
-                                                # AI decided NOT to interrupt
-                                                # Just update the timestamp
-                                                last_interrupt_time = current_time
-                                                print(f"[WebSocket] AI decided not to interrupt, will check again in 30s")
-
-                                                # DON'T reset start_time - let the full answer continue until naturally complete
-
-                                    # ONLY send silent restart if we didn't just interrupt
-                                    # (if we interrupted, client will restart via the interrupt message)
-                                    if not did_interrupt:
-                                        is_recording_active = False
-                                        await websocket.send_json({
-                                            "type": "silent_restart",
-                                            "message": "Continue..."
-                                        })
-                                        print(f"[WebSocket] Sent silent_restart to keep WebM stream fresh")
+                                # ONLY send silent restart if we didn't just interrupt
+                                # (if we interrupted, client will restart via the interrupt message)
+                                if not did_interrupt:
+                                    is_recording_active = False
+                                    await websocket.send_json({
+                                        "type": "silent_restart",
+                                        "message": "Continue..."
+                                    })
+                                    print(f"[WebSocket] Sent silent_restart to keep WebM stream fresh")
+                            else:
+                                # Empty transcription - could be silence
+                                if full_transcript:
+                                    # We already have some transcript, so empty result likely means user stopped speaking
+                                    # Let the 15-second silence timeout handle this, don't count as failure
+                                    print(f"[WebSocket] Empty transcription (likely silence), letting timeout handle it")
                                 else:
-                                    # Empty transcription - could be silence
-                                    if full_transcript:
-                                        # We already have some transcript, so empty result likely means user stopped speaking
-                                        # Let the 15-second silence timeout handle this, don't count as failure
-                                        print(f"[WebSocket] Empty transcription (likely silence), letting timeout handle it")
-                                    else:
-                                        # No transcript yet, this is a real failure
-                                        failed_transcriptions += 1
-                                        print(f"[WebSocket] Failed transcription {failed_transcriptions}/{MAX_FAILED_TRANSCRIPTIONS}")
+                                    # No transcript yet, this is a real failure
+                                    failed_transcriptions += 1
+                                    print(f"[WebSocket] Failed transcription {failed_transcriptions}/{MAX_FAILED_TRANSCRIPTIONS}")
 
-                                        # If too many failures, stop trying
-                                        if failed_transcriptions >= MAX_FAILED_TRANSCRIPTIONS:
-                                            print(f"[WebSocket] Too many failed transcriptions, ending")
-                                            break
+                                    # If too many failures, stop trying
+                                    if failed_transcriptions >= MAX_FAILED_TRANSCRIPTIONS:
+                                        print(f"[WebSocket] Too many failed transcriptions, ending")
+                                        break
 
-                            except Exception as e:
-                                print(f"Transcription error: {e}")
-                                failed_transcriptions += 1
-                                if failed_transcriptions >= MAX_FAILED_TRANSCRIPTIONS:
-                                    print(f"[WebSocket] Too many errors, ending")
-                                    break
+                        except Exception as e:
+                            print(f"Transcription error: {e}")
+                            failed_transcriptions += 1
+                            if failed_transcriptions >= MAX_FAILED_TRANSCRIPTIONS:
+                                print(f"[WebSocket] Too many errors, ending")
+                                break
 
-                            # Clean up temp file
-                            if os.path.exists(temp_audio_path):
-                                os.remove(temp_audio_path)
+                        # Clean up temp file
+                        if os.path.exists(temp_audio_path):
+                            os.remove(temp_audio_path)
 
-                            # Buffer already cleared after successful transcription (line 253)
-                            # No need to clear again here
+                        # Buffer already cleared after successful transcription (line 253)
+                        # No need to clear again here
 
-                        # Check if user stopped speaking
-                        if vad.is_speech_ended():
-                            # User finished answering
-                            break
-
-                    elif "text" in data:
-                        # Client sent control message
-                        msg = data["text"]
-                        if msg == "end_answer":
-                            print(f"[WebSocket] Client requested end")
-                            break
-                        elif msg == "recording_restarted":
-                            # Client has restarted MediaRecorder, we can accept chunks again
-                            is_recording_active = True
-                            # Don't reset silence timer on restart - keep tracking from last transcription
-                            print(f"[WebSocket] Recording restarted, accepting audio chunks again")
-
-                    # Check for 3-5 second silence (if no transcription for 5 seconds)
-                    # Only check if we've had at least ONE successful transcription
-                    if last_transcription_time is not None:
-                        current_time = time.time()
-                        silence_duration = current_time - last_transcription_time
-
-                        if chunks_received > 30 and silence_duration >= 5.0:  # 5 seconds of silence
-                            print(f"[WebSocket] Speech ended (5+ seconds of silence detected)")
-                            break
-
-                    # Also check VAD for additional confirmation
-                    if chunks_received > 30 and vad.is_speech_ended():
-                        print(f"[WebSocket] Speech ended (VAD detected silence)")
+                    # Check if user stopped speaking
+                    if vad.is_speech_ended():
+                        # User finished answering
                         break
 
-            except WebSocketDisconnect:
-                print(f"Client disconnected from session {session_id}")
-                manager.disconnect(session_id)
-                return
+                elif "text" in data:
+                    # Client sent control message
+                    msg = data["text"]
+                    if msg == "end_answer":
+                        print(f"[WebSocket] Client requested end")
+                        break
+                    elif msg == "recording_restarted":
+                        # Client has restarted MediaRecorder, we can accept chunks again
+                        is_recording_active = True
+                        # Don't reset silence timer on restart - keep tracking from last transcription
+                        print(f"[WebSocket] Recording restarted, accepting audio chunks again")
 
-            # Evaluate complete answer
-            state_values = result.copy()
-            state_values["user_answer"] = full_transcript
-            state_values["interview_type"] = session.interview_type
-            state_values["difficulty_level"] = session.difficulty_level
-            state_values["current_round"] = round_number
-            state_values["max_rounds"] = session.total_rounds
+                # Check for 3-5 second silence (if no transcription for 5 seconds)
+                # Only check if we've had at least ONE successful transcription
+                if last_transcription_time is not None:
+                    current_time = time.time()
+                    silence_duration = current_time - last_transcription_time
 
-            eval_result = await evaluate_answer(state_values)
+                    if chunks_received > 30 and silence_duration >= 5.0:  # 5 seconds of silence
+                        print(f"[WebSocket] Speech ended (5+ seconds of silence detected)")
+                        break
 
-            # Extract reasoning and suggestions from conversation history
-            reasoning = ""
-            suggestions = []
-            for msg in eval_result.get("conversation_history", []):
-                if msg.get("type") == "evaluation":
-                    # Format: "Score: 0.75 | Reasoning text here"
-                    content = msg.get("content", "")
-                    if " | " in content:
-                        reasoning = content.split(" | ", 1)[1]
+                # Also check VAD for additional confirmation
+                if chunks_received > 30 and vad.is_speech_ended():
+                    print(f"[WebSocket] Speech ended (VAD detected silence)")
+                    break
 
-            # Calculate score (0-100 scale for display)
-            cumulative_scores = eval_result.get("cumulative_scores", [])
-            score = cumulative_scores[-1] * 100 if cumulative_scores else 0.0
+        except WebSocketDisconnect:
+            print(f"Client disconnected from session {session_id}")
+            manager.disconnect(session_id)
+            return
 
-            # Build feedback text
-            feedback = f"**Evaluation:**\n\n{reasoning}\n\n"
-            if not eval_result.get("is_satisfactory", False):
-                feedback += "**Areas for improvement:**\n"
-                feedback += "- Provide more specific examples from your experience\n"
-                feedback += "- Explain the impact and measurable outcomes\n"
-                feedback += "- Structure your answer with more clarity\n"
-            else:
-                feedback += "**Good points:**\n"
-                feedback += "- You provided relevant examples\n"
-                feedback += "- Your thought process was clear\n"
+        # Evaluate complete answer
+        state_values = result.copy()
+        state_values["user_answer"] = full_transcript
+        state_values["interview_type"] = session.interview_type
+        state_values["difficulty_level"] = session.difficulty_level
+        state_values["current_round"] = round_number
+        state_values["max_rounds"] = session.total_rounds
 
-            # Generate spoken evaluation (detailed feedback)
-            spoken_evaluation = f"Your score is {score:.0f} out of 100. {reasoning}"
+        eval_result = await evaluate_answer(state_values)
 
-            # Generate TTS for detailed evaluation
-            evaluation_audio_path = os.path.join(
-                tempfile.gettempdir(),
-                f"evaluation_{session_id}_{round_number}_{time.time()}.mp3"
-            )
-            await text_to_speech(spoken_evaluation, evaluation_audio_path)
+        # Extract reasoning and suggestions from conversation history
+        reasoning = ""
+        suggestions = []
+        for msg in eval_result.get("conversation_history", []):
+            if msg.get("type") == "evaluation":
+                # Format: "Score: 0.75 | Reasoning text here"
+                content = msg.get("content", "")
+                if " | " in content:
+                    reasoning = content.split(" | ", 1)[1]
 
-            # Read and encode evaluation audio
-            with open(evaluation_audio_path, "rb") as f:
-                evaluation_audio_base64 = base64.b64encode(f.read()).decode()
+        # Calculate score (0-100 scale for display)
+        cumulative_scores = eval_result.get("cumulative_scores", [])
+        score = cumulative_scores[-1] * 100 if cumulative_scores else 0.0
 
-            # Send detailed evaluation with audio
-            await websocket.send_json({
-                "type": "evaluation",
-                "score": score,
-                "feedback": feedback,
-                "is_satisfactory": eval_result.get("is_satisfactory", False),
-                "audio_base64": evaluation_audio_base64  # Add audio to evaluation message
-            })
+        # Build feedback text
+        feedback = f"**Evaluation:**\n\n{reasoning}\n\n"
+        if not eval_result.get("is_satisfactory", False):
+            feedback += "**Areas for improvement:**\n"
+            feedback += "- Provide more specific examples from your experience\n"
+            feedback += "- Explain the impact and measurable outcomes\n"
+            feedback += "- Structure your answer with more clarity\n"
+        else:
+            feedback += "**Good points:**\n"
+            feedback += "- You provided relevant examples\n"
+            feedback += "- Your thought process was clear\n"
 
-            print(f"[WebSocket] Sent evaluation with audio")
+        # Generate spoken evaluation (detailed feedback)
+        spoken_evaluation = f"Your score is {score:.0f} out of 100. {reasoning}"
 
-            # Clean up temp file
-            if os.path.exists(evaluation_audio_path):
-                os.remove(evaluation_audio_path)
+        # Generate TTS for detailed evaluation
+        evaluation_audio_path = os.path.join(
+            tempfile.gettempdir(),
+            f"evaluation_{session_id}_{round_number}_{time.time()}.mp3"
+        )
+        await text_to_speech(spoken_evaluation, evaluation_audio_path)
 
-            # Send simple completion message (no audio needed, evaluation already spoken)
-            await websocket.send_json({
-                "type": "completion",
-                "message": "This interview round is now complete. You can review the detailed feedback above."
-            })
+        # Read and encode evaluation audio
+        with open(evaluation_audio_path, "rb") as f:
+            evaluation_audio_base64 = base64.b64encode(f.read()).decode()
 
-            print(f"[WebSocket] Sent completion message")
+        # Send detailed evaluation with audio
+        await websocket.send_json({
+            "type": "evaluation",
+            "score": score,
+            "feedback": feedback,
+            "is_satisfactory": eval_result.get("is_satisfactory", False),
+            "audio_base64": evaluation_audio_base64  # Add audio to evaluation message
+        })
 
-            # Save state to Redis for later round completion
-            await graph.aupdate_state(config, eval_result, as_node="evaluate_answer")
+        print(f"[WebSocket] Sent evaluation with audio")
+
+        # Clean up temp file
+        if os.path.exists(evaluation_audio_path):
+            os.remove(evaluation_audio_path)
+
+        # Send simple completion message (no audio needed, evaluation already spoken)
+        await websocket.send_json({
+            "type": "completion",
+            "message": "This interview round is now complete. You can review the detailed feedback above."
+        })
+
+        print(f"[WebSocket] Sent completion message")
 
         await websocket.close()
         manager.disconnect(session_id)

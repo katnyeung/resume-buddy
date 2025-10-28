@@ -1,48 +1,23 @@
-"""LangGraph state machine for interview practice sessions."""
+"""Question generation and evaluation without LangGraph dependency."""
 import json
-from typing import TypedDict, List, Literal
-from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+from typing import Dict, Any
 from infrastructure.clients.grok_client import get_grok_llm, generate_json_completion
 
 
-class InterviewState(TypedDict):
-    """LangGraph state (auto-persisted to Redis via RedisSaver)."""
-    session_id: str
-    user_id: int
-    resume_data: dict
-    job_analysis_data: dict  # Rich analysis with skill assessments, O*NET mappings
-    job_data: dict
-    interview_type: str  # TECHNICAL | BEHAVIORAL | LEADERSHIP
-    difficulty_level: str  # JUNIOR | MID | SENIOR | STAFF
-    current_round: int
-    max_rounds: int
-    question: str
-    user_answer: str
-    is_satisfactory: bool
-    conversation_history: List[dict]
-    cumulative_scores: List[float]
+async def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate interview question based on context.
 
+    Args:
+        state: Dictionary containing:
+            - session_id, user_id
+            - resume_data, job_analysis_data, job_data
+            - interview_type, difficulty_level
+            - current_round, max_rounds
+            - conversation_history
 
-async def generate_greeting(state: InterviewState) -> dict:
-    """Node: Generate welcome message."""
-    interview_type = state["interview_type"].lower()
-    difficulty = state["difficulty_level"].lower()
-
-    greeting = (
-        f"Hello! I'm excited to help you practice for your {interview_type} interview. "
-        f"This session is tailored for a {difficulty}-level position. "
-        f"I'll ask you {state['max_rounds']} questions, and we'll have a conversation about each one. "
-        f"Feel free to take your time and provide detailed answers. Let's begin!"
-    )
-
-    return {
-        "conversation_history": [{"role": "assistant", "content": greeting}]
-    }
-
-
-async def generate_question(state: InterviewState) -> dict:
-    """Node: Generate interview question based on context."""
+    Returns:
+        Dictionary with "question" key
+    """
     llm = get_grok_llm(temperature=0.8)
 
     # Build context from job analysis (PRIORITY: rich data with skill assessments)
@@ -164,7 +139,7 @@ async def generate_question(state: InterviewState) -> dict:
     # Previous conversation context
     prev_questions = [
         msg["content"]
-        for msg in state["conversation_history"]
+        for msg in state.get("conversation_history", [])
         if msg["role"] == "assistant" and msg.get("type") == "question"
     ]
 
@@ -198,44 +173,59 @@ Interview Type Guidelines:
 Difficulty Guidelines:
 - JUNIOR: Focus on foundational skills, learning ability, and hands-on work
 - MID: Focus on cross-functional collaboration, moderate system design, mentoring juniors
-- SENIOR: Focus on architecture, technical strategy, business impact, scaling teams
-- STAFF: Focus on organizational vision, technical direction, cross-company influence
+- SENIOR: Focus on architecture decisions, technical leadership, business impact
+- STAFF: Focus on organizational strategy, cross-team influence, long-term vision
 
-Previous questions asked: {prev_questions}
+INSTRUCTIONS:
+1. Review the TARGET JOB description first - what does THIS role actually need?
+2. Look at the candidate's background - what have they proven they can do?
+3. **Connect the dots**: Ask about their RELEVANT past experience that maps to what the job needs
+4. Be specific: Reference the job's tech stack, challenges, or requirements
+5. Ask concise questions (1-2 sentences max)
+6. Avoid generic questions like "Tell me about yourself"
 
-Generate ONE interview question that:
-1. **PRIMARY FOCUS: What does the TARGET JOB need?** (e.g., if job needs React + TypeScript, ask about that)
-2. **SECONDARY: Connect to their background** - Ask them to draw from their proven skills to demonstrate they can do the job
-3. **SPECIFIC EXAMPLE**: Ask for a concrete story/project that shows they have the capability the job requires
-4. **DIFFERENT TOPIC**: Must explore a NEW area from the job requirements (not previous questions)
+Examples of GOOD questions:
+- "This role requires building microservices with Spring Boot on GCP. Can you walk me through how you achieved 99.95% uptime in your current system?"
+- "Given your experience leading a distributed team across 3 time zones, how did you handle code review processes and maintain quality?"
 
-Example (if job needs "scale microservices" and they have "Docker/K8s with STRONG credibility"):
-❌ BAD: "Tell me about a time you worked on a machine learning project" (ignores job needs)
-✅ GOOD: "This role requires scaling microservices to handle high traffic. Can you describe a time you used Docker or Kubernetes to improve system scalability? What challenges did you face and how did you solve them?"
+Examples of BAD questions:
+- "Tell me about your experience with Java" (too generic)
+- "What's your biggest weakness?" (not tied to job needs)
 
-CRITICAL:
-- Focus on what THE JOB NEEDS first (job description requirements)
-- Then ask candidate to prove they can do it with a specific example from their past
-- DO NOT ask generic questions - reference actual job requirements
-- DO NOT repeat topics from previous rounds
+Generate ONE interview question that connects the job's needs to the candidate's proven experience."""
 
-Return ONLY the question text, nothing else."""
+    try:
+        response = await llm.ainvoke(prompt)
+        question = response.content.strip()
 
-    response = await llm.ainvoke(prompt)
-    question = response.content.strip()
+        # Clean up markdown artifacts
+        if question.startswith('"') and question.endswith('"'):
+            question = question[1:-1]
 
-    new_history = state["conversation_history"] + [
-        {"role": "assistant", "content": question, "type": "question"}
-    ]
+        return {"question": question}
 
-    return {
-        "question": question,
-        "conversation_history": new_history
-    }
+    except Exception as e:
+        print(f"[ERROR] Question generation failed: {e}")
+        # Fallback question
+        return {"question": f"Can you tell me about your experience with the key skills required for this {state['interview_type'].lower()} role?"}
 
 
-async def evaluate_answer(state: InterviewState) -> dict:
-    """Node: Evaluate user's answer and determine if satisfactory."""
+async def evaluate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Evaluate user's answer and determine if satisfactory.
+
+    Args:
+        state: Dictionary containing:
+            - interview_type, difficulty_level
+            - question, user_answer
+            - conversation_history
+            - cumulative_scores
+
+    Returns:
+        Dictionary with:
+            - is_satisfactory
+            - conversation_history (updated)
+            - cumulative_scores (updated)
+    """
     prompt = f"""You are an expert interview evaluator. Evaluate this candidate's answer.
 
 Interview Type: {state['interview_type']}
@@ -269,6 +259,7 @@ Only mark false if the answer is completely off-topic or too vague (no examples 
     try:
         evaluation = await generate_json_completion(prompt, temperature=0.3)
     except Exception as e:
+        print(f"[ERROR] Evaluation failed: {e}")
         # Fallback if JSON parsing fails
         evaluation = {
             "is_satisfactory": True,
@@ -277,7 +268,7 @@ Only mark false if the answer is completely off-topic or too vague (no examples 
             "suggestions": []
         }
 
-    new_history = state["conversation_history"] + [
+    new_history = state.get("conversation_history", []) + [
         {"role": "user", "content": state["user_answer"], "type": "answer"},
         {
             "role": "system",
@@ -291,102 +282,3 @@ Only mark false if the answer is completely off-topic or too vague (no examples 
         "conversation_history": new_history,
         "cumulative_scores": state.get("cumulative_scores", []) + [evaluation["score"]]
     }
-
-
-def should_continue(state: InterviewState) -> Literal["generate_question", "generate_feedback"]:
-    """Edge: Decide next action based on rounds and satisfaction."""
-    # If we've reached max rounds, generate feedback
-    if state["current_round"] >= state["max_rounds"]:
-        return "generate_feedback"
-
-    # Otherwise, continue to next question
-    return "generate_question"
-
-
-async def generate_feedback(state: InterviewState) -> dict:
-    """Node: Generate final feedback summary."""
-    llm = get_grok_llm(temperature=0.7)
-
-    avg_score = (
-        sum(state["cumulative_scores"]) / len(state["cumulative_scores"])
-        if state["cumulative_scores"]
-        else 0.5
-    )
-
-    # Extract Q&A pairs
-    qa_pairs = []
-    current_q = None
-    for msg in state["conversation_history"]:
-        if msg.get("type") == "question":
-            current_q = msg["content"]
-        elif msg.get("type") == "answer" and current_q:
-            qa_pairs.append(f"Q: {current_q}\nA: {msg['content']}")
-            current_q = None
-
-    conversation_summary = "\n\n".join(qa_pairs)
-
-    prompt = f"""You are an expert interview coach. Provide constructive feedback for this interview practice session.
-
-Interview Type: {state['interview_type']}
-Difficulty Level: {state['difficulty_level']}
-Average Score: {avg_score:.2f}/1.00
-
-Conversation:
-{conversation_summary}
-
-Provide feedback with:
-1. **Overall Assessment**: 2-3 sentences summarizing performance
-2. **Strengths**: 3 specific things the candidate did well
-3. **Areas for Improvement**: 3 specific, actionable areas to work on
-4. **Next Steps**: 2-3 concrete action items for continued practice
-
-Be encouraging but honest. Focus on specific examples from their answers."""
-
-    response = await llm.ainvoke(prompt)
-    feedback = response.content
-
-    new_history = state["conversation_history"] + [
-        {"role": "assistant", "content": feedback, "type": "feedback"}
-    ]
-
-    return {
-        "conversation_history": new_history
-    }
-
-
-def build_interview_graph(checkpointer: AsyncRedisSaver) -> StateGraph:
-    """
-    Build LangGraph workflow with Redis checkpointer.
-
-    Args:
-        checkpointer: AsyncRedisSaver instance
-
-    Returns:
-        Compiled StateGraph
-    """
-    workflow = StateGraph(InterviewState)
-
-    # Add nodes
-    workflow.add_node("generate_greeting", generate_greeting)
-    workflow.add_node("generate_question", generate_question)
-    workflow.add_node("evaluate_answer", evaluate_answer)
-    workflow.add_node("generate_feedback", generate_feedback)
-
-    # Add edges
-    workflow.add_edge(START, "generate_greeting")
-    workflow.add_edge("generate_greeting", "generate_question")
-
-    # Conditional edge after evaluation
-    workflow.add_conditional_edges(
-        "evaluate_answer",
-        should_continue,
-        {
-            "generate_question": "generate_question",
-            "generate_feedback": "generate_feedback"
-        }
-    )
-
-    workflow.add_edge("generate_feedback", END)
-
-    # Compile with Redis checkpointer
-    return workflow.compile(checkpointer=checkpointer)

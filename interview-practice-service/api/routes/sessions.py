@@ -15,10 +15,10 @@ from api.models import (
 from domain.services.session_manager import SessionManager
 from domain.models import InterviewSession, SessionRound
 from infrastructure.database import get_db
-from infrastructure.redis_client import get_async_redis_checkpointer
+# from infrastructure.redis_client import get_async_redis_checkpointer  # REMOVED - No LangGraph
 from infrastructure.clients.openai_client import transcribe_audio, text_to_speech
 from infrastructure.clients import resume_api_client, jobsearch_api_client
-from graph.interview_graph import build_interview_graph
+# from graph.interview_graph import build_interview_graph  # REMOVED - No LangGraph
 
 
 router = APIRouter(prefix="/api/interview", tags=["interview"])
