@@ -212,7 +212,12 @@ Difficulty Level: {state['difficulty_level']}
 Round: {state['current_round']}/{state['max_rounds']}
 
 Interview Type Guidelines:
-- TECHNICAL: Ask how their past experience relates to the job's technical requirements (system design, specific tech stack, scalability, testing)
+- TECHNICAL: Ask WHY/HOW questions that probe DEEP understanding, not just tool familiarity
+  * ❌ BAD: "What databases have you used?" (surface-level, just listing tools)
+  * ✅ GOOD: "Why did you choose PostgreSQL over MongoDB for that use case?" (trade-offs, characteristics)
+  * ❌ BAD: "Tell me about your monitoring setup" (vague, allows tool name-dropping)
+  * ✅ GOOD: "How would you troubleshoot an out-of-memory error in a Java application?" (JVM-specific, technical depth)
+
 - BEHAVIORAL: Ask for STAR examples that demonstrate skills needed for this job (teamwork, problem-solving, handling pressure)
 - LEADERSHIP: Ask about leadership/mentoring experiences that align with the job's scope (if job needs team lead, ask about team building)
 
@@ -228,11 +233,36 @@ You are a recruiter interviewing a candidate for the TARGET JOB above.
 
 Your goal: Assess if the candidate's experience matches what the job needs.
 
+**CRITICAL: Pick a DIVERSE, INTERESTING topic from their background!**
+
+The "What They Actually Did" list is RANDOMIZED - pick the FIRST interesting accomplishment, NOT Spring Boot!
+
+**Topic Selection Priority** (choose in this order):
+1. **SCALE/PERFORMANCE**: 99.95% uptime, 100K+ req/sec, million records
+2. **QUALITY/TESTING**: 100% test coverage, 70% defect reduction, load testing
+3. **LEADERSHIP/MENTORING**: GenAI sessions for 20+ devs, knowledge sharing, team building
+4. **AI/INNOVATION**: GenAI tool integration, cutting docs time 80%, test effort 50%
+5. **ARCHITECTURE**: Microservices design, GCP infrastructure, system scalability
+6. ONLY if above aren't available: Ask about technology (Spring Boot, Kubernetes, etc.)
+
+**For Round {state['current_round']}**: Focus on measuring IMPACT, not just listing tools.
+
+**REAL INTERVIEW FEEDBACK - What Senior Engineers Want to Hear:**
+Based on actual interview debriefs, candidates often miss the mark by:
+- ❌ Listing tools instead of explaining TRADE-OFFS (e.g., "I used Redis" vs "I chose Redis over Memcached because...")
+- ❌ Name-dropping cloud services instead of LOW-LEVEL technical details (e.g., "I used GCP monitoring" vs "I analyzed heap dumps and GC logs to find the memory leak")
+- ❌ Answering a DIFFERENT question than asked (e.g., asked "Java design flaws?" → answered "How I'd design a language")
+
+Your question MUST:
+- Force the candidate to explain WHY they made a decision (architecture, database choice, tool selection)
+- Force the candidate to explain HOW at a TECHNICAL level (not just tool names, but actual implementation details)
+- Be SPECIFIC enough that vague answers won't satisfy
+
 Ask ONE natural question that:
-- Picks from "What They Actually Did" list above (already filtered - no repeated topics!)
-- Connects their experience to job requirements
-- Sounds like a real conversation
+- Focuses on TRADE-OFFS, DECISIONS, or TROUBLESHOOTING (not just "what did you do")
+- Requires technical depth to answer well (mentioning tools alone won't cut it)
 - Max 15 words
+- WHY or HOW format (e.g., "Why PostgreSQL over MongoDB?" or "How did you debug the memory leak?")
 
 Generate ONE question now:"""
 
@@ -265,66 +295,175 @@ async def evaluate_answer(state: Dict[str, Any]) -> Dict[str, Any]:
             - question, user_answer
             - conversation_history
             - cumulative_scores
+            - current_round, max_rounds (for round tracking)
 
     Returns:
         Dictionary with:
-            - is_satisfactory
+            - satisfaction_level (0-100)
+            - needs_followup (boolean)
+            - feedback (immediate feedback)
+            - followup_question (if needs_followup=true)
+            - final_summary (if needs_followup=false)
             - conversation_history (updated)
             - cumulative_scores (updated)
     """
-    prompt = f"""You are an expert interview evaluator. Evaluate this candidate's answer.
+    # Build conversation context for Grok with attempt numbers
+    conversation_context = ""
+    answer_count = 0
+    question_count = 0
 
-Interview Type: {state['interview_type']}
-Difficulty Level: {state['difficulty_level']}
-Question: {state['question']}
-Answer: {state['user_answer']}
+    for msg in state.get("conversation_history", []):
+        if msg.get("type") == "question":
+            question_count += 1
+            conversation_context += f"\n[Question #{question_count}] {msg.get('content', '')}"
+        elif msg.get("type") == "answer":
+            answer_count += 1
+            conversation_context += f"\n[Attempt #{answer_count} - User's Answer] {msg.get('content', '')}"
+        elif msg.get("type") == "feedback":
+            # Feedback from follow-ups
+            conversation_context += f"\n[Interviewer's Feedback] {msg.get('content', '')}"
 
-Evaluation Criteria for {state['difficulty_level']} level:
-- Clarity and structure (STAR format for behavioral)
-- Specific examples with measurable outcomes
-- Depth of technical/behavioral insight
-- Communication skills
-- Relevance to the question
+    current_round = state.get("current_round", 1)
+    max_rounds = state.get("max_rounds", 3)
+    attempt_number = len([m for m in state.get("conversation_history", []) if m.get("type") == "answer"]) + 1
 
-Return a JSON object with:
+    # Add summary of attempts so far
+    if answer_count > 0:
+        conversation_context += f"\n\n[SUMMARY: Candidate has provided {answer_count} answer(s) so far across the conversation above.]"
+
+    prompt = f"""You are an expert interview evaluator conducting a conversational interview.
+
+**Context:**
+- Interview Type: {state['interview_type']}
+- Difficulty Level: {state['difficulty_level']}
+- Round: {current_round} of {max_rounds}
+- This is attempt #{attempt_number} for this round
+
+**Current Question:** {state['question']}
+**Candidate's Answer:** {state['user_answer']}
+
+**Previous Conversation (ALL attempts numbered for reference):**
+{conversation_context if conversation_context else "[This is Attempt #1 - the first question.]"}
+
+**Your Task:**
+Look at ALL the [Attempt #N] answers above (not just the most recent one). Consider the CUMULATIVE information provided across all numbered attempts.
+
+**What Makes a GOOD Technical Answer?**
+Based on real senior engineering interview feedback:
+- ✅ Explains TRADE-OFFS and WHY decisions were made (not just "I used X")
+- ✅ Provides LOW-LEVEL technical details (heap dumps, GC logs, JVM flags, not just "I used monitoring")
+- ✅ Answers the ACTUAL question asked (not a tangent)
+- ❌ Name-dropping tools without explaining why/how
+- ❌ Vague statements like "optimized for scalability" without specifics
+- ❌ Listing technologies instead of discussing characteristics/trade-offs
+
+Decide whether to:
+1. Ask ONE MORE follow-up (if attempt ≤2 AND critical details still missing - push for WHY/HOW)
+2. Provide FINAL feedback (if attempt ≥3 OR you have enough info)
+
+**Decision Rules - MAXIMUM 3 ATTEMPTS:**
+- Attempt 1: If answer is very vague, ask follow-up
+- Attempt 2: Consider ALL previous answers. If still missing key details, ONE more followup
+- Attempt 3+: **STOP ASKING FOLLOW-UPS**. Give final evaluation based on everything they've said so far.
+
+**CRITICAL RULE FOR ATTEMPT #{attempt_number}:**
+{"YOU MUST PROVIDE FINAL FEEDBACK NOW. Set needs_followup=false. The candidate has already provided " + str(attempt_number) + " answers. Evaluate based on the cumulative information provided." if attempt_number >= 3 else "You may ask ONE more follow-up if critical details are missing, but be lenient - they've already tried " + str(attempt_number) + " time(s)."}
+
+Remember: Look at the ENTIRE conversation history above, not just the last answer!
+
+Return STRICT JSON:
 {{
-  "is_satisfactory": true or false,
-  "score": 0.0-1.0 (numerical score),
-  "reasoning": "Brief explanation of the score",
-  "suggestions": ["suggestion1", "suggestion2"] (areas for improvement)
+  "satisfaction_level": 0-100 (numerical score),
+  "needs_followup": true or false,
+  "feedback": "Brief immediate response (1-2 sentences)",
+  "followup_question": "Next question to ask (if needs_followup=true, max 15 words, ONE specific thing to probe)",
+  "final_summary": "Comprehensive evaluation (if needs_followup=false, 2-3 sentences with score reasoning)"
 }}
 
-IMPORTANT: Be realistic and fair. If the candidate:
-- Provided a concrete example from their experience
-- Explained their thought process
-- Mentioned specific technologies or approaches
-Then mark as "is_satisfactory": true even if not perfect.
+**Examples:**
 
-Only mark false if the answer is completely off-topic or too vague (no examples at all)."""
+Tool name-dropping (attempt 1) - ❌ BAD:
+Answer: "I used Redis for caching and it worked well"
+{{
+  "satisfaction_level": 30,
+  "needs_followup": true,
+  "feedback": "You mentioned Redis, but I'd like to understand your decision-making.",
+  "followup_question": "Why did you choose Redis over other caching solutions?",
+  "final_summary": ""
+}}
 
-    try:
-        evaluation = await generate_json_completion(prompt, temperature=0.3)
-    except Exception as e:
-        print(f"[ERROR] Evaluation failed: {e}")
-        # Fallback if JSON parsing fails
+Still surface-level (attempt 2) - ❌ BAD:
+Answer: "Redis is fast and has good documentation"
+{{
+  "satisfaction_level": 35,
+  "needs_followup": true,
+  "feedback": "I need more technical depth on the trade-offs.",
+  "followup_question": "What Redis data structures did you use and why?",
+  "final_summary": ""
+}}
+
+Good answer with technical depth (attempt 3 - MUST END) - ✅ GOOD:
+Answer: "I chose Redis sorted sets over hash maps because we needed range queries for leaderboard rankings. Memcached lacks data structures, and PostgreSQL would require full table scans for top-100 queries at our 100K RPS scale. Redis pipelining cut network round-trips by 80%."
+{{
+  "satisfaction_level": 85,
+  "needs_followup": false,
+  "feedback": "Excellent technical depth on trade-offs and implementation details.",
+  "final_summary": "Your score is 85 out of 100. You clearly explained WHY you chose Redis (data structures + performance), compared alternatives (Memcached, PostgreSQL), and provided LOW-LEVEL details (sorted sets, pipelining, 80% improvement). This demonstrates deep technical understanding, not just tool familiarity."
+}}"""
+
+    # HARD CUTOFF: After 3 attempts, force final evaluation (prevent infinite loops)
+    if attempt_number >= 4:
+        print(f"[HARD CUTOFF] Attempt #{attempt_number} - forcing final evaluation")
+        # Calculate average score from previous attempts
+        avg_score = 50  # Default if no history
+        if state.get("cumulative_scores"):
+            avg_score = int(sum(state["cumulative_scores"]) * 100 / len(state["cumulative_scores"]))
+
         evaluation = {
-            "is_satisfactory": True,
-            "score": 0.7,
-            "reasoning": "Answer received and processed.",
-            "suggestions": []
+            "satisfaction_level": avg_score,
+            "needs_followup": False,
+            "feedback": "Thank you for your responses.",
+            "followup_question": "",
+            "final_summary": f"Your score is {avg_score} out of 100. Based on our conversation, you demonstrated some understanding of the topic. For future interviews, aim to provide more specific examples and quantifiable results upfront to strengthen your answers."
         }
+    else:
+        try:
+            evaluation = await generate_json_completion(prompt, temperature=0.7)
+        except Exception as e:
+            print(f"[ERROR] Evaluation failed: {e}")
+            # Fallback if JSON parsing fails
+            evaluation = {
+                "satisfaction_level": 70,
+                "needs_followup": False,
+                "feedback": "Answer received and processed.",
+                "followup_question": "",
+                "final_summary": "Your answer demonstrated understanding of the topic. Continue to provide specific examples in future interviews."
+            }
 
+    # Update conversation history
     new_history = state.get("conversation_history", []) + [
         {"role": "user", "content": state["user_answer"], "type": "answer"},
         {
             "role": "system",
-            "content": f"Score: {evaluation['score']:.2f} | {evaluation['reasoning']}",
-            "type": "evaluation"
+            "content": evaluation.get("feedback", ""),
+            "type": "feedback"
         }
     ]
 
+    # If followup needed, add the question to history
+    if evaluation.get("needs_followup", False) and evaluation.get("followup_question"):
+        new_history.append({
+            "role": "assistant",
+            "content": evaluation["followup_question"],
+            "type": "question"
+        })
+
     return {
-        "is_satisfactory": evaluation["is_satisfactory"],
+        "satisfaction_level": evaluation.get("satisfaction_level", 0),
+        "needs_followup": evaluation.get("needs_followup", False),
+        "feedback": evaluation.get("feedback", ""),
+        "followup_question": evaluation.get("followup_question", ""),
+        "final_summary": evaluation.get("final_summary", ""),
         "conversation_history": new_history,
-        "cumulative_scores": state.get("cumulative_scores", []) + [evaluation["score"]]
+        "cumulative_scores": state.get("cumulative_scores", []) + [evaluation.get("satisfaction_level", 0) / 100.0]
     }

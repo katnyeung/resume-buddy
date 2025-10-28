@@ -104,6 +104,20 @@ class AudioBuffer:
         # DON'T clear stored_header - reuse it for new MediaRecorder chunks
         print("[AudioBuffer] Accumulator reset (keeping stored header for reuse)")
 
+    def reset_for_next_question(self):
+        """
+        Reset both buffers for next question in multi-turn conversation.
+
+        Clears all audio data but keeps stored_header for reuse (MediaRecorder continues).
+        Call this after sending a follow-up question to start collecting fresh answer.
+        """
+        self.chunks = []
+        self.accumulated_chunks = []
+        self.total_duration_ms = 0
+        self.last_transcribed_chunk_count = 0
+        # Keep stored_header - MediaRecorder doesn't restart, just collecting new answer
+        print("[AudioBuffer] Reset for next question (keeping stored header)")
+
     def duration_seconds(self) -> float:
         """Get buffer duration in seconds."""
         return self.total_duration_ms / 1000.0
