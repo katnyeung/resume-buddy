@@ -103,30 +103,47 @@ async def stream_interview_round(
         vad = VoiceActivityDetector(silence_threshold_ms=800)
         interrupt_agent = InterruptAgent()
         last_interrupt_time = 0
-        last_transcription_time = time.time()  # Track when we last got transcription
+        last_transcription_time = None  # Track when we last got transcription (None = haven't spoken yet)
         SILENCE_TIMEOUT = 15  # If no transcription for 15 seconds, assume user finished
 
         # Generate question (same logic as REST endpoint)
-        from infrastructure.clients.resume_api_client import get_resume_analysis
+        from infrastructure.clients.resume_api_client import get_resume_analysis, get_job_analysis
         from infrastructure.clients.jobsearch_api_client import get_job_listing
 
         # Try to fetch resume/job data, but continue if external APIs are down
         resume_data = {}
+        job_analysis_data = None
         job_data = None
 
         try:
             print(f"[WebSocket] Fetching resume data...")
             resume_data = await get_resume_analysis(str(session.resume_id)) or {}
             print(f"[WebSocket] Resume data fetched")
+
+            # Fetch job analysis data for richer context (skill assessments, O*NET mappings)
+            experience_id_to_use = session.experience_id  # User-selected experience
+
+            # Fallback: If no experience_id in session, use first experience from resume
+            if not experience_id_to_use and resume_data.get("structuredData"):
+                experiences = resume_data.get("structuredData", {}).get("experiences", [])
+                if experiences and len(experiences) > 0:
+                    experience_id_to_use = experiences[0].get("id")
+                    print(f"[WebSocket] No experience_id in session, using first experience: {experience_id_to_use}")
+
+            if experience_id_to_use:
+                print(f"[WebSocket] Fetching job analysis for experience {experience_id_to_use}...")
+                job_analysis_data = await get_job_analysis(str(session.resume_id), str(experience_id_to_use))
+                if job_analysis_data:
+                    print(f"[WebSocket] Job analysis data fetched (with skill assessments)")
         except Exception as e:
-            print(f"[WebSocket] Warning: Could not fetch resume data: {e}")
+            print(f"[WebSocket] Warning: Could not fetch resume/analysis data: {e}")
             # Continue with empty resume data
 
         try:
             if session.job_listing_id:
-                print(f"[WebSocket] Fetching job data...")
+                print(f"[WebSocket] Fetching job listing data...")
                 job_data = await get_job_listing(str(session.job_listing_id))
-                print(f"[WebSocket] Job data fetched")
+                print(f"[WebSocket] Job listing data fetched (includes description)")
         except Exception as e:
             print(f"[WebSocket] Warning: Could not fetch job data: {e}")
             # Continue with empty job data
@@ -135,7 +152,8 @@ async def stream_interview_round(
             "session_id": session_id,
             "user_id": session.user_id,
             "resume_data": resume_data,
-            "job_data": job_data,
+            "job_analysis_data": job_analysis_data,  # Rich analysis with skill assessments
+            "job_data": job_data,  # Job listing with description
             "interview_type": session.interview_type,
             "difficulty_level": session.difficulty_level,
             "interrupt_level": session.interrupt_level,
@@ -199,7 +217,7 @@ async def stream_interview_round(
 
                     # Check if user stopped speaking (no transcription for SILENCE_TIMEOUT seconds)
                     # ONLY check if we're actively recording (not during interrupts)
-                    if is_recording_active:
+                    if is_recording_active and last_transcription_time is not None:
                         time_since_last_transcription = time.time() - last_transcription_time
                         if time_since_last_transcription > SILENCE_TIMEOUT and full_transcript:
                             print(f"[WebSocket] No transcription for {SILENCE_TIMEOUT}s, user finished speaking")
@@ -224,7 +242,7 @@ async def stream_interview_round(
                     if "bytes" in data:
                         # Only accept audio chunks if recording is active
                         if not is_recording_active:
-                            print(f"[WebSocket] Ignoring chunk during interrupt (recording inactive)")
+                            # Silently ignore chunks during interrupt (reduces log spam)
                             continue
 
                         audio_chunk = data["bytes"]
@@ -334,8 +352,9 @@ async def stream_interview_round(
                                                 is_recording_active = False
                                                 print(f"[WebSocket] Disabled audio chunk acceptance during interrupt")
 
-                                                # Reset timer after interrupt so user can continue answering
+                                                # Reset timers after interrupt so user can continue answering
                                                 start_time = time.time()
+                                                last_transcription_time = None  # Reset to None - wait for next transcription
                                                 print(f"[WebSocket] Reset recording timer after interrupt")
                                             else:
                                                 # AI decided NOT to interrupt
@@ -398,11 +417,21 @@ async def stream_interview_round(
                         elif msg == "recording_restarted":
                             # Client has restarted MediaRecorder, we can accept chunks again
                             is_recording_active = True
-                            last_transcription_time = time.time()  # Reset silence timer
+                            # Don't reset silence timer on restart - keep tracking from last transcription
                             print(f"[WebSocket] Recording restarted, accepting audio chunks again")
 
-                    # Check VAD after each chunk
-                    if chunks_received > 30 and vad.is_speech_ended():  # After ~1 second
+                    # Check for 3-5 second silence (if no transcription for 5 seconds)
+                    # Only check if we've had at least ONE successful transcription
+                    if last_transcription_time is not None:
+                        current_time = time.time()
+                        silence_duration = current_time - last_transcription_time
+
+                        if chunks_received > 30 and silence_duration >= 5.0:  # 5 seconds of silence
+                            print(f"[WebSocket] Speech ended (5+ seconds of silence detected)")
+                            break
+
+                    # Also check VAD for additional confirmation
+                    if chunks_received > 30 and vad.is_speech_ended():
                         print(f"[WebSocket] Speech ended (VAD detected silence)")
                         break
 
@@ -447,42 +476,42 @@ async def stream_interview_round(
                 feedback += "- You provided relevant examples\n"
                 feedback += "- Your thought process was clear\n"
 
-            # Send final evaluation to client
+            # Generate spoken evaluation (detailed feedback)
+            spoken_evaluation = f"Your score is {score:.0f} out of 100. {reasoning}"
+
+            # Generate TTS for detailed evaluation
+            evaluation_audio_path = os.path.join(
+                tempfile.gettempdir(),
+                f"evaluation_{session_id}_{round_number}_{time.time()}.mp3"
+            )
+            await text_to_speech(spoken_evaluation, evaluation_audio_path)
+
+            # Read and encode evaluation audio
+            with open(evaluation_audio_path, "rb") as f:
+                evaluation_audio_base64 = base64.b64encode(f.read()).decode()
+
+            # Send detailed evaluation with audio
             await websocket.send_json({
                 "type": "evaluation",
                 "score": score,
                 "feedback": feedback,
-                "is_satisfactory": eval_result.get("is_satisfactory", False)
+                "is_satisfactory": eval_result.get("is_satisfactory", False),
+                "audio_base64": evaluation_audio_base64  # Add audio to evaluation message
             })
 
-            # Generate and send completion message with TTS
-            completion_message = f"Thank you for completing this interview round! Your score is {score:.0f} out of 100. "
-            if eval_result.get("is_satisfactory", False):
-                completion_message += "Great job! You provided relevant examples and clear explanations. "
-            else:
-                completion_message += "You're on the right track. Focus on providing more specific examples and measurable outcomes in your next practice session. "
+            print(f"[WebSocket] Sent evaluation with audio")
 
-            completion_message += "Please review the detailed feedback on your screen. This session is now complete."
+            # Clean up temp file
+            if os.path.exists(evaluation_audio_path):
+                os.remove(evaluation_audio_path)
 
-            # Generate TTS for completion message
-            completion_audio_path = os.path.join(
-                tempfile.gettempdir(),
-                f"completion_{session_id}_{round_number}_{time.time()}.mp3"
-            )
-            await text_to_speech(completion_message, completion_audio_path)
-
-            # Read and encode completion audio
-            with open(completion_audio_path, "rb") as f:
-                completion_audio_base64 = base64.b64encode(f.read()).decode()
-
-            # Send completion message with audio
+            # Send simple completion message (no audio needed, evaluation already spoken)
             await websocket.send_json({
                 "type": "completion",
-                "message": completion_message,
-                "audio_base64": completion_audio_base64
+                "message": "This interview round is now complete. You can review the detailed feedback above."
             })
 
-            print(f"[WebSocket] Sent completion message with audio")
+            print(f"[WebSocket] Sent completion message")
 
             # Save state to Redis for later round completion
             await graph.aupdate_state(config, eval_result, as_node="evaluate_answer")

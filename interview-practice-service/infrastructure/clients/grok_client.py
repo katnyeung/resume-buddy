@@ -6,7 +6,8 @@ from langchain_openai import ChatOpenAI
 
 
 GROK_BASE_URL = os.getenv("GROK_BASE_URL", "https://api.x.ai/v1")
-GROK_MODEL = os.getenv("GROK_MODEL", "grok-beta")
+GROK_MODEL = os.getenv("GROK_MODEL", "grok-4-fast-reasoning")
+# X.AI API key for Grok LLM
 XAI_API_KEY = os.getenv("XAI_API_KEY")
 
 

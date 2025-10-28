@@ -1,8 +1,8 @@
 # Resume Buddy - AI-Powered Resume Enhancement Platform
 
-## 📌 Current State: Phase 11.17 - Stripe Payment Integration
-**Last Updated**: October 25, 2025
-**Status**: Production-ready with Stripe payments, user profile management, PostgreSQL (Neon), RunPod GPU parsing, auto file cleanup, 3-LLM optimized job analysis, client-side auth guards
+## 📌 Current State: Phase 11.18 - Interview Practice Production Deployment
+**Last Updated**: October 27, 2025
+**Status**: Production-ready with interview practice service, Stripe payments, user profile management, PostgreSQL (Neon), RunPod GPU parsing, auto file cleanup, 3-LLM optimized job analysis, client-side auth guards
 
 ## Project Overview
 AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration.
@@ -11,7 +11,7 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 - **Backend**: Spring Boot 3.2.1 + Java 17 + PostgreSQL 15 (Neon) + Neo4j 5.x + Redis Stack
   - Resume API (port 8080) - Resume analysis, job analysis, credits, async queue
   - Job Search Service (port 8085) - Profile matching, skill discovery, job crawling
-  - Interview Practice (port 8086) - Python FastAPI + LangGraph (Experimental)
+  - Interview Practice (port 8086) - Python FastAPI + LangGraph (Docker)
 - **Frontend**: Next.js 14 + TypeScript + Lexical Editor + Tailwind CSS
 - **AI/Data**: Grok-4-fast-reasoning (X.AI) + OpenAI Embeddings + O*NET API + Whisper/TTS
 - **Document Parsing**: Docling (Python FastAPI + Docker) with RunPod serverless GPU support
@@ -46,12 +46,14 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 - **Auto file cleanup**: Deletes parsed files after 7 days (saves disk space)
 - **RunPod GPU support**: Serverless OCR for resume parsing
 - **Google OAuth2 login**: Auto user creation/linking, JWT token generation
+- **Interview practice**: AI-powered voice interview with real-time feedback and interrupts
 
 ## Database Layers
 1. **PostgreSQL/Neon (resumebuddy)**: Resumes, analysis, user credits, job queue, payment records
 2. **PostgreSQL/Neon (jobsearch)**: Profiles, job listings, matches, crawl logs
-3. **Neo4j**: Job/occupation/skill graph with O*NET taxonomy
-4. **Redis**: Vector embeddings (1536-dim) with HNSW indexing
+3. **PostgreSQL/Neon (interview_practice)**: Interview sessions, rounds, transcripts
+4. **Neo4j**: Job/occupation/skill graph with O*NET taxonomy
+5. **Redis**: Vector embeddings (1536-dim) with HNSW indexing + LangGraph checkpoints
 
 ## Quick Start
 
@@ -59,6 +61,7 @@ AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relat
 # 1. Start infrastructure
 ./start-with-docker.sh  # Neo4j, Docling
 cd job-search-service && docker-compose up -d  # Redis
+docker-compose up -d  # Interview Practice :8086 (from root)
 
 # 2. Start services
 cd backend && mvn spring-boot:run &              # Resume API :8080
@@ -173,6 +176,14 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 - `infrastructure/external/jobsources/` - AdzunaApiClient, ReedApiClient, JSearchApiClient
 - `service/` - Neo4jJobListingService (skill co-occurrence, graph indexing)
 
+**Interview Practice Service (interview-practice-service/)**:
+- `main.py` - FastAPI entry point
+- `api/routes/streaming.py` - WebSocket streaming endpoint
+- `domain/agents/interrupt_agent.py` - AI interrupt logic
+- `domain/services/email_scheduler.py` - Daily round reminders
+- `infrastructure/clients/openai_client.py` - Whisper STT + TTS
+- `infrastructure/clients/grok_client.py` - Grok LLM for questions/evaluation
+
 **Frontend**:
 - `LexicalEditor.tsx` - Rich text editor
 - `AnalysisSummary.tsx` - ATS display + Skill Train
@@ -182,6 +193,9 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 - `JobMatchingResults.tsx` - Job matching page
 - `app/credits/page.tsx` - Credit purchase page with 3 packages
 - `app/profile/page.tsx` - User profile + transaction history
+- `app/interview/[sessionId]/[roundNum]/page.tsx` - Interview practice page
+- `components/InterviewPractice.tsx` - WebSocket streaming + live transcript
+- `lib/api/interview.ts` - Interview API client
 - `hooks/useAuth.ts` - Client-side authentication guard
 
 ## Neo4j Graph Structure
@@ -204,21 +218,25 @@ cd backend && ../deploy-backend.sh
 # Job Search Service (:8085)
 cd job-search-service && ../deploy-job-search.sh
 
+# Interview Practice Service (:8086 - Docker)
+./deploy-interview-practice.sh
+
 # Frontend (:3000)
 cd frontend && ../deploy-frontend.sh
 ```
 
 **What the scripts do**:
-- Stop service to prevent CPU spikes
-- Build/compile application
-- Upload artifacts to server
-- Restart service and verify status
+- Backend/Job Search: Stop service → Build JAR → Upload → Restart systemd service
+- Interview Practice: Build Docker image → Upload tar.gz → Load & start container
+- Frontend: Build Next.js → Upload → Restart systemd service
 - Safe error handling with rollback
 
 **Requirements**:
 - `~/resume-buddy.pem` - SSH key
 - Lightsail IP: 13.43.37.64
 - Systemd services: `resume-api`, `job-search`, `frontend`
+- Docker installed on server for interview-practice
+- Nginx configured for WebSocket proxying (/ws/interview)
 
 ## Common Issues & Solutions
 
@@ -232,6 +250,41 @@ cd frontend && ../deploy-frontend.sh
 **Redis data lost**: Re-vectorize recent jobs (~$0.10 for 14 days)
 
 ## Recent Updates
+
+### Phase 11.18 (Oct 27) - Interview Practice Production Deployment ✅
+**Full-stack integration of AI-powered voice interview practice:**
+
+**Frontend (Next.js/React):**
+- Created `/app/interview/[sessionId]/[roundNum]/page.tsx` - Interview practice page
+- `InterviewPractice.tsx` component with full feature parity from HTML test
+- WebSocket client with real-time audio streaming (30ms chunks)
+- Live transcript display with incremental updates
+- AI interrupt handling (gentle/moderate/firm with visual indicators)
+- MediaRecorder management (restart on interrupt, silent restart)
+- Audio playback for questions and interrupts
+- Final evaluation with score display and feedback
+- Debug log panel for troubleshooting
+- API client in `lib/api/interview.ts`
+
+**Backend (Python/FastAPI):**
+- Updated email scheduler URL from `/interview/session/{id}/round/{num}` to `/interview/{id}/{num}`
+- Dockerfile with ffmpeg and audio processing dependencies
+- docker-compose.yml for production deployment
+- .dockerignore for clean builds
+
+**DevOps:**
+- `deploy-interview-practice.sh` script for AWS Lightsail
+- Builds Docker image locally → uploads tar.gz → loads on server
+- Health check verification after deployment
+- Nginx WebSocket proxying configuration documented
+
+**Key Features:**
+- WebSocket streaming at `wss://resumebuddy.cv/ws/interview`
+- Real-time transcription with OpenAI Whisper
+- AI interrupts based on coaching level (CONSERVATIVE/MODERATE/AGGRESSIVE)
+- Scheduled multi-round practice with email reminders
+- 50 credits per session (3 rounds)
+- Cost: ~$0.06 per session (STT + TTS + Grok LLM)
 
 ### Phase 11.17 (Oct 25) - Stripe Payment Integration ✅
 **Complete credit purchase system with Stripe Checkout:**

@@ -150,7 +150,7 @@ Great progress! You're ready for Round {round.round_number} of your interview pr
 
 🎤 Start Round {round.round_number}:
 Click the link below whenever you're ready:
-https://resumebuddy.cv/interview/session/{session.id}/round/{round.round_number}
+https://resumebuddy.cv/interview/{session.id}/{round.round_number}
 
 💡 Quick Tips:
 • Find a quiet space

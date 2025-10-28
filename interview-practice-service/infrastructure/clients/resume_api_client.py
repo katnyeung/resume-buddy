@@ -70,34 +70,64 @@ async def deduct_credits(user_id: str, amount: int, job_id: str, reason: str = "
         return response.json()
 
 
-async def get_resume_analysis(resume_id: int) -> Optional[Dict[str, Any]]:
+async def get_resume_analysis(resume_id: str) -> Optional[Dict[str, Any]]:
     """
     Get analyzed resume data for generating contextual questions.
 
     Args:
-        resume_id: Resume ID
+        resume_id: Resume ID (UUID string)
 
     Returns:
         {
-            "resumeId": 456,
-            "userId": 123,
+            "resumeId": "uuid",
+            "userId": "uuid",
             "fileName": "john_doe_resume.pdf",
             "status": "ANALYZED",
-            "structuredData": {
-                "personalInfo": {...},
-                "experiences": [...],
-                "skills": [...]
-            },
-            "analysis": {
-                "experiences": [...],
-                "skills": [...]
-            }
+            "structuredData": {...},
+            "analysis": {...}
         }
     """
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         try:
             response = await client.get(
-                f"{RESUME_API_URL}/resumes/{resume_id}/analysis",
+                f"{RESUME_API_URL}/resumes/{resume_id}",
+                headers=_get_headers()
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
+
+async def get_job_analysis(resume_id: str, experience_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get job analysis data for a specific experience (with skill assessments, O*NET mappings).
+
+    Args:
+        resume_id: Resume ID (UUID string)
+        experience_id: Experience ID (UUID string)
+
+    Returns:
+        {
+            "id": "analysis-uuid",
+            "resumeId": "resume-uuid",
+            "experienceId": "exp-uuid",
+            "analysisResult": {
+                "occupations": [...],  # O*NET mappings
+                "technicalSkills": [...],  # Skill assessments with credibility
+                "softSkills": [...],
+                "taskCoverage": {...},  # Radar chart data
+                "comprehensiveAnalysis": "..."
+            },
+            "createdAt": "2025-10-27T..."
+        }
+    """
+    async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        try:
+            response = await client.get(
+                f"{RESUME_API_URL}/resumes/{resume_id}/experiences/{experience_id}/analysis",
                 headers=_get_headers()
             )
             response.raise_for_status()

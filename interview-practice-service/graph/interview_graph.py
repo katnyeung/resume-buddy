@@ -11,6 +11,7 @@ class InterviewState(TypedDict):
     session_id: str
     user_id: int
     resume_data: dict
+    job_analysis_data: dict  # Rich analysis with skill assessments, O*NET mappings
     job_data: dict
     interview_type: str  # TECHNICAL | BEHAVIORAL | LEADERSHIP
     difficulty_level: str  # JUNIOR | MID | SENIOR | STAFF
@@ -44,9 +45,81 @@ async def generate_question(state: InterviewState) -> dict:
     """Node: Generate interview question based on context."""
     llm = get_grok_llm(temperature=0.8)
 
-    # Build context from resume
+    # Build context from job analysis (PRIORITY: rich data with skill assessments)
     resume_summary = ""
-    if state.get("resume_data"):
+    job_analysis_data = state.get("job_analysis_data")
+    print(f"[DEBUG] job_analysis_data is None: {job_analysis_data is None}")
+    print(f"[DEBUG] job_analysis_data type: {type(job_analysis_data)}")
+
+    if job_analysis_data:
+        analysis = job_analysis_data
+        if isinstance(analysis, dict):
+            print(f"[DEBUG] job_analysis_data keys: {list(analysis.keys())}")
+            print(f"[DEBUG] Has 'analysisResult'? {('analysisResult' in analysis)}")
+            print(f"[DEBUG] Has 'analysis_result'? {('analysis_result' in analysis)}")
+            print(f"[DEBUG] First 300 chars: {str(analysis)[:300]}")
+
+        # The API returns a flat structure, not nested under 'analysisResult'
+        # Use the data directly from the top level
+
+        # Get job title and seniority
+        job_title = analysis.get("normalizedTitle") or analysis.get("jobTitle", "Unknown Role")
+        seniority = analysis.get("seniorityLevel", "")
+        primary_soc = analysis.get("primarySocCode", "")
+
+        resume_summary = f"**Candidate's Experience:**\n"
+        if seniority:
+            resume_summary += f"- **{job_title}** ({seniority} level)\n"
+        else:
+            resume_summary += f"- **{job_title}**\n"
+
+        if primary_soc:
+            resume_summary += f"- O*NET Code: {primary_soc}\n"
+
+        # Add scores to show candidate's level
+        impact_score = analysis.get("impactScore")
+        tech_depth = analysis.get("technicalDepthScore")
+        leadership_score = analysis.get("leadershipScore")
+
+        if impact_score or tech_depth or leadership_score:
+            resume_summary += f"- Scores: Impact={impact_score}/10, Technical Depth={tech_depth}/10, Leadership={leadership_score}/10\n"
+
+        resume_summary += "\n"
+
+        # Get extracted skills (technical skills)
+        extracted_skills = analysis.get("extractedSkills", [])
+        if extracted_skills:
+            print(f"[DEBUG] First skill sample: {extracted_skills[0] if extracted_skills else 'EMPTY'}")
+            resume_summary += "**Key Technical Skills:**\n"
+            # Skills might be in different formats - try multiple field names
+            for skill in extracted_skills[:10]:  # Top 10 skills
+                if isinstance(skill, dict):
+                    # Try different key combinations
+                    name = (skill.get("skill") or skill.get("name") or
+                           skill.get("skillName") or skill.get("technology") or "")
+                    proficiency = (skill.get("proficiency") or skill.get("credibility") or
+                                 skill.get("level") or skill.get("strength") or "")
+                    if name:
+                        if proficiency:
+                            resume_summary += f"- {name} ({proficiency})\n"
+                        else:
+                            resume_summary += f"- {name}\n"
+                elif isinstance(skill, str):
+                    resume_summary += f"- {skill}\n"
+            resume_summary += "\n"
+
+        # Get key strengths
+        key_strengths = analysis.get("keyStrengths", [])
+        if key_strengths:
+            resume_summary += f"**Key Strengths:** {', '.join(key_strengths[:5])}\n\n"
+
+        # Get recruiter summary (comprehensive context)
+        recruiter_summary = analysis.get("recruiterSummary", "")
+        if recruiter_summary:
+            resume_summary += f"**Experience Summary:** {recruiter_summary[:400]}...\n"
+
+    # Fallback to raw resume if no job_analysis available
+    elif state.get("resume_data"):
         resume = state["resume_data"]
         experiences = resume.get("structuredData", {}).get("experiences", [])
         skills = resume.get("structuredData", {}).get("skills", [])
@@ -68,17 +141,25 @@ async def generate_question(state: InterviewState) -> dict:
                 skill_list = ", ".join([s.get("name", s) if isinstance(s, dict) else str(s) for s in skills[:10]])
                 resume_summary += f"\n**Key Skills:** {skill_list}\n"
 
-    # Build context from job
+    # Build context from job listing
     job_summary = ""
     if state.get("job_data"):
         job = state["job_data"]
-        job_title = job.get("title", "Unknown Role")
-        job_company = job.get("company", "Unknown Company")
-        job_description = job.get("description", "")[:500]  # First 500 chars
+        print(f"[DEBUG] job_data keys: {list(job.keys()) if isinstance(job, dict) else 'NOT A DICT'}")
 
-        job_summary = f"**Target Role:**\n{job_title} at {job_company}\n"
+        # Try different field names
+        job_title = job.get("title") or job.get("jobTitle") or job.get("position") or "AI/ML Engineer Role"
+        job_company = job.get("company") or job.get("companyName") or job.get("employer") or "Technology Company"
+        job_description = job.get("description") or job.get("jobDescription") or ""
+
+        # Extract key requirements from description
+        job_summary = f"**Target Job Posting:**\n{job_title} at {job_company}\n\n"
         if job_description:
-            job_summary += f"Description: {job_description}...\n"
+            # Limit to 800 chars to fit in prompt
+            desc_preview = job_description[:800]
+            if len(job_description) > 800:
+                desc_preview += "..."
+            job_summary += f"**Job Description:**\n{desc_preview}\n"
 
     # Previous conversation context
     prev_questions = [
@@ -87,35 +168,56 @@ async def generate_question(state: InterviewState) -> dict:
         if msg["role"] == "assistant" and msg.get("type") == "question"
     ]
 
-    prompt = f"""You are an expert technical interviewer. Generate a {state['interview_type']} interview question for a {state['difficulty_level']}-level candidate.
+    # Debug: Print what context we're sending to LLM
+    print(f"\n{'='*80}")
+    print(f"[DEBUG] Question Generation Context for Round {state['current_round']}")
+    print(f"{'='*80}")
+    print(f"JOB SUMMARY ({len(job_summary)} chars):\n{job_summary[:500]}...")
+    print(f"\nRESUME SUMMARY ({len(resume_summary)} chars):\n{resume_summary[:500]}...")
+    print(f"{'='*80}\n")
 
+    prompt = f"""You are an expert interviewer for the job posting below. The candidate is practicing to land THIS specific role.
+
+═══════════════════════════════════════════════════════════════
+TARGET JOB (What they're applying for):
+{job_summary}
+═══════════════════════════════════════════════════════════════
+
+CANDIDATE'S BACKGROUND (What they've proven they can do):
 {resume_summary}
 
-{job_summary}
+Interview Type: {state['interview_type']}
+Difficulty Level: {state['difficulty_level']}
+Round: {state['current_round']}/{state['max_rounds']}
 
 Interview Type Guidelines:
-- TECHNICAL: System design, architecture, scalability, coding patterns, tech stack decisions
-- BEHAVIORAL: STAR method (Situation, Task, Action, Result), teamwork, conflict resolution
-- LEADERSHIP: Strategic thinking, mentorship, prioritization, cross-team collaboration
+- TECHNICAL: Ask how their past experience relates to the job's technical requirements (system design, specific tech stack, scalability, testing)
+- BEHAVIORAL: Ask for STAR examples that demonstrate skills needed for this job (teamwork, problem-solving, handling pressure)
+- LEADERSHIP: Ask about leadership/mentoring experiences that align with the job's scope (if job needs team lead, ask about team building)
 
 Difficulty Guidelines:
-- JUNIOR: Individual contributions, basic concepts, learning experiences
-- MID: System thinking, cross-functional work, moderate complexity
-- SENIOR: Architecture, technical leadership, business impact, strategic decisions
-- STAFF: Organizational strategy, long-term vision, company-wide influence
+- JUNIOR: Focus on foundational skills, learning ability, and hands-on work
+- MID: Focus on cross-functional collaboration, moderate system design, mentoring juniors
+- SENIOR: Focus on architecture, technical strategy, business impact, scaling teams
+- STAFF: Focus on organizational vision, technical direction, cross-company influence
 
 Previous questions asked: {prev_questions}
 
-Round: {state['current_round']}/{state['max_rounds']}
+Generate ONE interview question that:
+1. **PRIMARY FOCUS: What does the TARGET JOB need?** (e.g., if job needs React + TypeScript, ask about that)
+2. **SECONDARY: Connect to their background** - Ask them to draw from their proven skills to demonstrate they can do the job
+3. **SPECIFIC EXAMPLE**: Ask for a concrete story/project that shows they have the capability the job requires
+4. **DIFFERENT TOPIC**: Must explore a NEW area from the job requirements (not previous questions)
 
-Generate ONE specific question that:
-1. References their actual experience from the resume
-2. Is appropriate for the difficulty level
-3. Encourages storytelling and specificity
-4. **MUST be on a DIFFERENT topic** than previous questions - explore new areas!
-5. Covers different aspects (e.g., if previous was scalability, ask about team collaboration, debugging, or architecture trade-offs)
+Example (if job needs "scale microservices" and they have "Docker/K8s with STRONG credibility"):
+❌ BAD: "Tell me about a time you worked on a machine learning project" (ignores job needs)
+✅ GOOD: "This role requires scaling microservices to handle high traffic. Can you describe a time you used Docker or Kubernetes to improve system scalability? What challenges did you face and how did you solve them?"
 
-IMPORTANT: DO NOT repeat similar themes. Move to a completely new topic each round.
+CRITICAL:
+- Focus on what THE JOB NEEDS first (job description requirements)
+- Then ask candidate to prove they can do it with a specific example from their past
+- DO NOT ask generic questions - reference actual job requirements
+- DO NOT repeat topics from previous rounds
 
 Return ONLY the question text, nothing else."""
 

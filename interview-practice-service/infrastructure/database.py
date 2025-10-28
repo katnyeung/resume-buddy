@@ -8,8 +8,21 @@ from sqlalchemy.orm import sessionmaker
 # Load environment variables first (critical for DATABASE_URL)
 load_dotenv()
 
-# Support both PostgreSQL (production) and MySQL (legacy)
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Support both DB_URL (backend convention) and DATABASE_URL (fallback)
+DATABASE_URL = os.getenv("DB_URL") or os.getenv("DATABASE_URL")
+
+# If DB_URL is JDBC format (from Java backend), convert to SQLAlchemy format
+if DATABASE_URL and DATABASE_URL.startswith("jdbc:"):
+    # jdbc:postgresql://host:port/dbname?params -> postgresql://user:pass@host:port/dbname?params
+    DATABASE_URL = DATABASE_URL.replace("jdbc:", "")
+    # Need to add username and password from separate env vars
+    DB_USERNAME = os.getenv("DB_USERNAME")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    if DB_USERNAME and DB_PASSWORD:
+        # Extract host and remaining parts
+        if "://" in DATABASE_URL:
+            protocol, rest = DATABASE_URL.split("://", 1)
+            DATABASE_URL = f"{protocol}://{DB_USERNAME}:{DB_PASSWORD}@{rest}"
 
 if not DATABASE_URL:
     # Fallback to MySQL for local development

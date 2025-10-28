@@ -19,6 +19,7 @@ class InterviewSession(Base):
     # Foreign Keys (UUIDs to match Resume Buddy system)
     user_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     resume_id = Column(UUID(as_uuid=True), nullable=False)
+    experience_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # From job_analysis table
     job_listing_id = Column(UUID(as_uuid=True), nullable=True)
 
     # Session Configuration
@@ -59,6 +60,7 @@ class InterviewSession(Base):
             "id": str(self.id),
             "user_id": self.user_id,
             "resume_id": self.resume_id,
+            "experience_id": self.experience_id,
             "job_listing_id": self.job_listing_id,
             "interview_type": self.interview_type,
             "difficulty_level": self.difficulty_level,
