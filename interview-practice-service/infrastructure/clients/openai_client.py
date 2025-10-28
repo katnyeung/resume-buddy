@@ -1,13 +1,8 @@
 """OpenAI client for STT (Whisper) and TTS."""
 import os
+import subprocess
 from pathlib import Path
 from openai import AsyncOpenAI
-
-try:
-    from pydub import AudioSegment
-    PYDUB_AVAILABLE = True
-except ImportError:
-    PYDUB_AVAILABLE = False
 
 
 def get_client() -> AsyncOpenAI:
@@ -15,75 +10,74 @@ def get_client() -> AsyncOpenAI:
     return AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-async def transcribe_audio(audio_file_path: str, skip_validation: bool = False) -> str:
+async def transcribe_audio(audio_file_path: str) -> str:
     """
     Transcribe audio file to text using Whisper API.
 
+    For WebM files (including fragmented streaming chunks), converts to WAV first
+    using pydub + ffmpeg to ensure Whisper accepts the file.
+
     Args:
         audio_file_path: Path to audio file (supports mp3, mp4, mpeg, mpga, m4a, wav, webm)
-        skip_validation: If True, skip file validation and send directly to Whisper
 
     Returns:
-        Transcribed text
+        Transcribed text (empty string if file too small or conversion fails)
     """
     client = get_client()
+
+    # Check file size first
+    if os.path.getsize(audio_file_path) < 1000:  # Less than 1KB
+        print(f"Audio file too small ({os.path.getsize(audio_file_path)} bytes), skipping")
+        return ""
 
     # Determine file extension
     file_ext = Path(audio_file_path).suffix.lower()
 
-    # Skip conversion for streaming chunks (they're often incomplete WebM fragments)
-    if skip_validation or file_ext != '.webm':
-        # Send directly to Whisper
-        try:
-            with open(audio_file_path, "rb") as audio_file:
-                # Read file content
-                audio_content = audio_file.read()
-
-                # Skip if file is too small (likely corrupted)
-                if len(audio_content) < 1000:  # Less than 1KB
-                    print(f"Audio file too small ({len(audio_content)} bytes), skipping")
-                    return ""
-
-                # Create BytesIO object
-                from io import BytesIO
-                audio_bytes = BytesIO(audio_content)
-                audio_bytes.name = f"audio{file_ext}"  # Whisper needs a filename
-
-                transcript = await client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_bytes,
-                    language="en"
-                )
-            return transcript.text
-        except Exception as e:
-            print(f"Transcription error: {e}")
-            return ""
-
-    # For non-streaming files, try conversion
-    converted_path = None
-    if file_ext == '.webm' and PYDUB_AVAILABLE:
-        try:
-            audio = AudioSegment.from_file(audio_file_path, format="webm")
-            converted_path = audio_file_path.replace('.webm', '.wav')
-            audio.export(converted_path, format="wav")
-            audio_file_path = converted_path
-            file_ext = '.wav'
-        except Exception as e:
-            print(f"Audio conversion failed, using original: {e}")
-            converted_path = None
-
+    # Send WebM directly to Whisper (no conversion needed!)
+    # Whisper API supports WebM format natively
+    # Benefits: Smaller file size (compressed), faster upload, no ffmpeg overhead
     try:
         with open(audio_file_path, "rb") as audio_file:
-            transcript = await client.audio.transcriptions.create(
+            # Read file content
+            audio_content = audio_file.read()
+            print(f"[Transcribe] Sending WebM directly to Whisper ({len(audio_content)} bytes)")
+
+            # Create BytesIO object for Whisper API
+            from io import BytesIO
+            audio_bytes = BytesIO(audio_content)
+            audio_bytes.name = "audio.webm"  # Whisper needs a filename with extension
+
+            # Request word-level timestamps to detect hallucinations
+            # Hallucinated words have identical start/end timestamps
+            response = await client.audio.transcriptions.create(
                 model="whisper-1",
-                file=audio_file,
-                language="en"
+                file=audio_bytes,
+                language="en",
+                response_format="verbose_json",  # Required for timestamp_granularities
+                timestamp_granularities=["word"]
             )
-        return transcript.text
-    finally:
-        # Clean up converted file
-        if converted_path and os.path.exists(converted_path):
-            os.remove(converted_path)
+
+            # Filter out hallucinated words (same start/end timestamp)
+            if hasattr(response, 'words') and response.words:
+                filtered_words = []
+                for word in response.words:
+                    # Check if word has different start/end times (real speech)
+                    # Hallucinations have start == end (no actual audio duration)
+                    if abs(word.end - word.start) > 0.01:  # At least 10ms duration
+                        filtered_words.append(word.word)
+                    else:
+                        print(f"[Transcribe] Filtered hallucinated word: '{word.word}' (start={word.start}, end={word.end})")
+
+                filtered_text = " ".join(filtered_words).strip()
+                print(f"[Transcribe] Original: {len(response.words)} words, Filtered: {len(filtered_words)} words")
+                return filtered_text
+            else:
+                # Fallback to text if words not available
+                return response.text if hasattr(response, 'text') else ""
+
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        return ""
 
 
 async def text_to_speech(text: str, output_path: str, voice: str = "alloy") -> str:

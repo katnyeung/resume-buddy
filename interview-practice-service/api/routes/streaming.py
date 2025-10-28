@@ -100,11 +100,9 @@ async def stream_interview_round(
 
         # Initialize components
         audio_buffer = AudioBuffer()
-        vad = VoiceActivityDetector(silence_threshold_ms=800)
+        vad = VoiceActivityDetector(silence_threshold_ms=10000)  # 10 seconds of silence to end speech
         interrupt_agent = InterruptAgent()
         last_interrupt_time = 0
-        last_transcription_time = None  # Track when we last got transcription (None = haven't spoken yet)
-        SILENCE_TIMEOUT = 15  # If no transcription for 15 seconds, assume user finished
 
         # Generate question (same logic as REST endpoint)
         from infrastructure.clients.resume_api_client import get_resume_analysis, get_job_analysis
@@ -148,6 +146,36 @@ async def stream_interview_round(
             print(f"[WebSocket] Warning: Could not fetch job data: {e}")
             # Continue with empty job data
 
+        # Check if there are previous rounds - extract already-asked topics
+        asked_topics = []
+        if round_number > 1:
+            # Query previous rounds to get their questions
+            try:
+                db_gen = get_db()
+                db = next(db_gen)
+                previous_rounds = db.query(SessionRound).filter(
+                    SessionRound.session_id == session_id,
+                    SessionRound.round_number < round_number,
+                    SessionRound.status == "COMPLETED"
+                ).all()
+
+                # Extract keywords from previous questions (simple approach)
+                common_tech = ["spring boot", "kubernetes", "docker", "terraform", "jenkins",
+                               "aws", "azure", "gcp", "microservices", "api", "database",
+                               "redis", "kafka", "mysql", "postgresql", "mongodb"]
+
+                for prev_round in previous_rounds:
+                    if prev_round.question_text:
+                        question_lower = prev_round.question_text.lower()
+                        for tech in common_tech:
+                            if tech in question_lower:
+                                asked_topics.append(tech)
+
+                if asked_topics:
+                    print(f"[WebSocket] Already asked about: {', '.join(set(asked_topics))}")
+            except Exception as e:
+                print(f"[WebSocket] Warning: Could not fetch previous rounds: {e}")
+
         initial_state = {
             "session_id": session_id,
             "user_id": session.user_id,
@@ -164,7 +192,8 @@ async def stream_interview_round(
             "question": "",
             "user_answer": "",
             "conversation_history": [],
-            "score": 0.0
+            "score": 0.0,
+            "asked_topics": list(set(asked_topics))  # Unique topics already covered
         }
 
         # Generate question
@@ -194,7 +223,8 @@ async def stream_interview_round(
         chunks_received = 0
         failed_transcriptions = 0
         MAX_FAILED_TRANSCRIPTIONS = 3
-        is_recording_active = True  # Flag to track if we should accept audio chunks
+        consecutive_empty_transcriptions = 0  # Track consecutive empty results (user stopped speaking)
+        MAX_EMPTY_BEFORE_END = 1  # End after 1 empty transcription (10s of silence) - faster detection
 
         # Set a maximum recording time (3 minutes - enough for a thorough answer)
         MAX_RECORDING_TIME = 180
@@ -206,14 +236,6 @@ async def stream_interview_round(
                 if elapsed > MAX_RECORDING_TIME:
                     print(f"[WebSocket] Max recording time reached, ending answer")
                     break
-
-                # Check if user stopped speaking (no transcription for SILENCE_TIMEOUT seconds)
-                # ONLY check if we're actively recording (not during interrupts)
-                if is_recording_active and last_transcription_time is not None:
-                    time_since_last_transcription = time.time() - last_transcription_time
-                    if time_since_last_transcription > SILENCE_TIMEOUT and full_transcript:
-                        print(f"[WebSocket] No transcription for {SILENCE_TIMEOUT}s, user finished speaking")
-                        break
 
                 # Receive audio chunk from client (with timeout)
                 try:
@@ -232,48 +254,86 @@ async def stream_interview_round(
                     raise
 
                 if "bytes" in data:
-                    # Only accept audio chunks if recording is active
-                    if not is_recording_active:
-                        # Silently ignore chunks during interrupt (reduces log spam)
-                        continue
-
                     audio_chunk = data["bytes"]
                     audio_buffer.append(audio_chunk)
                     chunks_received += 1
 
-                    # Process VAD
+                    # Process VAD on every chunk
                     is_speech = vad.process_frame(audio_chunk)
+
+                    # Check if user stopped speaking (10s silence detected by VAD)
+                    if vad.is_speech_ended():
+                        print(f"[WebSocket] Speech ended (VAD: 10s silence detected)")
+                        break
 
                     # Transcribe every 10 seconds of audio (longer chunks are more reliable for WebM)
                     buffer_duration = audio_buffer.duration_seconds()
                     if buffer_duration >= 10.0:
-                        print(f"[WebSocket] Buffer reached {buffer_duration:.1f}s, transcribing...")
+                        print(f"[WebSocket] Buffer reached {buffer_duration:.1f}s, checking speech...")
 
-                        # Save buffer to temp file for transcription
+                        # Check if buffer contains actual speech using VAD
+                        # If user has been speaking, transcribe. If pure silence, skip.
+                        if not vad.is_speaking:
+                            print(f"[WebSocket] Buffer contains only silence, skipping transcription")
+                            audio_buffer.clear()
+                            continue
+
+                        print(f"[WebSocket] Speech detected in buffer, transcribing...")
+
+                        # Save ACCUMULATED buffer to temp file
+                        # Use get_accumulated_with_header() which prepends stored header if available
                         temp_audio_path = os.path.join(
                             tempfile.gettempdir(),
-                            f"chunk_{session_id}_{round_number}_{time.time()}.webm"
+                            f"accumulated_{session_id}_{round_number}_{time.time()}.webm"
                         )
-                        buffer_data = audio_buffer.get_audio()
-                        print(f"[WebSocket] Buffer size: {len(buffer_data)} bytes")
+                        accumulated_data = audio_buffer.get_accumulated_with_header()
+                        has_stored_header = audio_buffer.stored_header is not None
+                        print(f"[WebSocket] Accumulated audio size: {len(accumulated_data)} bytes ({len(audio_buffer.accumulated_chunks)} chunks, header: {has_stored_header})")
 
                         with open(temp_audio_path, "wb") as f:
-                            f.write(buffer_data)
+                            f.write(accumulated_data)
 
-                        # IMPORTANT: Clear buffer immediately after saving to prevent duplicate transcriptions
-                        # We have the data saved to disk, buffer can be cleared now
+                        # Clear sliding window buffer (but keep accumulated_chunks for next transcription)
                         audio_buffer.clear()
-                        print(f"[WebSocket] Cleared buffer after saving to disk")
+                        print(f"[WebSocket] Cleared sliding window buffer")
 
-                        # Transcribe chunk (skip validation for streaming fragments)
+                        # Transcribe chunk (WebM will be converted to WAV automatically)
                         try:
-                            chunk_transcript = await transcribe_audio(temp_audio_path, skip_validation=True)
+                            chunk_transcript = await transcribe_audio(temp_audio_path)
 
-                            if chunk_transcript:  # Only process if we got actual text
+                            # Filter out Whisper hallucinations (common silence patterns)
+                            if chunk_transcript:
+                                cleaned = chunk_transcript.strip().lower()
+
+                                # Common Whisper hallucinations during silence
+                                hallucinations = [
+                                    ".", "..", "...", ". .", ". . .", "thank you", "thanks",
+                                    "bye", "goodbye", "okay", "ok", "um", "uh", "hmm"
+                                ]
+
+                                # Check if entire transcript is just hallucination
+                                is_hallucination = cleaned in hallucinations or all(c in '. ' for c in cleaned)
+
+                                if is_hallucination:
+                                    print(f"[WebSocket] Filtered Whisper hallucination: '{chunk_transcript}'")
+                                    chunk_transcript = None  # Treat as silence
+
+                            if chunk_transcript:  # Only process if we got actual text (not hallucination)
                                 full_transcript += " " + chunk_transcript
                                 failed_transcriptions = 0  # Reset failure counter
-                                last_transcription_time = time.time()  # Update last transcription time (for VAD)
-                                print(f"[WebSocket] Updated last transcription time (for silence detection)")
+                                consecutive_empty_transcriptions = 0  # Reset empty counter (user is speaking)
+
+                                # CRITICAL: After first successful transcription, store WebM header for reuse
+                                # This solves the "EBML header parsing failed" issue on subsequent chunks
+                                if audio_buffer.stored_header is None:
+                                    print(f"[WebSocket] First successful transcription - extracting WebM header")
+                                    audio_buffer.store_header_from_file(temp_audio_path)
+
+                                # CRITICAL: Clear accumulated chunks to prevent re-transcribing same audio
+                                # We keep the stored_header (reused for next cycle)
+                                # This prevents duplicate transcriptions and growing memory usage
+                                audio_buffer.accumulated_chunks = []
+                                print(f"[WebSocket] Cleared accumulated chunks (keeping header for next cycle)")
 
                                 # Send live transcript to client
                                 await websocket.send_json({
@@ -314,9 +374,11 @@ async def stream_interview_round(
                                             print(f"[WebSocket] AI decided to interrupt: {decision['reason']}")
                                             did_interrupt = True  # Mark that we interrupted
 
-                                            # Clear buffer - client will restart MediaRecorder with fresh WebM stream
+                                            # Reset accumulator - client will restart MediaRecorder with fresh WebM stream
+                                            # This is CRITICAL: new MediaRecorder = new WebM header
                                             audio_buffer.clear()
-                                            print(f"[WebSocket] Cleared buffer (interrupting - client will restart with fresh WebM stream)")
+                                            audio_buffer.reset_accumulator()
+                                            print(f"[WebSocket] Cleared buffer and reset accumulator (client will restart MediaRecorder)")
 
                                             # Generate interrupt TTS
                                             interrupt_audio_path = os.path.join(
@@ -340,14 +402,10 @@ async def stream_interview_round(
 
                                             last_interrupt_time = current_time
 
-                                            # Stop accepting audio chunks during interrupt
-                                            is_recording_active = False
-                                            print(f"[WebSocket] Disabled audio chunk acceptance during interrupt")
-
-                                            # Reset timers after interrupt so user can continue answering
+                                            # Reset timer and VAD after interrupt so user can continue answering
                                             start_time = time.time()
-                                            last_transcription_time = None  # Reset to None - wait for next transcription
-                                            print(f"[WebSocket] Reset recording timer after interrupt")
+                                            vad.reset()  # Reset VAD to start fresh silence detection
+                                            print(f"[WebSocket] Reset recording timer and VAD after interrupt")
                                         else:
                                             # AI decided NOT to interrupt
                                             # Just update the timestamp
@@ -355,22 +413,17 @@ async def stream_interview_round(
                                             print(f"[WebSocket] AI decided not to interrupt, will check again in 30s")
 
                                             # DON'T reset start_time - let the full answer continue until naturally complete
-
-                                # ONLY send silent restart if we didn't just interrupt
-                                # (if we interrupted, client will restart via the interrupt message)
-                                if not did_interrupt:
-                                    is_recording_active = False
-                                    await websocket.send_json({
-                                        "type": "silent_restart",
-                                        "message": "Continue..."
-                                    })
-                                    print(f"[WebSocket] Sent silent_restart to keep WebM stream fresh")
                             else:
-                                # Empty transcription - could be silence
+                                # Empty transcription - could be silence or hallucination filtered
                                 if full_transcript:
-                                    # We already have some transcript, so empty result likely means user stopped speaking
-                                    # Let the 15-second silence timeout handle this, don't count as failure
-                                    print(f"[WebSocket] Empty transcription (likely silence), letting timeout handle it")
+                                    # We already have some transcript, empty result means user stopped speaking
+                                    consecutive_empty_transcriptions += 1
+                                    print(f"[WebSocket] Empty transcription #{consecutive_empty_transcriptions} (likely silence)")
+
+                                    # If we get empty transcription, user is done (10s silence)
+                                    if consecutive_empty_transcriptions >= MAX_EMPTY_BEFORE_END:
+                                        print(f"[WebSocket] User stopped speaking ({MAX_EMPTY_BEFORE_END} empty transcription = 10s silence)")
+                                        break
                                 else:
                                     # No transcript yet, this is a real failure
                                     failed_transcriptions += 1
@@ -395,37 +448,12 @@ async def stream_interview_round(
                         # Buffer already cleared after successful transcription (line 253)
                         # No need to clear again here
 
-                    # Check if user stopped speaking
-                    if vad.is_speech_ended():
-                        # User finished answering
-                        break
-
                 elif "text" in data:
                     # Client sent control message
                     msg = data["text"]
                     if msg == "end_answer":
                         print(f"[WebSocket] Client requested end")
                         break
-                    elif msg == "recording_restarted":
-                        # Client has restarted MediaRecorder, we can accept chunks again
-                        is_recording_active = True
-                        # Don't reset silence timer on restart - keep tracking from last transcription
-                        print(f"[WebSocket] Recording restarted, accepting audio chunks again")
-
-                # Check for 3-5 second silence (if no transcription for 5 seconds)
-                # Only check if we've had at least ONE successful transcription
-                if last_transcription_time is not None:
-                    current_time = time.time()
-                    silence_duration = current_time - last_transcription_time
-
-                    if chunks_received > 30 and silence_duration >= 5.0:  # 5 seconds of silence
-                        print(f"[WebSocket] Speech ended (5+ seconds of silence detected)")
-                        break
-
-                # Also check VAD for additional confirmation
-                if chunks_received > 30 and vad.is_speech_ended():
-                    print(f"[WebSocket] Speech ended (VAD detected silence)")
-                    break
 
         except WebSocketDisconnect:
             print(f"Client disconnected from session {session_id}")

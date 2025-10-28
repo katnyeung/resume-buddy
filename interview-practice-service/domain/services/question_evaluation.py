@@ -1,6 +1,7 @@
 """Question generation and evaluation without LangGraph dependency."""
 import json
-from typing import Dict, Any
+import random
+from typing import Dict, Any, List
 from infrastructure.clients.grok_client import get_grok_llm, generate_json_completion
 
 
@@ -18,80 +19,125 @@ async def generate_question(state: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dictionary with "question" key
     """
-    llm = get_grok_llm(temperature=0.8)
+    llm = get_grok_llm(temperature=0.9)  # Higher temperature for more varied questions
 
-    # Build context from job analysis (PRIORITY: rich data with skill assessments)
+    # Build context from job analysis (SIMPLIFIED - use description lines only)
     resume_summary = ""
     job_analysis_data = state.get("job_analysis_data")
-    print(f"[DEBUG] job_analysis_data is None: {job_analysis_data is None}")
-    print(f"[DEBUG] job_analysis_data type: {type(job_analysis_data)}")
 
     if job_analysis_data:
         analysis = job_analysis_data
+
+        # DEBUG: Check what fields we actually have and extract nested data
         if isinstance(analysis, dict):
-            print(f"[DEBUG] job_analysis_data keys: {list(analysis.keys())}")
-            print(f"[DEBUG] Has 'analysisResult'? {('analysisResult' in analysis)}")
-            print(f"[DEBUG] Has 'analysis_result'? {('analysis_result' in analysis)}")
-            print(f"[DEBUG] First 300 chars: {str(analysis)[:300]}")
+            print(f"[DEBUG] job_analysis_data top-level keys: {list(analysis.keys())}")
 
-        # The API returns a flat structure, not nested under 'analysisResult'
-        # Use the data directly from the top level
+            # Data is nested under 'analysis_result' or 'analysisResult' column
+            for key in ['analysis_result', 'analysisResult', 'analysis', 'data', 'result']:
+                if key in analysis:
+                    print(f"[DEBUG] Found nested data under '{key}' key")
+                    nested = analysis[key]
+                    if isinstance(nested, dict):
+                        print(f"[DEBUG] Nested keys: {list(nested.keys())[:10]}...")  # First 10 keys
+                        if 'descriptionLines' in nested or 'normalizedTitle' in nested:
+                            print(f"[DEBUG] ✅ Using nested data from '{key}'")
+                            analysis = nested  # Use nested data
+                            break
+                    elif isinstance(nested, str):
+                        # If it's a JSON string, parse it
+                        try:
+                            import json
+                            nested = json.loads(nested)
+                            print(f"[DEBUG] Parsed JSON string from '{key}'")
+                            if isinstance(nested, dict):
+                                analysis = nested
+                                break
+                        except:
+                            pass
 
-        # Get job title and seniority
+            print(f"[DEBUG] Final analysis keys: {list(analysis.keys())[:10] if isinstance(analysis, dict) else 'NOT A DICT'}...")
+            print(f"[DEBUG] Has descriptionLines: {'descriptionLines' in analysis if isinstance(analysis, dict) else False}")
+
+        # Get job title and seniority (basic header)
         job_title = analysis.get("normalizedTitle") or analysis.get("jobTitle", "Unknown Role")
         seniority = analysis.get("seniorityLevel", "")
-        primary_soc = analysis.get("primarySocCode", "")
 
-        resume_summary = f"**Candidate's Experience:**\n"
+        resume_summary = f"**Candidate's Experience: {job_title}**"
         if seniority:
-            resume_summary += f"- **{job_title}** ({seniority} level)\n"
+            resume_summary += f" ({seniority} level)\n\n"
         else:
-            resume_summary += f"- **{job_title}**\n"
+            resume_summary += "\n\n"
 
-        if primary_soc:
-            resume_summary += f"- O*NET Code: {primary_soc}\n"
+        # Get description lines (the actual resume text - what they wrote)
+        # Field name is 'descriptionLineMappings' not 'descriptionLines'
+        description_lines = analysis.get("descriptionLineMappings", [])
 
-        # Add scores to show candidate's level
-        impact_score = analysis.get("impactScore")
-        tech_depth = analysis.get("technicalDepthScore")
-        leadership_score = analysis.get("leadershipScore")
+        # FILTER OUT already-asked topics
+        asked_topics = state.get("asked_topics", [])
 
-        if impact_score or tech_depth or leadership_score:
-            resume_summary += f"- Scores: Impact={impact_score}/10, Technical Depth={tech_depth}/10, Leadership={leadership_score}/10\n"
+        # RANDOMIZE: Shuffle description lines so LLM doesn't always pick the first one
+        if description_lines:
+            # Convert to list of strings and extract potentialQuestions
+            lines_text = []
+            all_potential_questions = []
+            all_stars_analysis = []
 
-        resume_summary += "\n"
+            for line in description_lines:
+                if isinstance(line, dict):
+                    text = line.get("text", "")
+                    if text:
+                        lines_text.append(text)
 
-        # Get extracted skills (technical skills)
-        extracted_skills = analysis.get("extractedSkills", [])
-        if extracted_skills:
-            print(f"[DEBUG] First skill sample: {extracted_skills[0] if extracted_skills else 'EMPTY'}")
-            resume_summary += "**Key Technical Skills:**\n"
-            # Skills might be in different formats - try multiple field names
-            for skill in extracted_skills[:10]:  # Top 10 skills
-                if isinstance(skill, dict):
-                    # Try different key combinations
-                    name = (skill.get("skill") or skill.get("name") or
-                           skill.get("skillName") or skill.get("technology") or "")
-                    proficiency = (skill.get("proficiency") or skill.get("credibility") or
-                                 skill.get("level") or skill.get("strength") or "")
-                    if name:
-                        if proficiency:
-                            resume_summary += f"- {name} ({proficiency})\n"
-                        else:
-                            resume_summary += f"- {name}\n"
-                elif isinstance(skill, str):
-                    resume_summary += f"- {skill}\n"
+                    # Extract potentialQuestions from each line mapping
+                    pot_q = line.get("potentialQuestions", [])
+                    if pot_q:
+                        all_potential_questions.extend(pot_q)
+
+                    # Extract starsAnalysis from each line mapping
+                    stars = line.get("starsAnalysis", [])
+                    if stars:
+                        all_stars_analysis.extend(stars)
+
+                elif isinstance(line, str):
+                    lines_text.append(line)
+
+            # FILTER: Remove lines that contain already-asked topics
+            if asked_topics:
+                filtered_lines = []
+                for line in lines_text:
+                    line_lower = line.lower()
+                    # Check if this line contains any already-asked topic
+                    contains_asked_topic = any(topic.lower() in line_lower for topic in asked_topics)
+                    if not contains_asked_topic:
+                        filtered_lines.append(line)
+                    else:
+                        print(f"[DEBUG] Filtered out line containing {asked_topics}: {line[:60]}...")
+                lines_text = filtered_lines if filtered_lines else lines_text  # Keep all if nothing left
+
+            # Shuffle the order (different each time!)
+            random.shuffle(lines_text)
+
+            resume_summary += "**What They Actually Did:**\n"
+            for text in lines_text[:8]:  # Top 8 (now in random order, without already-asked topics)
+                resume_summary += f"• {text}\n"
             resume_summary += "\n"
 
-        # Get key strengths
-        key_strengths = analysis.get("keyStrengths", [])
-        if key_strengths:
-            resume_summary += f"**Key Strengths:** {', '.join(key_strengths[:5])}\n\n"
+        # Use extracted potential questions from descriptionLineMappings
+        if all_potential_questions:
+            # RANDOMIZE: Shuffle potential questions
+            random.shuffle(all_potential_questions)
+            resume_summary += "**Interview Coach Suggestions (what to ask about):**\n"
+            for q in all_potential_questions[:5]:  # Top 5 suggested areas to probe (random order)
+                resume_summary += f"- {q}\n"
+            resume_summary += "\n"
 
-        # Get recruiter summary (comprehensive context)
-        recruiter_summary = analysis.get("recruiterSummary", "")
-        if recruiter_summary:
-            resume_summary += f"**Experience Summary:** {recruiter_summary[:400]}...\n"
+        # Use extracted STARS analysis from descriptionLineMappings
+        if all_stars_analysis:
+            # RANDOMIZE: Shuffle STARS suggestions
+            random.shuffle(all_stars_analysis)
+            resume_summary += "**Areas to Dig Deeper:**\n"
+            for suggestion in all_stars_analysis[:5]:  # Top 5 improvement areas (random order)
+                resume_summary += f"- {suggestion}\n"
 
     # Fallback to raw resume if no job_analysis available
     elif state.get("resume_data"):
@@ -177,22 +223,22 @@ Difficulty Guidelines:
 - STAFF: Focus on organizational strategy, cross-team influence, long-term vision
 
 INSTRUCTIONS:
-1. Review the TARGET JOB description first - what does THIS role actually need?
-2. Look at the candidate's background - what have they proven they can do?
-3. **Connect the dots**: Ask about their RELEVANT past experience that maps to what the job needs
-4. Be specific: Reference the job's tech stack, challenges, or requirements
-5. Ask concise questions (1-2 sentences max)
-6. Avoid generic questions like "Tell me about yourself"
 
-Examples of GOOD questions:
-- "This role requires building microservices with Spring Boot on GCP. Can you walk me through how you achieved 99.95% uptime in your current system?"
-- "Given your experience leading a distributed team across 3 time zones, how did you handle code review processes and maintain quality?"
+You are a recruiter interviewing a candidate for the TARGET JOB above.
 
-Examples of BAD questions:
-- "Tell me about your experience with Java" (too generic)
-- "What's your biggest weakness?" (not tied to job needs)
+Your goal: Assess if the candidate's experience matches what the job needs.
 
-Generate ONE interview question that connects the job's needs to the candidate's proven experience."""
+Ask ONE natural question that:
+- Picks from "What They Actually Did" list above (already filtered - no repeated topics!)
+- Connects their experience to job requirements
+- Sounds like a real conversation
+- Max 15 words
+
+Generate ONE question now:"""
+
+    # Add exclusion warning if we have asked topics
+    if state.get("asked_topics"):
+        prompt += f"\n\n⚠️ NOTE: The resume lines above have been FILTERED to remove topics you already asked about: {', '.join(state['asked_topics'])}. Ask about something NEW."
 
     try:
         response = await llm.ainvoke(prompt)
