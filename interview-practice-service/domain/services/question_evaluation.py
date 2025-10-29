@@ -235,17 +235,11 @@ Your goal: Assess if the candidate's experience matches what the job needs.
 
 **CRITICAL: Pick a DIVERSE, INTERESTING topic from their background!**
 
-The "What They Actually Did" list is RANDOMIZED - pick the FIRST interesting accomplishment, NOT Spring Boot!
+The "What They Actually Did" list is **ALREADY RANDOMIZED** - pick the FIRST accomplishment in the list!
 
-**Topic Selection Priority** (choose in this order):
-1. **SCALE/PERFORMANCE**: 99.95% uptime, 100K+ req/sec, million records
-2. **QUALITY/TESTING**: 100% test coverage, 70% defect reduction, load testing
-3. **LEADERSHIP/MENTORING**: GenAI sessions for 20+ devs, knowledge sharing, team building
-4. **AI/INNOVATION**: GenAI tool integration, cutting docs time 80%, test effort 50%
-5. **ARCHITECTURE**: Microservices design, GCP infrastructure, system scalability
-6. ONLY if above aren't available: Ask about technology (Spring Boot, Kubernetes, etc.)
+**DO NOT always ask about the same topics** (Spring Boot, 99.95% uptime, etc.).
 
-**For Round {state['current_round']}**: Focus on measuring IMPACT, not just listing tools.
+**For Round {state['current_round']}**: Pick a DIFFERENT accomplishment than previous rounds. Focus on measuring IMPACT, not just listing tools.
 
 **REAL INTERVIEW FEEDBACK - What Senior Engineers Want to Hear:**
 Based on actual interview debriefs, candidates often miss the mark by:

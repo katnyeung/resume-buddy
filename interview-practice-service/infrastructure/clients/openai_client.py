@@ -47,33 +47,15 @@ async def transcribe_audio(audio_file_path: str) -> str:
             audio_bytes = BytesIO(audio_content)
             audio_bytes.name = "audio.webm"  # Whisper needs a filename with extension
 
-            # Request word-level timestamps to detect hallucinations
-            # Hallucinated words have identical start/end timestamps
+            # Request transcription (no hallucination filtering needed - frontend controls timing)
             response = await client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_bytes,
-                language="en",
-                response_format="verbose_json",  # Required for timestamp_granularities
-                timestamp_granularities=["word"]
+                language="en"
             )
 
-            # Filter out hallucinated words (same start/end timestamp)
-            if hasattr(response, 'words') and response.words:
-                filtered_words = []
-                for word in response.words:
-                    # Check if word has different start/end times (real speech)
-                    # Hallucinations have start == end (no actual audio duration)
-                    if abs(word.end - word.start) > 0.01:  # At least 10ms duration
-                        filtered_words.append(word.word)
-                    else:
-                        print(f"[Transcribe] Filtered hallucinated word: '{word.word}' (start={word.start}, end={word.end})")
-
-                filtered_text = " ".join(filtered_words).strip()
-                print(f"[Transcribe] Original: {len(response.words)} words, Filtered: {len(filtered_words)} words")
-                return filtered_text
-            else:
-                # Fallback to text if words not available
-                return response.text if hasattr(response, 'text') else ""
+            # Return transcription text directly
+            return response.text if hasattr(response, 'text') else ""
 
     except Exception as e:
         print(f"Transcription error: {e}")

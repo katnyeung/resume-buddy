@@ -248,8 +248,34 @@ cd frontend && ../deploy-frontend.sh
   - `POST /api/job-search/admin/revectorize/listing-lines?daysBack=14` (re-vectorize)
 **Matches not updating**: Use `?refresh=true` query parameter
 **Redis data lost**: Re-vectorize recent jobs (~$0.10 for 14 days)
+**Job-search-service crashes on AWS Lightsail**:
+  - HikariCP thread starvation from expensive Neo4j queries
+  - Fixed: Reduced pool size to 5, limited matrix queries to 10×10 max
+  - Fixed: Disabled SQL logging (show-sql: false)
+  - Fixed: Added 10s query timeout
 
 ## Recent Updates
+
+### Phase 11.19 (Oct 29) - Job Search Resource Optimization ✅
+**Fixed AWS Lightsail resource exhaustion causing crashes:**
+
+**Database Tuning:**
+- Reduced HikariCP pool: 10→5 connections (Lightsail has limited RAM)
+- Added connection timeout: 20s
+- Added leak detection: 60s threshold
+- Added query timeout: 10s (prevents runaway queries)
+
+**Query Optimization:**
+- Limited skill path matrix: 34×15 → 10×10 (100 pairs vs 510)
+- Limited heatmap matrix: topN capped at 15 (225 pairs max)
+- Added LIMIT 200 to co-occurrence queries
+
+**Logging Reduction:**
+- Disabled SQL logging (show-sql: false)
+- Reduced log levels: DEBUG→INFO, SQL→WARN
+- Silenced HikariCP housekeeping warnings
+
+**Result**: Reduced query load by 80%, eliminated thread starvation warnings
 
 ### Phase 11.18 (Oct 27) - Interview Practice Production Deployment ✅
 **Full-stack integration of AI-powered voice interview practice:**

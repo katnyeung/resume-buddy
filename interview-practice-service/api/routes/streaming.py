@@ -55,7 +55,8 @@ async def collect_user_answer(
             try:
                 data = await asyncio.wait_for(websocket.receive(), timeout=1.0)
             except asyncio.TimeoutError:
-                # Timeout is normal - just means no data arrived in 1 second
+                # Timeout - no data arrived in 1 second, just continue waiting
+                # Frontend controls all transcription timing
                 continue
             except RuntimeError as e:
                 if "disconnect" in str(e).lower():
@@ -68,156 +69,183 @@ async def collect_user_answer(
                 audio_buffer.append(audio_chunk)
                 chunks_received += 1
 
-                # Transcribe every 10 seconds of audio
-                buffer_duration = audio_buffer.duration_seconds()
-                if buffer_duration >= 10.0:
-                    print(f"[WebSocket] Buffer reached {buffer_duration:.1f}s, transcribing...")
-
-                    # Save accumulated buffer to temp file
-                    temp_audio_path = os.path.join(
-                        tempfile.gettempdir(),
-                        f"accumulated_{session_id}_{round_number}_{time.time()}.webm"
-                    )
-                    accumulated_data = audio_buffer.get_accumulated_with_header()
-                    has_stored_header = audio_buffer.stored_header is not None
-                    print(f"[WebSocket] Accumulated audio size: {len(accumulated_data)} bytes ({len(audio_buffer.accumulated_chunks)} chunks, header: {has_stored_header})")
-
-                    with open(temp_audio_path, "wb") as f:
-                        f.write(accumulated_data)
-
-                    audio_buffer.clear()
-                    print(f"[WebSocket] Cleared sliding window buffer")
-
-                    # Transcribe chunk
-                    try:
-                        chunk_transcript = await transcribe_audio(temp_audio_path)
-
-                        # Filter out Whisper hallucinations
-                        if chunk_transcript:
-                            cleaned = chunk_transcript.strip().lower()
-                            hallucinations = [
-                                ".", "..", "...", ". .", ". . .", "thank you", "thanks",
-                                "bye", "goodbye", "okay", "ok", "um", "uh", "hmm"
-                            ]
-                            is_hallucination = cleaned in hallucinations or all(c in '. ' for c in cleaned)
-
-                            if is_hallucination:
-                                print(f"[WebSocket] Filtered Whisper hallucination: '{chunk_transcript}'")
-                                chunk_transcript = None
-
-                        if chunk_transcript:
-                            full_transcript += " " + chunk_transcript
-                            failed_transcriptions = 0
-
-                            # Store WebM header after first success
-                            if audio_buffer.stored_header is None:
-                                print(f"[WebSocket] First successful transcription - extracting WebM header")
-                                audio_buffer.store_header_from_file(temp_audio_path)
-
-                            # Clear accumulated chunks to prevent duplicates
-                            audio_buffer.accumulated_chunks = []
-                            print(f"[WebSocket] Cleared accumulated chunks (keeping header for next cycle)")
-
-                            # Send live transcript to client
-                            await websocket.send_json({
-                                "type": "transcript",
-                                "text": chunk_transcript
-                            })
-
-                            # Check for interrupt (ONLY if enabled and strict conditions met)
-                            word_count = len(full_transcript.split())
-
-                            # Skip interrupts entirely if interrupt_level is NONE or not set
-                            interrupt_enabled = session.interrupt_level and session.interrupt_level != "NONE"
-
-                            if interrupt_enabled and word_count > 50:  # At least 50 words before considering interrupt
-                                current_time = time.time()
-                                duration_seconds = current_time - start_time
-                                time_since_last_interrupt = current_time - last_interrupt_time
-
-                                # Strict timing: 45s between interrupts AND 30s into answer
-                                if time_since_last_interrupt >= 45.0 and duration_seconds >= 30.0:
-                                    print(f"[WebSocket] Checking for interrupt (transcript: {word_count} words, duration: {duration_seconds:.0f}s)")
-
-                                    await websocket.send_json({
-                                        "type": "ai_thinking",
-                                        "message": "AI is analyzing your answer..."
-                                    })
-
-                                    decision = await interrupt_agent.analyze(
-                                        transcript=full_transcript,
-                                        question=question_text,
-                                        interview_type=session.interview_type,
-                                        difficulty_level=session.difficulty_level,
-                                        interrupt_level=session.interrupt_level,
-                                        duration_seconds=duration_seconds
-                                    )
-
-                                    if decision["should_interrupt"]:
-                                        print(f"[WebSocket] AI decided to interrupt: {decision['reason']}")
-
-                                        audio_buffer.clear()
-                                        audio_buffer.reset_accumulator()
-                                        print(f"[WebSocket] Cleared buffer and reset accumulator")
-
-                                        # Generate interrupt TTS
-                                        interrupt_audio_path = os.path.join(
-                                            tempfile.gettempdir(),
-                                            f"interrupt_{session_id}_{round_number}_{time.time()}.mp3"
-                                        )
-                                        await text_to_speech(decision["feedback_text"], interrupt_audio_path)
-
-                                        with open(interrupt_audio_path, "rb") as f:
-                                            interrupt_audio_base64 = base64.b64encode(f.read()).decode()
-
-                                        await websocket.send_json({
-                                            "type": "interrupt",
-                                            "text": decision["feedback_text"],
-                                            "reason": decision["reason"],
-                                            "interrupt_type": decision["interrupt_type"],
-                                            "audio_base64": interrupt_audio_base64,
-                                            "restart_recording": True
-                                        })
-
-                                        last_interrupt_time = current_time
-                                        start_time = time.time()
-                                        print(f"[WebSocket] Reset recording timer after interrupt")
-                                    else:
-                                        last_interrupt_time = current_time
-                                        print(f"[WebSocket] AI decided not to interrupt, will check again in 30s")
-                        else:
-                            # Empty transcription (hallucinations filtered out = silence detected)
-                            if full_transcript:
-                                # User has spoken before, now getting silence/hallucinations
-                                # This is IMMEDIATE evidence of silence - end right away!
-                                print(f"[WebSocket] Silence detected (Whisper returned only hallucinations, no real speech)")
-                                print(f"[WebSocket] User stopped speaking - ending answer immediately")
-                                break
-                            else:
-                                failed_transcriptions += 1
-                                print(f"[WebSocket] Failed transcription {failed_transcriptions}/{MAX_FAILED_TRANSCRIPTIONS}")
-
-                                if failed_transcriptions >= MAX_FAILED_TRANSCRIPTIONS:
-                                    print(f"[WebSocket] Too many failed transcriptions, ending")
-                                    break
-
-                    except Exception as e:
-                        print(f"Transcription error: {e}")
-                        failed_transcriptions += 1
-                        if failed_transcriptions >= MAX_FAILED_TRANSCRIPTIONS:
-                            print(f"[WebSocket] Too many errors, ending")
-                            break
-
-                    # Clean up temp file
-                    if os.path.exists(temp_audio_path):
-                        os.remove(temp_audio_path)
+                # Log every 100 chunks to verify audio is being received
+                if chunks_received % 100 == 0:
+                    buffer_duration = audio_buffer.duration_seconds()
+                    print(f"[WebSocket] Received {chunks_received} chunks, buffer: {buffer_duration:.1f}s")
+                # Frontend now controls all transcription timing via transcribe_now messages
 
             elif "text" in data:
-                # Client sent control message
-                msg = data["text"]
+                # Client sent control message (JSON string)
+                import json
+                try:
+                    message_json = json.loads(data["text"])
+                    msg = message_json.get("text", "")
+                    print(f"[WebSocket] Received control message: {msg}")
+                except json.JSONDecodeError:
+                    # Fallback: treat as plain string
+                    msg = data["text"]
+                    print(f"[WebSocket] Received text (non-JSON): {msg}")
+
                 if msg == "end_answer":
                     print(f"[WebSocket] Client requested end")
                     break
+                elif msg == "transcribe_final":
+                    # Frontend detected 10s silence - this is the FINAL transcription before evaluation
+                    print(f"[WebSocket] Client requested FINAL transcription (10s silence detected)")
+                    buffer_duration = audio_buffer.duration_seconds()
+                    if buffer_duration >= 2.0:  # Only transcribe if we have at least 2 seconds
+                        print(f"[WebSocket] Processing final transcription ({buffer_duration:.1f}s buffered)")
+
+                        # Save accumulated buffer to temp file
+                        temp_audio_path = os.path.join(
+                            tempfile.gettempdir(),
+                            f"final_{session_id}_{round_number}_{time.time()}.webm"
+                        )
+                        accumulated_data = audio_buffer.get_accumulated_with_header()
+                        with open(temp_audio_path, "wb") as f:
+                            f.write(accumulated_data)
+
+                        audio_buffer.clear()
+
+                        # Transcribe chunk
+                        try:
+                            chunk_transcript = await transcribe_audio(temp_audio_path)
+
+                            if chunk_transcript and chunk_transcript.strip():
+                                full_transcript += " " + chunk_transcript
+
+                                # Send live transcript to client
+                                await websocket.send_json({
+                                    "type": "transcript",
+                                    "text": chunk_transcript
+                                })
+
+                                print(f"[WebSocket] Final transcription complete, breaking collection loop")
+                            else:
+                                print(f"[WebSocket] Final transcription empty, breaking collection loop anyway")
+
+                        except Exception as e:
+                            print(f"Final transcription error: {e}")
+                        finally:
+                            # Clean up temp file
+                            if os.path.exists(temp_audio_path):
+                                os.remove(temp_audio_path)
+
+                    # BREAK the collection loop - move to evaluation
+                    print(f"[WebSocket] Ending answer collection (10s silence)")
+                    break
+
+                elif msg == "transcribe_now":
+                    # Frontend requests immediate transcription (e.g., detected a pause)
+                    buffer_duration = audio_buffer.duration_seconds()
+                    if buffer_duration >= 2.0:  # Only transcribe if we have at least 2 seconds
+                        print(f"[WebSocket] Client requested transcription ({buffer_duration:.1f}s buffered)")
+
+                        # Save accumulated buffer to temp file
+                        temp_audio_path = os.path.join(
+                            tempfile.gettempdir(),
+                            f"requested_{session_id}_{round_number}_{time.time()}.webm"
+                        )
+                        accumulated_data = audio_buffer.get_accumulated_with_header()
+                        with open(temp_audio_path, "wb") as f:
+                            f.write(accumulated_data)
+
+                        audio_buffer.clear()
+
+                        # Transcribe chunk
+                        try:
+                            chunk_transcript = await transcribe_audio(temp_audio_path)
+
+                            if chunk_transcript and chunk_transcript.strip():
+                                full_transcript += " " + chunk_transcript
+                                failed_transcriptions = 0
+
+                                # Store WebM header after first success
+                                if audio_buffer.stored_header is None:
+                                    print(f"[WebSocket] First successful transcription - extracting WebM header")
+                                    audio_buffer.store_header_from_file(temp_audio_path)
+
+                                # Clear accumulated chunks to prevent duplicates
+                                audio_buffer.accumulated_chunks = []
+                                print(f"[WebSocket] Cleared accumulated chunks (keeping header for next cycle)")
+
+                                # Send live transcript to client
+                                await websocket.send_json({
+                                    "type": "transcript",
+                                    "text": chunk_transcript
+                                })
+
+                                # Check for interrupt (frontend-triggered, on every transcription)
+                                word_count = len(full_transcript.split())
+
+                                # Skip interrupts if interrupt_level is NONE or not set
+                                interrupt_enabled = session.interrupt_level and session.interrupt_level != "NONE"
+
+                                if interrupt_enabled and word_count > 20:  # At least 20 words before considering interrupt
+                                    current_time = time.time()
+                                    duration_seconds = current_time - start_time
+                                    time_since_last_interrupt = current_time - last_interrupt_time
+
+                                    # Only interrupt if enough time has passed (45s cooldown)
+                                    if time_since_last_interrupt >= 45.0:
+                                        print(f"[WebSocket] Checking for interrupt (transcript: {word_count} words, duration: {duration_seconds:.0f}s)")
+
+                                        await websocket.send_json({
+                                            "type": "ai_thinking",
+                                            "message": "AI is analyzing your answer..."
+                                        })
+
+                                        decision = await interrupt_agent.analyze(
+                                            transcript=full_transcript,
+                                            question=question_text,
+                                            interview_type=session.interview_type,
+                                            difficulty_level=session.difficulty_level,
+                                            interrupt_level=session.interrupt_level,
+                                            duration_seconds=duration_seconds
+                                        )
+
+                                        if decision["should_interrupt"]:
+                                            print(f"[WebSocket] AI decided to interrupt: {decision['reason']}")
+
+                                            audio_buffer.clear()
+                                            audio_buffer.reset_accumulator()
+                                            print(f"[WebSocket] Cleared buffer and reset accumulator")
+
+                                            # Generate interrupt TTS
+                                            interrupt_audio_path = os.path.join(
+                                                tempfile.gettempdir(),
+                                                f"interrupt_{session_id}_{round_number}_{time.time()}.mp3"
+                                            )
+                                            await text_to_speech(decision["feedback_text"], interrupt_audio_path)
+
+                                            with open(interrupt_audio_path, "rb") as f:
+                                                interrupt_audio_base64 = base64.b64encode(f.read()).decode()
+
+                                            await websocket.send_json({
+                                                "type": "interrupt",
+                                                "text": decision["feedback_text"],
+                                                "reason": decision["reason"],
+                                                "interrupt_type": decision["interrupt_type"],
+                                                "audio_base64": interrupt_audio_base64,
+                                                "restart_recording": True
+                                            })
+
+                                            last_interrupt_time = current_time
+                                            start_time = time.time()
+                                            print(f"[WebSocket] Reset recording timer after interrupt")
+                                        else:
+                                            last_interrupt_time = current_time
+                                            print(f"[WebSocket] AI decided not to interrupt")
+
+                        except Exception as e:
+                            print(f"Transcription error: {e}")
+                        finally:
+                            # Clean up temp file
+                            if os.path.exists(temp_audio_path):
+                                os.remove(temp_audio_path)
+                    else:
+                        print(f"[WebSocket] Ignoring transcribe_now request (only {buffer_duration:.1f}s buffered, need ≥2s)")
 
     except WebSocketDisconnect:
         print(f"Client disconnected from session {session_id}")
@@ -430,7 +458,13 @@ async def stream_interview_round(
         })
 
         # OUTER LOOP: Multi-turn conversation (keep asking follow-ups until Grok is satisfied)
+        attempt_count = 0
+        last_followup_question = None  # Track last question to prevent duplicates
+
         while True:
+            attempt_count += 1
+            print(f"[WebSocket] Answer attempt #{attempt_count}")
+
             # Collect user's answer using helper function
             try:
                 full_transcript, last_interrupt_time = await collect_user_answer(
@@ -513,9 +547,15 @@ async def stream_interview_round(
 
             print(f"[WebSocket] Grok decision: needs_followup={needs_followup}, satisfaction={satisfaction_level}")
 
+            # Safety check: Prevent duplicate follow-ups
+            if needs_followup and followup_question_text == last_followup_question:
+                print(f"[WebSocket] ⚠️ Duplicate follow-up detected, forcing final evaluation instead")
+                needs_followup = False  # Force CASE 2 (final evaluation)
+
             if needs_followup and followup_question_text:
                 # CASE 1: Ask follow-up question and continue loop
                 print(f"[WebSocket] Asking follow-up: {followup_question_text}")
+                last_followup_question = followup_question_text
 
                 # Generate TTS for feedback + followup question
                 spoken_followup = f"{feedback_text} {followup_question_text}"
@@ -548,7 +588,37 @@ async def stream_interview_round(
                 # Reset audio buffer for next answer
                 audio_buffer.reset_for_next_question()
 
-                print(f"[WebSocket] Follow-up sent, continuing to next answer (outer loop continues)")
+                print(f"[WebSocket] Follow-up sent, draining stale audio chunks...")
+
+                # CRITICAL: Drain any stale chunks from WebSocket buffer
+                # Frontend needs time to: stop recording → play audio → restart recording
+                # Any chunks received during this transition are garbage (from old recording session)
+                drain_start = time.time()
+                drained_count = 0
+                try:
+                    while True:
+                        # Non-blocking drain with short timeout
+                        drain_data = await asyncio.wait_for(websocket.receive(), timeout=0.3)
+
+                        if "bytes" in drain_data:
+                            drained_count += 1
+                        elif "text" in drain_data:
+                            # Stop draining if we get a control message
+                            import json
+                            try:
+                                message_json = json.loads(drain_data["text"])
+                                msg = message_json.get("text", "")
+                                if msg == "recording_restarted":
+                                    print(f"[WebSocket] Drained {drained_count} stale chunks, client restarted recording")
+                                    break
+                            except:
+                                pass
+                except asyncio.TimeoutError:
+                    # Timeout is normal - no more stale chunks
+                    drain_duration = time.time() - drain_start
+                    print(f"[WebSocket] Drained {drained_count} stale chunks in {drain_duration:.1f}s")
+
+                print(f"[WebSocket] Continuing to next answer (outer loop continues)")
 
                 # CONTINUE THE OUTER LOOP - collect next answer
                 continue
