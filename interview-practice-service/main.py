@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from api.routes import sessions, streaming
 from domain.services.email_scheduler import start_scheduler, stop_scheduler
+from infrastructure.clients.redis_client import init_redis_store
 
 # Load environment variables
 load_dotenv()
@@ -17,12 +18,17 @@ async def lifespan(app: FastAPI):
     Application lifespan manager for startup and shutdown events.
 
     Startup:
+    - Initialize Redis conversation store
     - Start email scheduler for round reminders
 
     Shutdown:
     - Stop email scheduler gracefully
     """
     # Startup
+    redis_uri = os.getenv("REDIS_URI", "redis://localhost:6379")
+    init_redis_store(redis_uri)
+    print(f"[Startup] Redis conversation store initialized: {redis_uri}")
+
     start_scheduler()
     yield
     # Shutdown

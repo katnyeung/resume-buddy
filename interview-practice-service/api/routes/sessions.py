@@ -13,8 +13,9 @@ from api.models import (
     SessionCompleteResponse
 )
 from domain.services.session_manager import SessionManager
-from domain.models import InterviewSession, SessionRound
+from domain.models import InterviewSession, SessionRound, SessionRoundInteraction
 from infrastructure.database import get_db
+from infrastructure.clients.redis_client import get_redis_store
 # from infrastructure.redis_client import get_async_redis_checkpointer  # REMOVED - No LangGraph
 from infrastructure.clients.openai_client import transcribe_audio, text_to_speech
 from infrastructure.clients import resume_api_client, jobsearch_api_client
@@ -207,6 +208,66 @@ Resume Buddy Team
         message=f"Session created with {session.total_rounds} rounds! Check your email for Round 1 practice link.",
         scheduled_datetime=scheduled_datetime_str
     )
+
+
+# ==================== INFO ENDPOINTS (for frontend) ====================
+
+@router.get("/sessions/{session_id}/info")
+async def get_session_info(
+    session_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get session information for frontend display."""
+    session = db.query(InterviewSession).filter(
+        InterviewSession.id == session_id
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return {
+        "id": str(session.id),
+        "userId": str(session.user_id),
+        "resumeId": str(session.resume_id),
+        "experienceId": str(session.experience_id) if session.experience_id else None,
+        "jobListingId": str(session.job_listing_id) if session.job_listing_id else None,
+        "interviewType": session.interview_type,
+        "difficultyLevel": session.difficulty_level,
+        "interruptLevel": session.interrupt_level,
+        "scheduledDate": session.scheduled_date.isoformat(),
+        "scheduledTime": session.scheduled_time.isoformat() if session.scheduled_time else None,
+        "totalRounds": session.total_rounds,
+        "currentRound": session.completed_rounds + 1,
+        "status": session.status
+    }
+
+
+@router.get("/sessions/{session_id}/rounds/{round_number}/info")
+async def get_round_info(
+    session_id: str,
+    round_number: int,
+    db: Session = Depends(get_db)
+):
+    """Get round information for frontend display."""
+    round_record = db.query(SessionRound).filter(
+        SessionRound.session_id == session_id,
+        SessionRound.round_number == round_number
+    ).first()
+
+    if not round_record:
+        raise HTTPException(status_code=404, detail="Round not found")
+
+    return {
+        "id": str(round_record.id),
+        "sessionId": str(round_record.session_id),
+        "roundNumber": round_record.round_number,
+        "scheduledDate": round_record.scheduled_date.isoformat(),
+        "scheduledTime": round_record.scheduled_time.isoformat() if round_record.scheduled_time else None,
+        "status": round_record.status,
+        "questionText": round_record.question_text,
+        "answerText": round_record.answer_text,
+        "score": float(round_record.score) if round_record.score else None
+    }
 
 
 # ==================== ROUND PRACTICE ENDPOINTS ====================
@@ -642,3 +703,102 @@ async def get_session_summary(
             for r in rounds
         ]
     }
+
+
+# ==================== CONVERSATION HISTORY ENDPOINT ====================
+
+@router.get("/sessions/{session_id}/rounds/{round_num}/conversation")
+async def get_conversation_history(
+    session_id: str,
+    round_num: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Get full conversation history for a specific round.
+
+    This endpoint:
+    1. Tries to load from Redis first (if round is in progress or recently completed)
+    2. Falls back to database (if round completed and Redis expired)
+    3. Returns all interactions with questions, answers, evaluations
+
+    Use cases:
+    - Frontend loads conversation on page mount/refresh
+    - User reviews past round performance
+    - Analytics dashboard shows conversation flow
+
+    Returns:
+    - session_id, round_number, status
+    - interactions: [{question, answer, satisfaction_level, feedback, followup_question, final_summary}]
+    - interrupts: [{timestamp, type, reason, coaching_text}]
+    - final_score, total_interactions
+    """
+    redis_store = get_redis_store()
+
+    # 1. Try Redis first (active or recent rounds)
+    try:
+        state = await redis_store.get_state(session_id, round_num)
+        if state:
+            print(f"[API] Loaded conversation from Redis: {session_id} round {round_num}")
+            return state
+    except Exception as e:
+        print(f"[API] Redis lookup failed: {e}")
+
+    # 2. Fallback to database (completed rounds, Redis expired)
+    try:
+        # Get round record
+        round_record = db.query(SessionRound).filter_by(
+            session_id=session_id,
+            round_number=round_num
+        ).first()
+
+        if not round_record:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Round {round_num} not found for session {session_id}"
+            )
+
+        # Get all interactions for this round
+        interactions = db.query(SessionRoundInteraction).filter_by(
+            session_id=session_id,
+            round_number=round_num
+        ).order_by(SessionRoundInteraction.interaction_number).all()
+
+        # Reconstruct conversation state from database
+        state = {
+            "session_id": session_id,
+            "round_number": round_num,
+            "status": round_record.status.lower(),
+            "interactions": [
+                {
+                    "interaction_num": i.interaction_number,
+                    "question": i.question_text,
+                    "answer_transcript": i.answer_transcript,
+                    "satisfaction_level": i.satisfaction_level,
+                    "needs_followup": i.needs_followup,
+                    "feedback": i.feedback_text,
+                    "followup_question": i.followup_question,
+                    "final_summary": i.final_summary,
+                    "timestamp": i.question_asked_at.isoformat() if i.question_asked_at else None,
+                    "updated_at": i.answer_completed_at.isoformat() if i.answer_completed_at else None,
+                    "interrupt_count": i.interrupt_count
+                }
+                for i in interactions
+            ],
+            "interrupts": [],  # TODO: Store interrupts separately if needed
+            "final_score": float(round_record.score) if round_record.score else None,
+            "total_interactions": len(interactions),
+            "created_at": round_record.started_at.isoformat() if round_record.started_at else None,
+            "completed_at": round_record.completed_at.isoformat() if round_record.completed_at else None
+        }
+
+        print(f"[API] Loaded conversation from database: {session_id} round {round_num}")
+        return state
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[API] Database lookup failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load conversation history: {str(e)}"
+        )

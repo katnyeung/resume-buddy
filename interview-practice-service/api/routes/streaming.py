@@ -13,8 +13,10 @@ from infrastructure.database import get_db
 from infrastructure.websocket.audio_buffer import AudioBuffer
 from infrastructure.websocket.connection_manager import manager
 from infrastructure.clients.openai_client import text_to_speech, transcribe_audio
+from infrastructure.clients.redis_client import get_redis_store
 from domain.agents.interrupt_agent import InterruptAgent
 from domain.services.question_evaluation import generate_question, evaluate_answer
+from domain.services.persistence import persist_round_to_database
 
 
 router = APIRouter(prefix="/ws/interview", tags=["websocket"])
@@ -59,9 +61,9 @@ async def collect_user_answer(
                 # Frontend controls all transcription timing
                 continue
             except RuntimeError as e:
-                if "disconnect" in str(e).lower():
-                    print(f"[WebSocket] Client disconnected gracefully")
-                    break
+                if "disconnect" in str(e).lower() or "websocket" in str(e).lower():
+                    print(f"[WebSocket] Client disconnected during answer collection")
+                    raise WebSocketDisconnect()
                 raise
 
             if "bytes" in data:
@@ -343,6 +345,7 @@ async def stream_interview_round(
         audio_buffer = AudioBuffer()
         interrupt_agent = InterruptAgent()
         last_interrupt_time = 0
+        redis_store = get_redis_store()
 
         # Generate question (same logic as REST endpoint)
         from infrastructure.clients.resume_api_client import get_resume_analysis, get_job_analysis
@@ -436,6 +439,10 @@ async def stream_interview_round(
             "asked_topics": list(set(asked_topics))  # Unique topics already covered
         }
 
+        # Initialize Redis state for this round
+        await redis_store.init_round(session_id, round_number)
+        print(f"[Redis] Initialized conversation state")
+
         # Generate question
         result = await generate_question(initial_state)
         question_text = result["question"]
@@ -449,21 +456,107 @@ async def stream_interview_round(
         with open(question_audio_path, "rb") as f:
             question_audio_base64 = base64.b64encode(f.read()).decode()
 
+        # Save initial question to Redis
+        await redis_store.add_interaction(session_id, round_number, {
+            "interaction_num": 1,
+            "question": question_text
+        })
+        print(f"[Redis] Saved initial question")
+
         # Send question to client (client should pause recording during playback)
         await websocket.send_json({
             "type": "question",
             "text": question_text,
             "audio_base64": question_audio_base64,
-            "pause_recording": True  # Tell client to stop recording during playback
+            "pause_recording": True,  # Tell client to stop recording during playback
+            "can_regenerate": True  # Tell client this is the initial question (can be regenerated)
         })
 
         # OUTER LOOP: Multi-turn conversation (keep asking follow-ups until Grok is satisfied)
         attempt_count = 0
         last_followup_question = None  # Track last question to prevent duplicates
+        awaiting_first_answer = True  # Track if we're waiting for the first answer (regenerate allowed)
 
         while True:
             attempt_count += 1
             print(f"[WebSocket] Answer attempt #{attempt_count}")
+
+            # Handle regenerate_question request (only before first answer)
+            # Allow MULTIPLE regenerates with a loop
+            if awaiting_first_answer:
+                regenerate_loop = True
+                first_audio_chunk = None  # Store first audio chunk if user starts recording
+                while regenerate_loop:
+                    try:
+                        # Check for regenerate request with 2 second timeout (balance between user action time and responsiveness)
+                        regen_data = await asyncio.wait_for(websocket.receive(), timeout=2.0)
+                        if "text" in regen_data:
+                            import json
+                            try:
+                                message_json = json.loads(regen_data["text"])
+                                msg = message_json.get("text", "")
+                                if msg == "regenerate_question":
+                                    print(f"[WebSocket] Regenerating initial question...")
+
+                                    # Remove last interaction from Redis
+                                    await redis_store.remove_last_interaction(session_id, round_number)
+
+                                    # Generate new question with same context
+                                    result = await generate_question(initial_state)
+                                    question_text = result["question"]
+
+                                    # Generate TTS for new question
+                                    question_audio_path = os.path.join(tempfile.gettempdir(), f"question_{session_id}_{round_number}_regen.mp3")
+                                    await text_to_speech(question_text, question_audio_path)
+
+                                    with open(question_audio_path, "rb") as f:
+                                        question_audio_base64 = base64.b64encode(f.read()).decode()
+
+                                    # Save new question to Redis
+                                    await redis_store.add_interaction(session_id, round_number, {
+                                        "interaction_num": 1,
+                                        "question": question_text
+                                    })
+                                    print(f"[Redis] Saved regenerated question")
+
+                                    # Send new question to client
+                                    await websocket.send_json({
+                                        "type": "question",
+                                        "text": question_text,
+                                        "audio_base64": question_audio_base64,
+                                        "pause_recording": True,
+                                        "can_regenerate": True,
+                                        "is_regenerated": True
+                                    })
+
+                                    # Clean up temp file
+                                    if os.path.exists(question_audio_path):
+                                        os.remove(question_audio_path)
+
+                                    print(f"[WebSocket] Sent regenerated question, looping back for another possible regenerate")
+                                    attempt_count = 0  # Reset attempt counter
+                                    # Continue inner loop - check for another regenerate
+                                    continue
+                                else:
+                                    # Different control message, exit regenerate loop
+                                    print(f"[WebSocket] Received control message: {msg}, exiting regenerate loop")
+                                    regenerate_loop = False
+                            except json.JSONDecodeError:
+                                pass
+                        elif "bytes" in regen_data:
+                            # Audio data received - user started recording, exit regenerate loop
+                            print(f"[WebSocket] User started recording, exiting regenerate loop")
+                            first_audio_chunk = regen_data["bytes"]  # Save first chunk
+                            regenerate_loop = False
+                    except asyncio.TimeoutError:
+                        # Timeout - no regenerate request, proceed with answer collection
+                        print(f"[WebSocket] Regenerate timeout, proceeding to answer collection")
+                        regenerate_loop = False
+
+                # If we captured the first audio chunk, add it to the buffer
+                if first_audio_chunk:
+                    audio_buffer.add_chunk(first_audio_chunk)
+                    print(f"[WebSocket] Added captured first audio chunk to buffer")
 
             # Collect user's answer using helper function
             try:
@@ -478,13 +571,24 @@ async def stream_interview_round(
                     last_interrupt_time=last_interrupt_time
                 )
             except WebSocketDisconnect:
-                print(f"Client disconnected during answer collection")
+                print(f"[WebSocket] Client disconnected during answer collection")
                 manager.disconnect(session_id)
                 return
+            except RuntimeError as e:
+                if "websocket.send" in str(e):
+                    print(f"[WebSocket] Client disconnected (RuntimeError)")
+                    manager.disconnect(session_id)
+                    return
+                raise
 
             # Wait 2 seconds to ensure any pending transcription completes
             print(f"[WebSocket] Waiting 2s for final transcription to complete...")
             await asyncio.sleep(2.0)
+
+            # Disable regeneration after first answer attempt
+            if awaiting_first_answer:
+                awaiting_first_answer = False
+                print(f"[WebSocket] First answer received, regeneration disabled")
 
             # Log final transcript
             word_count = len(full_transcript.split())
@@ -547,6 +651,17 @@ async def stream_interview_round(
 
             print(f"[WebSocket] Grok decision: needs_followup={needs_followup}, satisfaction={satisfaction_level}")
 
+            # Update Redis with answer and evaluation
+            await redis_store.update_last_interaction(session_id, round_number, {
+                "answer_transcript": full_transcript,
+                "satisfaction_level": satisfaction_level,
+                "needs_followup": needs_followup,
+                "feedback": feedback_text,
+                "followup_question": followup_question_text if needs_followup else None,
+                "final_summary": final_summary if not needs_followup else None
+            })
+            print(f"[Redis] Updated interaction with evaluation")
+
             # Safety check: Prevent duplicate follow-ups
             if needs_followup and followup_question_text == last_followup_question:
                 print(f"[WebSocket] ⚠️ Duplicate follow-up detected, forcing final evaluation instead")
@@ -585,40 +700,18 @@ async def stream_interview_round(
                 # Update question for next iteration
                 question_text = followup_question_text
 
+                # Add new interaction to Redis for followup question
+                interaction_count = await redis_store.get_interaction_count(session_id, round_number)
+                await redis_store.add_interaction(session_id, round_number, {
+                    "interaction_num": interaction_count + 1,
+                    "question": followup_question_text
+                })
+                print(f"[Redis] Saved followup question as interaction #{interaction_count + 1}")
+
                 # Reset audio buffer for next answer
                 audio_buffer.reset_for_next_question()
 
-                print(f"[WebSocket] Follow-up sent, draining stale audio chunks...")
-
-                # CRITICAL: Drain any stale chunks from WebSocket buffer
-                # Frontend needs time to: stop recording → play audio → restart recording
-                # Any chunks received during this transition are garbage (from old recording session)
-                drain_start = time.time()
-                drained_count = 0
-                try:
-                    while True:
-                        # Non-blocking drain with short timeout
-                        drain_data = await asyncio.wait_for(websocket.receive(), timeout=0.3)
-
-                        if "bytes" in drain_data:
-                            drained_count += 1
-                        elif "text" in drain_data:
-                            # Stop draining if we get a control message
-                            import json
-                            try:
-                                message_json = json.loads(drain_data["text"])
-                                msg = message_json.get("text", "")
-                                if msg == "recording_restarted":
-                                    print(f"[WebSocket] Drained {drained_count} stale chunks, client restarted recording")
-                                    break
-                            except:
-                                pass
-                except asyncio.TimeoutError:
-                    # Timeout is normal - no more stale chunks
-                    drain_duration = time.time() - drain_start
-                    print(f"[WebSocket] Drained {drained_count} stale chunks in {drain_duration:.1f}s")
-
-                print(f"[WebSocket] Continuing to next answer (outer loop continues)")
+                print(f"[WebSocket] Follow-up sent, continuing to next answer (no draining)")
 
                 # CONTINUE THE OUTER LOOP - collect next answer
                 continue
@@ -655,6 +748,23 @@ async def stream_interview_round(
                 # Clean up temp file
                 if os.path.exists(evaluation_audio_path):
                     os.remove(evaluation_audio_path)
+
+                # Save final score to Redis
+                await redis_store.set_final_score(session_id, round_number, satisfaction_level)
+                print(f"[Redis] Saved final score: {satisfaction_level}")
+
+                # Persist conversation from Redis to PostgreSQL
+                print(f"[WebSocket] Persisting conversation to database...")
+                db_new = next(get_db())
+                try:
+                    await persist_round_to_database(session_id, round_number, db_new, redis_store)
+                    print(f"[WebSocket] Successfully persisted to database")
+                except Exception as persist_error:
+                    print(f"[WebSocket] ERROR persisting to database: {persist_error}")
+                    import traceback
+                    print(traceback.format_exc())
+                finally:
+                    db_new.close()
 
                 # Send simple completion message
                 await websocket.send_json({

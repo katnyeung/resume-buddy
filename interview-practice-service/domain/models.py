@@ -1,5 +1,5 @@
 """SQLAlchemy ORM models for interview practice service."""
-from sqlalchemy import Column, Integer, String, Date, Time, TIMESTAMP, DECIMAL, ARRAY, Text, ForeignKey
+from sqlalchemy import Column, Integer, String, Date, Time, TIMESTAMP, DECIMAL, ARRAY, Text, ForeignKey, Boolean, ForeignKeyConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -124,6 +124,7 @@ class SessionRound(Base):
 
     # Relationships
     session = relationship("InterviewSession", back_populates="rounds")
+    interactions = relationship("SessionRoundInteraction", back_populates="round", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<SessionRound(id={self.id}, session_id={self.session_id}, round={self.round_number}, status={self.status})>"
@@ -149,4 +150,74 @@ class SessionRound(Base):
             "feedback_audio_url": self.feedback_audio_url,
             "evaluation_json": self.evaluation_json,
             "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class SessionRoundInteraction(Base):
+    """Individual Q&A interaction within a round (for multi-turn conversations)."""
+
+    __tablename__ = "interview_session_round_interactions"
+
+    # Primary Key
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Foreign Keys (composite foreign key to SessionRound)
+    session_id = Column(UUID(as_uuid=True), nullable=False)
+    round_number = Column(Integer, nullable=False)
+    interaction_number = Column(Integer, nullable=False)  # 1, 2, 3...
+
+    # Composite foreign key constraint
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ['session_id', 'round_number'],
+            ['interview_session_round.session_id', 'interview_session_round.round_number'],
+            ondelete='CASCADE'
+        ),
+    )
+
+    # Question
+    question_text = Column(Text, nullable=False)
+
+    # Answer
+    answer_transcript = Column(Text, nullable=True)
+    answer_duration_seconds = Column(Integer, nullable=True)
+
+    # Evaluation
+    satisfaction_level = Column(Integer, nullable=True)  # 0-100
+    needs_followup = Column(Boolean, nullable=True)
+    feedback_text = Column(Text, nullable=True)
+    followup_question = Column(Text, nullable=True)
+    final_summary = Column(Text, nullable=True)
+
+    # Timestamps
+    question_asked_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
+    answer_completed_at = Column(TIMESTAMP, nullable=True)
+
+    # Metadata
+    interrupt_count = Column(Integer, default=0)
+
+    # Relationships
+    round = relationship("SessionRound", back_populates="interactions")
+
+    def __repr__(self):
+        return f"<SessionRoundInteraction(session={self.session_id}, round={self.round_number}, interaction={self.interaction_number})>"
+
+    def to_dict(self):
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "id": str(self.id),
+            "session_id": str(self.session_id),
+            "round_number": self.round_number,
+            "interaction_number": self.interaction_number,
+            "question_text": self.question_text,
+            "answer_transcript": self.answer_transcript,
+            "answer_duration_seconds": self.answer_duration_seconds,
+            "satisfaction_level": self.satisfaction_level,
+            "needs_followup": self.needs_followup,
+            "feedback_text": self.feedback_text,
+            "followup_question": self.followup_question,
+            "final_summary": self.final_summary,
+            "question_asked_at": self.question_asked_at.isoformat() if self.question_asked_at else None,
+            "answer_completed_at": self.answer_completed_at.isoformat() if self.answer_completed_at else None,
+            "interrupt_count": self.interrupt_count
         }
