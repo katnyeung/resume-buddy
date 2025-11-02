@@ -1,5 +1,9 @@
 package com.resumebuddy.jobsearch.service;
 
+import com.resumebuddy.jobsearch.domain.JobListingLine;
+import com.resumebuddy.jobsearch.domain.JobSearchProfileLine;
+import com.resumebuddy.jobsearch.repository.JobListingLineRepository;
+import com.resumebuddy.jobsearch.repository.JobSearchProfileLineRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +20,7 @@ import java.util.*;
 /**
  * Infrastructure Service: Redis Vector Store
  * Manages vector embeddings in Redis using RediSearch
+ * Also stores vectors in MySQL for backup/recovery
  */
 @Service
 @Slf4j
@@ -23,6 +28,9 @@ import java.util.*;
 public class RedisVectorService {
 
     private final JedisPooled jedis;
+    private final JobListingLineRepository jobListingLineRepository;
+    private final JobSearchProfileLineRepository jobSearchProfileLineRepository;
+
     private static final String VECTOR_INDEX = "idx:vectors";
     private static final int VECTOR_DIM = 1536; // OpenAI embedding dimension
 
@@ -107,7 +115,7 @@ public class RedisVectorService {
     }
 
     /**
-     * Store vector embedding in Redis
+     * Store vector embedding in Redis ONLY (legacy method)
      */
     public void storeVector(String key, float[] embedding) {
         if (embedding.length != VECTOR_DIM) {
@@ -125,6 +133,72 @@ public class RedisVectorService {
             log.debug("Stored vector for key: {} ({} bytes)", key, vectorBytes.length);
         } catch (Exception e) {
             log.error("Failed to store vector for key: {}", key, e);
+            throw new RuntimeException("Failed to store vector", e);
+        }
+    }
+
+    /**
+     * Store job listing line vector in Redis ONLY (no PostgreSQL backup)
+     * If Redis fails, re-vectorize recent jobs (14 days) via OpenAI API
+     *
+     * @param lineId Database ID of the job_listing_line
+     * @param embedding OpenAI embedding (1536 floats)
+     */
+    public void storeJobListingLineVector(String lineId, float[] embedding) {
+        if (embedding.length != VECTOR_DIM) {
+            throw new IllegalArgumentException("Vector dimension must be " + VECTOR_DIM);
+        }
+
+        String redisKey = "listing:line:" + lineId;
+        byte[] vectorBytes = floatArrayToBytes(embedding);
+
+        try {
+            // Store in Redis for fast vector search
+            jedis.hset(redisKey, "key", redisKey);
+            jedis.hset(redisKey.getBytes(), "vector".getBytes(), vectorBytes);
+            log.debug("Stored vector in Redis for key: {} (~{} KB)", redisKey, vectorBytes.length / 1024);
+
+            // Update Redis key reference in PostgreSQL (no vector backup)
+            jobListingLineRepository.findById(lineId).ifPresent(line -> {
+                line.setRedisVectorKey(redisKey);
+                jobListingLineRepository.save(line);
+            });
+
+        } catch (Exception e) {
+            log.error("Failed to store vector for line: {}", lineId, e);
+            throw new RuntimeException("Failed to store vector", e);
+        }
+    }
+
+    /**
+     * Store job search profile line vector in Redis ONLY (no PostgreSQL backup)
+     * If Redis fails, re-vectorize user profiles (<100 profiles) via OpenAI API
+     *
+     * @param lineId Database ID of the job_search_profile_line
+     * @param embedding OpenAI embedding (1536 floats)
+     */
+    public void storeProfileLineVector(String lineId, float[] embedding) {
+        if (embedding.length != VECTOR_DIM) {
+            throw new IllegalArgumentException("Vector dimension must be " + VECTOR_DIM);
+        }
+
+        String redisKey = "profile:line:" + lineId;
+        byte[] vectorBytes = floatArrayToBytes(embedding);
+
+        try {
+            // Store in Redis for fast vector search
+            jedis.hset(redisKey, "key", redisKey);
+            jedis.hset(redisKey.getBytes(), "vector".getBytes(), vectorBytes);
+            log.debug("Stored vector in Redis for key: {} (~{} KB)", redisKey, vectorBytes.length / 1024);
+
+            // Update Redis key reference in PostgreSQL (no vector backup)
+            jobSearchProfileLineRepository.findById(lineId).ifPresent(line -> {
+                line.setRedisVectorKey(redisKey);
+                jobSearchProfileLineRepository.save(line);
+            });
+
+        } catch (Exception e) {
+            log.error("Failed to store vector for profile line: {}", lineId, e);
             throw new RuntimeException("Failed to store vector", e);
         }
     }
@@ -179,6 +253,28 @@ public class RedisVectorService {
             log.error("Failed to delete vector for key: {}", key, e);
             throw new RuntimeException("Failed to delete vector", e);
         }
+    }
+
+    /**
+     * DEPRECATED: PostgreSQL vector backup removed (2025-10-22) to save storage costs
+     *
+     * For disaster recovery after Redis data loss, use re-vectorization endpoints instead:
+     * - POST /api/job-search/admin/revectorize/listing-lines?daysBack=14
+     * - POST /api/job-search/admin/revectorize/profile-lines
+     *
+     * Cost comparison:
+     * - Old: $0.00 (instant recovery from PostgreSQL), but ongoing storage cost
+     * - New: ~$0.10 for 14 days (one-time re-vectorization), saves 50% PostgreSQL storage
+     *
+     * @deprecated Use re-vectorization endpoints for disaster recovery
+     * @return Nothing - throws UnsupportedOperationException
+     */
+    @Deprecated(since = "2025-10-22", forRemoval = true)
+    public int rebuildRedisFromMysql() {
+        throw new UnsupportedOperationException(
+            "PostgreSQL vector backup removed to save storage. " +
+            "Use re-vectorization instead: POST /api/job-search/admin/revectorize/listing-lines?daysBack=14"
+        );
     }
 
     /**

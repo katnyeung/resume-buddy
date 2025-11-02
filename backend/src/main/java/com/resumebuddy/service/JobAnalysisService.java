@@ -127,23 +127,25 @@ public class JobAnalysisService {
             neo4jGraphService.createSkillMappingsFromGraph(experienceId, primarySocCode, skills, onetTaxonomy);
         }
 
-        // Step 5: Parse description lines and map to O*NET activities/tasks (NEW)
-        log.info("Parsing description lines and mapping to O*NET activities/tasks and skills");
-        List<Map<String, Object>> lineMappings = analyzeDescriptionLines(
-            experienceId, experience.getDescription(), primarySocCode,
-            normalized.getNormalizedTitle(), experience.getJobTitle(), skills
+        // Step 5 & 6 MERGED: Analyze description lines AND evaluate job with single LLM call (PHASE 11.6)
+        log.info("Running merged LLM analysis: description line mapping + job evaluation");
+        MergedAnalysisResult mergedResult = analyzeDescriptionAndEvaluate(
+            experienceId, experience, normalized, primarySocCode, skills, allOccupationData.get(primarySocCode)
         );
-
-        // Step 6: Evaluate job with LLM (use primary occupation data)
-        log.info("Evaluating job quality with LLM...");
-        Map<String, Object> evaluation = evaluateJobWithLLM(experience, normalized, allOccupationData.get(primarySocCode));
+        List<Map<String, Object>> lineMappings = mergedResult.getLineMappings();
+        Map<String, Object> evaluation = mergedResult.getEvaluation();
 
         // Step 7: Build complete analysis result DTO
         JobAnalysisResultDto result = buildAnalysisResultDto(
             resume, experience, normalized, skills, lineMappings, evaluation
         );
 
-        // Step 8: Save analysis to database as JSON
+        // Step 7.5: Enrich with deep graph insights (PHASE 11.5)
+        // This includes Task Coverage Insights generation (one-time LLM call)
+        log.info("Enriching with deep graph insights including Task Coverage Insights");
+        enrichWithDeepGraphAnalysis(result, experienceId, false); // false = generate insights
+
+        // Step 8: Save analysis to database as JSON (now includes Task Coverage Insights)
         JobAnalysis analysis = new JobAnalysis();
         analysis.setResumeId(resumeId);
         analysis.setExperienceId(experienceId);
@@ -179,7 +181,8 @@ public class JobAnalysisService {
             dto.setId(analysis.getId());
 
             // NEW: Enrich with deep graph analysis (Phase 6)
-            enrichWithDeepGraphAnalysis(dto, experienceId);
+            // PHASE 11.5: Task Coverage Insights are pre-computed during analysis, so skip regeneration
+            enrichWithDeepGraphAnalysis(dto, experienceId, true);
 
             return dto;
         } catch (Exception e) {
@@ -203,7 +206,8 @@ public class JobAnalysisService {
             dto.setId(analysis.getId());
 
             // Enrich with deep graph analysis (Phase 6)
-            enrichWithDeepGraphAnalysis(dto, dto.getExperienceId());
+            // PHASE 11.5: Task Coverage Insights are pre-computed during analysis, so skip regeneration
+            enrichWithDeepGraphAnalysis(dto, dto.getExperienceId(), true);
 
             return dto;
         } catch (Exception e) {
@@ -219,8 +223,10 @@ public class JobAnalysisService {
      * 2. Description line value scores
      * 3. Missing skill-task opportunities
      * 4. Missing high-priority tasks/activities
+     *
+     * @param skipTaskCoverageInsights If true, skip LLM-based task coverage insights (already pre-computed)
      */
-    private void enrichWithDeepGraphAnalysis(JobAnalysisResultDto dto, String experienceId) {
+    private void enrichWithDeepGraphAnalysis(JobAnalysisResultDto dto, String experienceId, boolean skipTaskCoverageInsights) {
         try {
             log.info("Enriching analysis with deep graph insights for experience: {}", experienceId);
 
@@ -272,6 +278,20 @@ public class JobAnalysisService {
             if (taskDemo != null && !taskDemo.isEmpty()) {
                 dto.setTaskDemonstrationAnalysis(convertToTaskDemonstrationDtos(taskDemo));
                 log.info("Added {} task demonstration analyses to DTO", taskDemo.size());
+
+                // 7. Generate task coverage insights with LLM (PHASE 11.5)
+                // Only generate if NOT skipping (i.e., during initial analysis, not on page load)
+                if (!skipTaskCoverageInsights) {
+                    try {
+                        generateTaskCoverageInsights(dto, experienceId);
+                        log.info("Successfully generated task coverage insights");
+                    } catch (Exception e) {
+                        log.error("Error generating task coverage insights: {}", e.getMessage());
+                        // Don't fail - insights are optional enhancement
+                    }
+                } else {
+                    log.debug("Skipping task coverage insights regeneration (using pre-computed data)");
+                }
             } else {
                 log.warn("No task demonstration data found for experience: {}", experienceId);
             }
@@ -282,6 +302,13 @@ public class JobAnalysisService {
             log.error("Error enriching with deep graph analysis: {}", e.getMessage());
             // Don't fail - just skip enrichment if graph queries fail
         }
+    }
+
+    /**
+     * Overload for backward compatibility - defaults to NOT skipping task coverage insights
+     */
+    private void enrichWithDeepGraphAnalysis(JobAnalysisResultDto dto, String experienceId) {
+        enrichWithDeepGraphAnalysis(dto, experienceId, false);
     }
 
     /**
@@ -374,6 +401,121 @@ public class JobAnalysisService {
                 log.error("Error enriching skill {} with task popularity: {}", skill.getSkillName(), e.getMessage());
                 // Continue with next skill - don't fail entire enrichment
             }
+        }
+    }
+
+    /**
+     * PHASE 11.5: Generate task coverage insights using LLM
+     * Creates skill themes, career summary, strengths, gaps, and usage guide
+     */
+    private void generateTaskCoverageInsights(JobAnalysisResultDto dto, String experienceId) {
+        List<JobAnalysisResultDto.TaskDemonstrationDto> tasks = dto.getTaskDemonstrationAnalysis();
+        if (tasks == null || tasks.isEmpty()) {
+            return;
+        }
+
+        // Fetch experience data from repository
+        ResumeAnalysisExperience experience = experienceRepository.findById(experienceId)
+                .orElseThrow(() -> new RuntimeException("Experience not found: " + experienceId));
+
+        // Group tasks by coverage strength
+        List<String> strongTasks = tasks.stream()
+                .filter(t -> "STRONG".equals(t.getCoverageStrength()))
+                .map(JobAnalysisResultDto.TaskDemonstrationDto::getTaskName)
+                .toList();
+
+        List<String> moderateTasks = tasks.stream()
+                .filter(t -> "MODERATE".equals(t.getCoverageStrength()))
+                .map(JobAnalysisResultDto.TaskDemonstrationDto::getTaskName)
+                .toList();
+
+        List<String> weakTasks = tasks.stream()
+                .filter(t -> "WEAK".equals(t.getCoverageStrength()))
+                .map(JobAnalysisResultDto.TaskDemonstrationDto::getTaskName)
+                .toList();
+
+        List<String> noneTasks = tasks.stream()
+                .filter(t -> "NONE".equals(t.getCoverageStrength()))
+                .map(JobAnalysisResultDto.TaskDemonstrationDto::getTaskName)
+                .toList();
+
+        // Group skills by evidence strength from skillDemonstrationAnalysis
+        List<String> strongSkills = new ArrayList<>();
+        List<String> moderateSkills = new ArrayList<>();
+        List<String> weakSkills = new ArrayList<>();
+        List<String> noneSkills = new ArrayList<>();
+
+        if (dto.getSkillDemonstrationAnalysis() != null) {
+            for (JobAnalysisResultDto.SkillDemonstrationDto skill : dto.getSkillDemonstrationAnalysis()) {
+                String skillName = skill.getSkillName();
+                String evidenceStrength = skill.getEvidenceStrength();
+
+                if ("STRONG".equals(evidenceStrength)) {
+                    strongSkills.add(skillName);
+                } else if ("MODERATE".equals(evidenceStrength)) {
+                    moderateSkills.add(skillName);
+                } else if ("WEAK".equals(evidenceStrength)) {
+                    weakSkills.add(skillName);
+                } else if ("NONE".equals(evidenceStrength)) {
+                    noneSkills.add(skillName);
+                }
+            }
+        }
+
+        // Get skill names from extracted skills in DTO (for context)
+        String skillNames = "";
+        if (dto.getExtractedSkills() != null && !dto.getExtractedSkills().isEmpty()) {
+            skillNames = dto.getExtractedSkills().stream()
+                    .map(JobAnalysisResultDto.SkillDetailDto::getName)
+                    .limit(10)
+                    .collect(java.util.stream.Collectors.joining(", "));
+        }
+
+        try {
+            // Load and populate prompt
+            String prompt = loadPromptTemplate("prompts/3-job-analysis-task-coverage-insights.txt");
+            prompt = prompt.replace("{jobTitle}", experience.getJobTitle() != null ? experience.getJobTitle() : "")
+                    .replace("{extractedSkills}", skillNames)
+                    .replace("{strongSkills}", String.join(", ", strongSkills))
+                    .replace("{moderateSkills}", String.join(", ", moderateSkills))
+                    .replace("{weakSkills}", String.join(", ", weakSkills))
+                    .replace("{noneSkills}", String.join(", ", noneSkills))
+                    .replace("{strongTasks}", String.join(", ", strongTasks))
+                    .replace("{moderateTasks}", String.join(", ", moderateTasks))
+                    .replace("{weakTasks}", String.join(", ", weakTasks))
+                    .replace("{noneTasks}", String.join(", ", noneTasks));
+
+            // Call LLM
+            String llmResponse = callLLM(prompt);
+
+            // Parse JSON response
+            Map<String, Object> insights = objectMapper.readValue(llmResponse, new TypeReference<Map<String, Object>>() {});
+
+            // Extract skill themes
+            List<JobAnalysisResultDto.SkillThemeDto> skillThemes = new ArrayList<>();
+            List<Map<String, Object>> skillThemesRaw = (List<Map<String, Object>>) insights.get("skillThemes");
+            if (skillThemesRaw != null) {
+                for (Map<String, Object> theme : skillThemesRaw) {
+                    JobAnalysisResultDto.SkillThemeDto themeDto = new JobAnalysisResultDto.SkillThemeDto();
+                    themeDto.setName((String) theme.get("name"));
+                    themeDto.setScore(theme.get("score") != null ? ((Number) theme.get("score")).intValue() : 0);
+                    themeDto.setTaskCount(theme.get("taskCount") != null ? ((Number) theme.get("taskCount")).intValue() : 0);
+                    skillThemes.add(themeDto);
+                }
+                dto.setSkillThemes(skillThemes);
+            }
+
+            // Extract text insights
+            dto.setTaskCoverageSummary((String) insights.get("careerSummary"));
+            dto.setTaskCoverageStrengths((List<String>) insights.get("keyStrengths"));
+            dto.setTaskCoverageGaps((List<String>) insights.get("growthAreas"));
+            dto.setTaskUsageGuide((String) insights.get("usageGuide"));
+
+            log.info("Successfully generated task coverage insights with {} skill themes", skillThemes.size());
+
+        } catch (Exception e) {
+            log.error("Error parsing task coverage insights from LLM: {}", e.getMessage());
+            throw new RuntimeException("Failed to generate task coverage insights", e);
         }
     }
 
@@ -557,7 +699,7 @@ public class JobAnalysisService {
      */
     private ComprehensiveAnalysisResult analyzeJobComprehensive(ResumeAnalysisExperience experience) {
         try {
-            String prompt = loadPromptTemplate("prompts/comprehensive-job-analysis-prompt.txt");
+            String prompt = loadPromptTemplate("prompts/1-job-analysis-normalization-and-skills.txt");
             prompt = prompt.replace("{jobTitle}", experience.getJobTitle() != null ? experience.getJobTitle() : "")
                     .replace("{company}", experience.getCompanyName() != null ? experience.getCompanyName() : "")
                     .replace("{startDate}", experience.getStartDate() != null ? experience.getStartDate() : "")
@@ -1034,19 +1176,34 @@ public class JobAnalysisService {
                 insightsDto.setAppealReasoning((String) recruiterInsights.get("appealReasoning"));
                 insightsDto.setBestFitRoles((List<String>) recruiterInsights.get("bestFitRoles"));
 
-                // Red Flags
-                List<Map<String, Object>> redFlags = (List<Map<String, Object>>) recruiterInsights.get("redFlags");
-                if (redFlags != null) {
-                    List<JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto> redFlagDtos = new ArrayList<>();
-                    for (Map<String, Object> redFlag : redFlags) {
-                        JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto redFlagDto =
-                                new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto();
-                        redFlagDto.setType((String) redFlag.get("type"));
-                        redFlagDto.setSeverity((String) redFlag.get("severity"));
-                        redFlagDto.setDescription((String) redFlag.get("description"));
-                        redFlagDtos.add(redFlagDto);
+                // Red Flags - handle both List<String> (simple) and List<Map> (detailed) formats
+                Object redFlagsObj = recruiterInsights.get("redFlags");
+                if (redFlagsObj instanceof List) {
+                    List<?> redFlags = (List<?>) redFlagsObj;
+                    if (!redFlags.isEmpty()) {
+                        List<JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto> redFlagDtos = new ArrayList<>();
+                        for (Object item : redFlags) {
+                            if (item instanceof Map) {
+                                // Detailed format: {type, severity, description}
+                                Map<String, Object> redFlag = (Map<String, Object>) item;
+                                JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto redFlagDto =
+                                        new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto();
+                                redFlagDto.setType((String) redFlag.get("type"));
+                                redFlagDto.setSeverity((String) redFlag.get("severity"));
+                                redFlagDto.setDescription((String) redFlag.get("description"));
+                                redFlagDtos.add(redFlagDto);
+                            } else if (item instanceof String) {
+                                // Simple format: just a string description
+                                JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto redFlagDto =
+                                        new JobAnalysisResultDto.LineMappingDto.RecruiterInsightsDto.RedFlagDto();
+                                redFlagDto.setType("general");
+                                redFlagDto.setSeverity("medium");
+                                redFlagDto.setDescription((String) item);
+                                redFlagDtos.add(redFlagDto);
+                            }
+                        }
+                        insightsDto.setRedFlags(redFlagDtos);
                     }
-                    insightsDto.setRedFlags(redFlagDtos);
                 }
 
                 lineMappingDto.setRecruiterInsights(insightsDto);
@@ -1332,6 +1489,166 @@ public class JobAnalysisService {
 
         public List<Map<String, Object>> getSkills() {
             return skills;
+        }
+    }
+
+    /**
+     * Result of merged analysis (description line mapping + job evaluation) - PHASE 11.6
+     */
+    private static class MergedAnalysisResult {
+        private final List<Map<String, Object>> lineMappings;
+        private final Map<String, Object> evaluation;
+
+        public MergedAnalysisResult(List<Map<String, Object>> lineMappings, Map<String, Object> evaluation) {
+            this.lineMappings = lineMappings;
+            this.evaluation = evaluation;
+        }
+
+        public List<Map<String, Object>> getLineMappings() {
+            return lineMappings;
+        }
+
+        public Map<String, Object> getEvaluation() {
+            return evaluation;
+        }
+    }
+
+    /**
+     * PHASE 11.6: Merged LLM call combining description line analysis and job evaluation
+     * Reduces 2 LLM calls → 1 LLM call (saves 5-10 seconds + ~$0.003 per analysis)
+     */
+    private MergedAnalysisResult analyzeDescriptionAndEvaluate(
+            String experienceId,
+            ResumeAnalysisExperience experience,
+            NormalizedJobDto normalized,
+            String socCode,
+            List<Map<String, Object>> skills,
+            String onetData) {
+
+        if (experience.getDescription() == null || experience.getDescription().trim().isEmpty()) {
+            log.warn("No description to analyze for experience {}", experienceId);
+            return new MergedAnalysisResult(new ArrayList<>(), Map.of(
+                "impactScore", 0.0,
+                "technicalDepthScore", 0.0,
+                "leadershipScore", 0.0,
+                "overallScore", 0.0,
+                "keyStrengths", List.of(),
+                "improvementAreas", List.of(),
+                "recruiterSummary", "No description provided"
+            ));
+        }
+
+        try {
+            // Step 1: Parse description into lines
+            List<String> descriptionLines = neo4jGraphService.parseDescriptionIntoLines(experienceId, experience.getDescription());
+            if (descriptionLines.isEmpty()) {
+                log.warn("No description lines parsed for experience {}", experienceId);
+                return new MergedAnalysisResult(new ArrayList<>(), Map.of());
+            }
+
+            // Step 2: Fetch O*NET activities and tasks
+            Map<String, List<String>> onetActivityTasks = neo4jGraphService.fetchONetActivitiesAndTasks(socCode);
+            List<String> activities = onetActivityTasks.get("activities");
+            List<String> tasks = onetActivityTasks.get("tasks");
+
+            if (activities.isEmpty() && tasks.isEmpty()) {
+                log.warn("No O*NET activities/tasks found for SOC {}. Skipping line mapping.", socCode);
+                return new MergedAnalysisResult(new ArrayList<>(), Map.of());
+            }
+
+            // Step 3: Load merged prompt template
+            String prompt = loadPromptTemplate("prompts/2-job-analysis-line-mapping-and-evaluation.txt");
+            prompt = prompt.replace("{jobTitle}", experience.getJobTitle() != null ? experience.getJobTitle() : "")
+                    .replace("{occupationTitle}", normalized.getNormalizedTitle())
+                    .replace("{company}", experience.getCompanyName() != null ? experience.getCompanyName() : "")
+                    .replace("{startDate}", experience.getStartDate() != null ? experience.getStartDate() : "")
+                    .replace("{endDate}", experience.getEndDate() != null ? experience.getEndDate() : "")
+                    .replace("{seniorityLevel}", normalized.getSeniority() != null ? normalized.getSeniority() : "")
+                    .replace("{socCode}", socCode)
+                    .replace("{description}", experience.getDescription())
+                    .replace("{extractedSkills}", formatSkillsForPrompt(skills))
+                    .replace("{descriptionLines}", formatDescriptionLinesForPrompt(descriptionLines))
+                    .replace("{onetActivities}", formatONetDataForPrompt(activities))
+                    .replace("{onetTasks}", formatONetDataForPrompt(tasks));
+
+            // Step 4: Call LLM with merged prompt
+            log.info("Calling LLM with merged prompt (description analysis + evaluation)");
+            String llmResponse = callLLM(prompt);
+
+            // Step 5: Parse merged response
+            JsonNode root = objectMapper.readTree(llmResponse);
+
+            // Extract line mappings
+            List<Map<String, Object>> lineMappings = new ArrayList<>();
+            JsonNode lineMappingsNode = root.path("lineMappings");
+            if (lineMappingsNode.isArray()) {
+                for (JsonNode lineNode : lineMappingsNode) {
+                    lineMappings.add(objectMapper.convertValue(lineNode, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}));
+                }
+            }
+
+            // Extract skill-to-task mappings and store in Neo4j
+            JsonNode skillMappingsNode = root.path("skillToTaskMappings");
+            if (skillMappingsNode.isArray() && skillMappingsNode.size() > 0) {
+                // Convert JSON to SkillToTaskMappingDto list
+                List<com.resumebuddy.model.dto.DescriptionLineMappingDto.SkillToTaskMappingDto> skillMappings = new ArrayList<>();
+                for (JsonNode skillNode : skillMappingsNode) {
+                    String skillName = skillNode.path("skillName").asText();
+                    JsonNode tasksNode = skillNode.path("tasks");
+
+                    if (tasksNode.isArray()) {
+                        for (JsonNode taskNode : tasksNode) {
+                            com.resumebuddy.model.dto.DescriptionLineMappingDto.SkillToTaskMappingDto mapping =
+                                new com.resumebuddy.model.dto.DescriptionLineMappingDto.SkillToTaskMappingDto();
+                            mapping.setSkillName(skillName);
+                            mapping.setTaskName(taskNode.path("taskName").asText());
+                            mapping.setTaskId(taskNode.path("taskId").asText());
+                            mapping.setConfidence(taskNode.path("confidence").asDouble(0.0));
+                            mapping.setReasoning(taskNode.path("reasoning").asText(""));
+                            skillMappings.add(mapping);
+                        }
+                    }
+                }
+
+                if (!skillMappings.isEmpty()) {
+                    neo4jGraphService.storeSkillToTaskMappings(experienceId, skillMappings);
+                    log.info("Successfully mapped {} skills to O*NET tasks", skillMappings.size());
+                }
+            }
+
+            // Store line mappings in Neo4j
+            if (!lineMappings.isEmpty()) {
+                neo4jGraphService.storeDescriptionLineMappings(experienceId, socCode, lineMappings);
+                log.info("Successfully mapped {} description lines to O*NET activities/tasks", lineMappings.size());
+            }
+
+            // Extract overall evaluation
+            JsonNode evaluationNode = root.path("overallEvaluation");
+            Map<String, Object> evaluation = objectMapper.convertValue(
+                evaluationNode,
+                new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}
+            );
+
+            log.info("Merged analysis completed: {} line mappings, evaluation scores: impact={}, technical={}, leadership={}",
+                    lineMappings.size(),
+                    evaluation.get("impactScore"),
+                    evaluation.get("technicalDepthScore"),
+                    evaluation.get("leadershipScore"));
+
+            return new MergedAnalysisResult(lineMappings, evaluation);
+
+        } catch (Exception e) {
+            log.error("Error in merged description analysis and evaluation for experience {}", experienceId, e);
+            // Return empty results on error
+            return new MergedAnalysisResult(new ArrayList<>(), Map.of(
+                "impactScore", 0.0,
+                "technicalDepthScore", 0.0,
+                "leadershipScore", 0.0,
+                "overallScore", 0.0,
+                "keyStrengths", List.of(),
+                "improvementAreas", List.of(),
+                "recruiterSummary", "Error analyzing experience"
+            ));
         }
     }
 }

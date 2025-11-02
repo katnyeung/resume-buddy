@@ -177,7 +177,8 @@ public class Neo4jJobListingService {
                 return result.stream()
                         .collect(java.util.stream.Collectors.toMap(
                                 record -> record.get("skillName").asString(),
-                                record -> record.get("jobCount").asLong()
+                                record -> record.get("jobCount").asLong(),
+                                (count1, count2) -> count1 + count2 // Merge duplicates by summing counts
                         ));
             });
         } catch (Exception e) {
@@ -343,6 +344,10 @@ public class Neo4jJobListingService {
                 }
 
                 // Step 2: For each pair of skills, count co-occurrences (jobs with BOTH skills)
+                // LIMIT topN to max 15 to prevent resource exhaustion (15×15 = 225 pairs max)
+                int limitedTopN = Math.min(topN, 15);
+                List<String> limitedTopSkills = topSkills.stream().limit(limitedTopN).toList();
+
                 String cooccurrenceCypher = """
                     UNWIND $skills AS skill1
                     UNWIND $skills AS skill2
@@ -352,13 +357,13 @@ public class Neo4jJobListingService {
                     RETURN skill1, skill2, cooccurrence
                     """;
 
-                var cooccurrenceResult = tx.run(cooccurrenceCypher, Map.of("skills", topSkills));
+                var cooccurrenceResult = tx.run(cooccurrenceCypher, Map.of("skills", limitedTopSkills));
 
                 // Build matrix as nested map
                 Map<String, Map<String, Long>> matrix = new java.util.HashMap<>();
                 long maxCooccurrence = 0L;
 
-                for (String skill : topSkills) {
+                for (String skill : limitedTopSkills) {
                     matrix.put(skill, new java.util.HashMap<>());
                 }
 
@@ -385,11 +390,11 @@ public class Neo4jJobListingService {
                 long totalJobs = totalJobsResult.hasNext() ?
                         totalJobsResult.next().get("total").asLong() : 0L;
 
-                log.info("Built {}x{} co-occurrence matrix, max value: {}",
-                        topSkills.size(), topSkills.size(), maxCooccurrence);
+                log.info("Built {}x{} co-occurrence matrix (limited from {}), max value: {}",
+                        limitedTopSkills.size(), limitedTopSkills.size(), topN, maxCooccurrence);
 
                 return Map.of(
-                        "skillNames", topSkills,
+                        "skillNames", limitedTopSkills,
                         "cooccurrenceMatrix", matrix,
                         "maxCooccurrence", maxCooccurrence,
                         "totalJobs", totalJobs
@@ -451,6 +456,10 @@ public class Neo4jJobListingService {
                 }
 
                 // Step 2: For each user skill × market skill pair, count co-occurrences
+                // OPTIMIZED: Limit to top 10 user skills and top 10 market skills to reduce load
+                List<String> limitedUserSkills = userSkills.stream().limit(10).toList();
+                List<String> limitedMarketSkills = marketSkillsList.stream().limit(10).toList();
+
                 String cooccurrenceCypher = """
                     UNWIND $userSkills AS userSkill
                     UNWIND $marketSkills AS marketSkill
@@ -458,16 +467,17 @@ public class Neo4jJobListingService {
                                    (job)-[:REQUIRES_SKILL]->(s2:Skill {name: marketSkill})
                     WITH userSkill, marketSkill, COUNT(DISTINCT job) as cooccurrence
                     RETURN userSkill, marketSkill, cooccurrence
+                    LIMIT 200
                     """;
 
                 var cooccurrenceResult = tx.run(cooccurrenceCypher,
-                        Map.of("userSkills", userSkills, "marketSkills", marketSkillsList));
+                        Map.of("userSkills", limitedUserSkills, "marketSkills", limitedMarketSkills));
 
                 // Build matrix as nested map: userSkill -> marketSkill -> count
                 Map<String, Map<String, Long>> matrix = new java.util.HashMap<>();
                 final long[] maxCooccurrence = {0L}; // Use array to make it effectively final
 
-                for (String userSkill : userSkills) {
+                for (String userSkill : limitedUserSkills) {
                     matrix.put(userSkill, new java.util.HashMap<>());
                 }
 
@@ -482,12 +492,13 @@ public class Neo4jJobListingService {
                     }
                 });
 
-                log.info("Built {}×{} skill path matrix, max value: {}",
+                log.info("Built {}×{} skill path matrix (limited from {}×{}), max value: {}",
+                        limitedUserSkills.size(), limitedMarketSkills.size(),
                         userSkills.size(), marketSkillsList.size(), maxCooccurrence[0]);
 
                 return Map.of(
-                        "userSkills", userSkills,
-                        "marketSkills", marketSkillsList,
+                        "userSkills", limitedUserSkills,
+                        "marketSkills", limitedMarketSkills,
                         "cooccurrenceMatrix", matrix,
                         "maxCooccurrence", maxCooccurrence[0]
                 );

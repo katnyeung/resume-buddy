@@ -47,8 +47,8 @@ public class OAuth2LoginSuccessHandler extends SimpleUrlAuthenticationSuccessHan
             // Find or create user
             User user = authService.findOrCreateGoogleUser(googleId, email, fullName);
 
-            // Generate JWT token
-            String token = jwtTokenProvider.generateToken(user.getId());
+            // Generate JWT token with role
+            String token = jwtTokenProvider.generateToken(user);
 
             // Redirect to frontend with token
             String redirectUrl = UriComponentsBuilder.fromUriString(frontendUrl + "/auth/callback")

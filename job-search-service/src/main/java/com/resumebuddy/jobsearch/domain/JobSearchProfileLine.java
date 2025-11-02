@@ -39,6 +39,9 @@ public class JobSearchProfileLine {
     /**
      * Redis key for the vector embedding of this specific line
      * Format: "profile:line:{id}"
+     *
+     * NOTE: Vector embeddings are stored ONLY in Redis (not PostgreSQL)
+     * If Redis fails, re-vectorize user profiles (typically <100 profiles) via OpenAI API
      */
     @Column(name = "redis_vector_key", length = 100)
     private String redisVectorKey;

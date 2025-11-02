@@ -41,6 +41,7 @@ public class ResumeController {
     private final ResumeLineService resumeLineService;
     private final Neo4jGraphService neo4jGraphService;
     private final UserCreditService userCreditService;
+    private final com.resumebuddy.service.EditorStateService editorStateService;
 
     @Value("${app.token-costs.resume-upload}")
     private int resumeUploadCost;
@@ -229,11 +230,19 @@ public class ResumeController {
             // updatedAt will be set automatically by JPA
             resumeRepository.save(resume);
 
-            // Create file URL for Docling service to fetch
-            String fileUrl = "http://localhost:8080/api/resumes/" + id + "/file";
+            // Load file from disk
+            byte[] fileContent = fileStorageService.loadFileAsBytes(resume.getFilePath());
+            if (fileContent == null || fileContent.length == 0) {
+                throw new RuntimeException("Resume file content is empty or could not be loaded");
+            }
 
-            // Parse with Docling HTTP service using URL
-            ParsedResume parsedResume = doclingHttpService.parseResumeFromUrl(fileUrl, resume.getId());
+            // Parse with Docling HTTP service (delegates to RunPod with base64)
+            ParsedResume parsedResume = doclingHttpService.parseResumeFromBytes(
+                fileContent,
+                resume.getFilename(),
+                resume.getContentType(),
+                resume.getId()
+            );
 
             // Store the parsed content as JSON and update status
             resume.setParsedContent(doclingHttpService.convertToJson(parsedResume));
@@ -312,7 +321,7 @@ public class ResumeController {
     }
 
     @PutMapping("/{id}/editor-state")
-    @Operation(summary = "Save editor state", description = "Save Lexical editor state as JSON")
+    @Operation(summary = "Save editor state", description = "Save Lexical editor state as JSON and update resume_lines")
     public ResponseEntity<Resume> saveEditorState(
             @PathVariable String id,
             @RequestBody String editorState) {
@@ -328,7 +337,10 @@ public class ResumeController {
             resume.setEditorState(editorState);
             Resume savedResume = resumeRepository.save(resume);
 
-            log.info("Successfully saved editor state for resume ID: {}", id);
+            // Parse editor state and update resume_lines table
+            editorStateService.updateResumeLinesFromEditorState(savedResume, editorState);
+
+            log.info("Successfully saved editor state and updated resume lines for resume ID: {}", id);
             return ResponseEntity.ok(savedResume);
         } catch (Exception e) {
             log.error("Error saving editor state for resume ID: {}", id, e);

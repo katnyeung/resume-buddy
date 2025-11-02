@@ -43,7 +43,7 @@ public class UserCreditService {
 
         // Lock row to prevent concurrent modification
         UserCredit userCredit = userCreditRepository.findByIdWithLock(userId)
-            .orElseGet(() -> createDefaultUserCredit(userId));
+            .orElseThrow(() -> new RuntimeException("User credit account not found: " + userId));
 
         BigDecimal balanceBefore = userCredit.getTotalCredits().subtract(userCredit.getUsedCredits());
 
@@ -119,7 +119,7 @@ public class UserCreditService {
         log.info("Granting {} credits to user {}. Reason: {}", amount, userId, reason);
 
         UserCredit userCredit = userCreditRepository.findByIdWithLock(userId)
-            .orElseGet(() -> createDefaultUserCredit(userId));
+            .orElseThrow(() -> new RuntimeException("User credit account not found: " + userId));
 
         BigDecimal balanceBefore = userCredit.getTotalCredits().subtract(userCredit.getUsedCredits());
 
@@ -144,12 +144,28 @@ public class UserCreditService {
     }
 
     /**
-     * Get user credit balance (creates default if not exists)
+     * Get user credit balance (throws exception if not exists)
      */
-    @Transactional
+    @Transactional(readOnly = true)
     public UserCredit getUserCredit(String userId) {
         return userCreditRepository.findById(userId)
-            .orElseGet(() -> createDefaultUserCredit(userId));
+            .orElseThrow(() -> new RuntimeException("User credit account not found. Please contact support."));
+    }
+
+    /**
+     * Create initial credit account for new user (called during registration only)
+     */
+    @Transactional
+    public void createInitialCredits(String userId) {
+        log.info("Creating initial credit account for new user {}", userId);
+
+        UserCredit userCredit = new UserCredit();
+        userCredit.setUserId(userId);
+        userCredit.setTotalCredits(new BigDecimal("1000.00")); // Default 1000 free credits
+        userCredit.setUsedCredits(BigDecimal.ZERO);
+        userCreditRepository.save(userCredit);
+
+        log.info("Created initial credit account with 1000 credits for user {}", userId);
     }
 
     /**
@@ -158,18 +174,6 @@ public class UserCreditService {
     @Transactional(readOnly = true)
     public List<CreditTransaction> getTransactionHistory(String userId) {
         return creditTransactionRepository.findByUserIdOrderByCreatedAtDesc(userId);
-    }
-
-    /**
-     * Create default user credit account with initial credits
-     */
-    private UserCredit createDefaultUserCredit(String userId) {
-        log.info("Creating default credit account for user {}", userId);
-        UserCredit userCredit = new UserCredit();
-        userCredit.setUserId(userId);
-        userCredit.setTotalCredits(new BigDecimal("1000.00")); // Default 1000 free credits
-        userCredit.setUsedCredits(BigDecimal.ZERO);
-        return userCreditRepository.save(userCredit);
     }
 
     /**

@@ -47,7 +47,7 @@ public class JobMatch {
      *   "matchPercentage": 75.5
      * }
      */
-    @Column(name = "skill_gaps", columnDefinition = "JSON")
+    @Column(name = "skill_gaps", columnDefinition = "TEXT")
     private String skillGaps;
 
     @CreationTimestamp

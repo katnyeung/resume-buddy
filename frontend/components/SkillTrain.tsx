@@ -52,7 +52,12 @@ export default function SkillTrain({ resumeId, userSkills, userSkillsWithCategor
         setCurrentStations(startingStations);
       } catch (err: any) {
         console.error('Failed to load skill train:', err);
-        setError('Failed to load skill train data');
+        // If 404, user hasn't created job search profile yet - don't show error
+        if (err?.response?.status === 404) {
+          setError(null);
+        } else {
+          setError('Failed to load skill train data');
+        }
       } finally {
         setIsInitialLoading(false);
       }

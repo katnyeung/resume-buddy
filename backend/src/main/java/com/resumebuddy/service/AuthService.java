@@ -26,6 +26,9 @@ public class AuthService {
     @Autowired
     private JwtTokenProvider jwtTokenProvider;
 
+    @Autowired
+    private UserCreditService userCreditService;
+
     /**
      * Register a new user with email and password
      */
@@ -45,6 +48,9 @@ public class AuthService {
 
         User savedUser = userRepository.save(user);
         logger.info("New user registered: {}", email);
+
+        // Create initial credit account
+        userCreditService.createInitialCredits(savedUser.getId());
 
         return savedUser;
     }
@@ -66,9 +72,9 @@ public class AuthService {
             throw new RuntimeException("Invalid email or password");
         }
 
-        // Generate JWT token
-        String token = jwtTokenProvider.generateToken(user.getId());
-        logger.info("User logged in: {}", email);
+        // Generate JWT token with role
+        String token = jwtTokenProvider.generateToken(user);
+        logger.info("User logged in: {} with role: {}", email, user.getRole());
 
         return token;
     }
@@ -107,6 +113,9 @@ public class AuthService {
 
         User savedUser = userRepository.save(newUser);
         logger.info("New Google user registered: {}", email);
+
+        // Create initial credit account
+        userCreditService.createInitialCredits(savedUser.getId());
 
         return savedUser;
     }

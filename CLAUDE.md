@@ -1,194 +1,73 @@
 # Resume Buddy - AI-Powered Resume Enhancement Platform
 
-## 📌 Current State: Phase 11.4 - Skill Co-occurrence Heatmap ✅ + Interview Practice Service (Experimental)
-**Last Updated**: October 19, 2025
-**Status**: Production-ready MVP with job search, vector matching, graph-based skill discovery, token credits, skill train, and skill heatmap. **NEW**: Experimental interview practice microservice.
+## 📌 Current State: Phase 11.18 - Interview Practice Production Deployment
+**Last Updated**: October 27, 2025
+**Status**: Production-ready with interview practice service, Stripe payments, user profile management, PostgreSQL (Neon), RunPod GPU parsing, auto file cleanup, 3-LLM optimized job analysis, client-side auth guards
 
 ## Project Overview
-AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration. **NEW**: Voice-based interview practice with LangGraph state management.
+AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration.
 
 ## Tech Stack
-- **Backend**:
-  - **Resume API** (port 8080): Spring Boot 3.2.1 + Java 17 + MySQL 8.0 + Neo4j 5.x
-  - **Job Search Service** (port 8085): Spring Boot 3.2.1 + Java 17 + MySQL 8.0 + Redis Stack + Swagger/OpenAPI
-  - **Interview Practice Service** (port 8086): Python FastAPI + LangGraph + Redis (RedisSaver) + MySQL **(NEW - Experimental)**
+- **Backend**: Spring Boot 3.2.1 + Java 17 + PostgreSQL 15 (Neon) + Neo4j 5.x + Redis Stack
+  - Resume API (port 8080) - Resume analysis, job analysis, credits, async queue
+  - Job Search Service (port 8085) - Profile matching, skill discovery, job crawling
+  - Interview Practice (port 8086) - Python FastAPI + LangGraph (Docker)
 - **Frontend**: Next.js 14 + TypeScript + Lexical Editor + Tailwind CSS
-- **AI/Data**: Grok-4-fast-reasoning (X.AI) + OpenAI Embeddings (text-embedding-3-small) + O*NET Web Services API + OpenAI Whisper (STT) + OpenAI TTS
-- **Document Parsing**: Docling microservice (Python FastAPI + Docker) with optimized OCR (EasyOCR + GPU acceleration)
+- **AI/Data**: Grok-4-fast-reasoning (X.AI) + OpenAI Embeddings + O*NET API + Whisper/TTS
+- **Document Parsing**: Docling (Python FastAPI + Docker) with RunPod serverless GPU support
 - **Vector Search**: Redis Stack with RediSearch + HNSW indexing
 
-## Key Architecture
+## Key Features
 
-### Service Architecture (Microservices)
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Frontend (Next.js) - Port 3000                               │
-│  - Resume Editor | Job Search UI | Interview Practice (TODO) │
-└────────────┬─────────────────────────────────────────────────┘
-             │
-      ┌──────┴──────┬──────────────┐
-      │             │              │
-┌─────▼─────┐  ┌───▼──────────┐  ┌▼──────────────────────────┐
-│ Resume API│  │ Job Search   │  │ Interview Practice (NEW)  │
-│ :8080     │  │ Service      │  │ :8086 (Experimental)      │
-│           │  │ :8085        │  │                           │
-│ MySQL     │  │              │  │ - Voice Q&A (STT/TTS)     │
-│ Neo4j     │  │ - Profiles   │  │ - LangGraph workflow      │
-└───────────┘  │ - Matching   │  │ - Redis checkpoints       │
-               │ - Skills     │  │                           │
-               │              │  │ Redis (state)             │
-               │ MySQL + Redis│  │ MySQL (analytics)         │
-               └──────────────┘  └───────────────────────────┘
-```
-
-### Database Layers
-1. **MySQL (resumebuddy)**: Raw resumes, line-by-line content, structured ATS analysis, **user credits, job queue**
-2. **Neo4j**: Job/occupation/skill graph with O*NET taxonomy
-3. **MySQL (jobsearch)**: Job search profiles, job listings, matches, **crawl activity logs**
-4. **Redis**: Vector embeddings (1536-dim) with HNSW indexing
-
-### Core Services (Resume API - :8080)
-- `DoclingHttpService` - Document parsing
-- `AIAnalysisService` - LLM-based resume analysis
-- `ResumeAnalysisService` - Structured data extraction
-- `JobAnalysisService` - Job normalization + O*NET integration
-- `ONetIntegrationService` - O*NET API client
-- `Neo4jGraphService` - Graph operations + skill mapping
-- **`UserCreditService`** - Token credit management with ACID transactions (NEW)
-- **`JobQueueService`** - Async job queue with optimistic locking (NEW)
-- **`JobQueueWorker`** - Scheduled worker (@Scheduled every 2s) (NEW)
-- **`JobExecutor`** - Job execution wrapper for existing services (NEW)
-
-### Core Services (Job Search - :8081)
-**Domain**:
-- `JobPostGenerator` - LLM-powered job post creation from experiences
-- `SkillMatcher` - Skill gap analysis (cosine similarity + set difference)
-
-**Application**:
-- `JobSearchApplicationService` - Profile orchestration
-- `JobMatchingApplicationService` - Vector search + ranking
-
-**Infrastructure**:
-- `RedisVectorService` - Vector storage + RediSearch queries
-- `VectorEmbeddingService` - OpenAI embeddings client
-- `ResumeApiClient` - HTTP client to fetch experience data
-- `GrokLLMClient` - Job post generation
-
-### Frontend Components
-- `LexicalEditor` - Rich text editing with formatting
-- `AnalysisSummary` - ATS-style structured data display + **Job Search Profile Editor** (editable textarea at top of page)
-- `AnalysisOverlay` - Line-by-line grouped analysis
-- `JobAnalysisReport` - Deep graph analysis with skill credibility
-
-## Neo4j Graph Structure
-
-**Key Nodes**:
-- `JobExperience`, `Occupation` (O*NET SOC), `Skill`, `ONetSkill`, `ONetTechnology`, `ONetActivity`
-
-**Key Relationships**:
-- `(JobExperience)-[:MAPS_TO]->(Occupation)` - Multi-occupation mapping (2-3 per job)
-- `(JobExperience)-[:REQUIRES_SKILL]->(Skill)` - Technical skills
-- `(Occupation)-[:REQUIRES_SKILL]->(ONetSkill)` - Soft skills
-- `(Occupation)-[:USES_TECHNOLOGY]->(ONetTechnology)` - Technologies
-- `(Skill)-[:DEMONSTRATES]->(ONetSkill)` - LLM-mapped soft skills
-- `(Skill)-[:RELATED_TO]->(ONetTechnology)` - LLM-mapped technologies
-
-## Core Features
-
-### Resume Analysis (Phase 6)
-- **Skill credibility scoring**: STRONG (2+ examples), MODERATE (1), WEAK/NONE (graph-linked)
-- **Line value ranking**: By skill count (EXCELLENT: 4+, GOOD: 2-3, MODERATE: 1, LOW: 0)
-- **Missing skill/task recommendations**: From O*NET graph, importance-sorted
+### Resume Analysis
+- Skill credibility scoring (STRONG/MODERATE/WEAK/NONE)
+- Line value ranking (EXCELLENT/GOOD/MODERATE/LOW)
 - Multi-occupation mapping (2-3 O*NET SOCs per job)
+- LLM-powered task coverage insights with radar chart
 
-### Job Search & Matching (Phases 7-11)
-- **Profile creation**: Select 1-N experiences → LLM generates mock job post (8-12 bullets)
-- **Editable profiles**: Inline textarea at top of page, save triggers re-vectorization
-- **Dual vector system**: Profile-level (full post) + line-level (each bullet) vectors
-- **Hybrid matching**: 60% vector similarity + 40% proficiency-weighted skills
-- **Match classification**: STRONG (≥0.85), GOOD (≥0.70), MODERATE (<0.70)
-- **Smart caching**: Cache-first page loads, Force Refresh option, preserves user flags
-- **Date filtering**: 7d/2wk/1mo/2mo/3mo/All (default: 1 month)
-- **topK selector**: 50/100/200/300/500/ALL jobs analyzed
+### Job Search & Matching
+- Vector-based semantic matching (profile + line-level vectors)
+- Hybrid ranking: 60% vector similarity + 40% proficiency-weighted skills
+- Smart caching with Force Refresh option
+- Date filtering (7d/2wk/1mo/2mo/3mo/All) + topK selector (50-500/ALL)
+- Multi-source job crawling (Reed, Adzuna, JSearch) with web scraping
 
-### Neo4j Skill Discovery (Phase 11.2)
-- **Interactive tag cloud**: Top 30 in-demand skills with job counts
-- **Drilldown modal**: AND logic filtering (Java → Java+Docker → Java+Docker+AWS)
-- **Related skills**: Shows co-occurring skills in matching jobs
-- **Graph-discovered jobs**: Separate table bypassing vector search
-- **Performance**: <100ms Neo4j queries, <50ms MySQL batch fetch
+### Interactive Skill Discovery
+- **Skill Tag Cloud**: Top 30 in-demand skills with job counts
+- **Drilldown Modal**: AND logic filtering with related skill suggestions
+- **Skill Train**: Interactive career path explorer (build skill combinations)
+- **Skill Heatmap**: 2D co-occurrence matrix (10×10 to 25×25)
 
-### Skill Train (Phase 11.3)
-- **Interactive career path explorer**: Build skill combinations to explore job opportunities
-- **Visual train track**: Horizontal stations showing skills (owned vs gaps) with job counts
-- **Path building**: Click skills to extend path, see related skills at each level (AND logic)
-- **Backtrack/Reset**: Navigate back or restart exploration
-- **Zero cost**: Reuses existing Neo4j queries, no LLM calls
-- **Placement**: Displayed after Skills section in ATS Analysis Summary page
+### Production Features
+- **User credits system**: Token-based billing with ACID transactions
+- **Stripe payment integration**: Buy credits (£2/200, £5/500, £8/1000) via Stripe Checkout (prices exclude tax)
+- **User profile management**: Edit name, view transaction history, soft-delete account
+- **Async job queue**: PostgreSQL-based queue with @Scheduled worker
+- **Auto file cleanup**: Deletes parsed files after 7 days (saves disk space)
+- **RunPod GPU support**: Serverless OCR for resume parsing
+- **Google OAuth2 login**: Auto user creation/linking, JWT token generation
+- **Interview practice**: AI-powered voice interview with real-time feedback and interrupts
 
-### Skill Co-occurrence Heatmap (Phase 11.4)
-- **2D matrix visualization**: Shows how often skill pairs appear together in job listings
-- **Color-coded intensity**: White (0 jobs) → deep indigo (max co-occurrences)
-- **Interactive cells**: Click any cell to explore jobs requiring both skills
-- **Configurable size**: 10×10, 15×15, 20×20, or 25×25 matrix
-- **Hover tooltips**: Shows skill pair and job count + percentage
-- **Sticky headers**: Vertical skill labels on rows/columns for easy reading
-- **Performance**: <200ms Neo4j query for 20×20 matrix
-- **Zero cost**: Pure graph queries, no LLM calls
-- **Placement**: Job Search page after "Discover Jobs by Skills" section
+## Database Layers
+1. **PostgreSQL/Neon (resumebuddy)**: Resumes, analysis, user credits, job queue, payment records
+2. **PostgreSQL/Neon (jobsearch)**: Profiles, job listings, matches, crawl logs
+3. **PostgreSQL/Neon (interview_practice)**: Interview sessions, rounds, transcripts
+4. **Neo4j**: Job/occupation/skill graph with O*NET taxonomy
+5. **Redis**: Vector embeddings (1536-dim) with HNSW indexing + LangGraph checkpoints
 
-## API Endpoints (Key)
+## Quick Start
 
-**Resume Management** (:8080):
-- `POST /api/resumes/upload` - Upload file
-- `POST /api/resumes/{id}/parse` - Parse with Docling
-- `GET /api/resumes/{id}` - Get metadata
-- `DELETE /api/resumes/{id}` - Delete (with Neo4j cleanup)
+```bash
+# 1. Start infrastructure
+./start-with-docker.sh  # Neo4j, Docling
+cd job-search-service && docker-compose up -d  # Redis
+docker-compose up -d  # Interview Practice :8086 (from root)
 
-**Analysis** (:8080):
-- `POST /api/resumes/{id}/analyze` - Line-by-line + structured analysis
-- `GET /api/resumes/{id}/structured-analysis` - Get ATS data
-- `POST /api/resumes/{resumeId}/experiences/{experienceId}/analyze` - Job analysis with graph
-- `GET /api/resumes/{resumeId}/experiences/{experienceId}/analysis` - Get job analysis
-
-**Editor** (:8080):
-- `PUT /api/resumes/{id}/editor-state` - Save Lexical state
-- `GET /api/resumes/{id}/editor-state` - Load state
-
-**Async Job Queue** (:8080 - NEW Phase 10):
-- `POST /api/jobs/resumes/{id}/analyze/async` - Queue resume analysis (async)
-- `POST /api/jobs/resumes/{resumeId}/experiences/{expId}/analyze/async` - Queue job experience analysis (async)
-- `GET /api/jobs/{jobId}/status` - Poll job status (returns QUEUED/PROCESSING/COMPLETED/FAILED)
-
-**User Credits** (:8080 - NEW Phase 10):
-- `GET /api/users/{userId}/credits` - Get credit balance
-- `GET /api/users/{userId}/credits/transactions` - Get transaction history
-- `POST /api/users/admin/credits/grant` - Admin: Grant credits to user
-
-**Job Search** (:8085 - NEW):
-- `POST /api/job-search/profiles` - Create profile from experiences
-- `PUT /api/job-search/profiles/{id}` - Update job post
-- `GET /api/job-search/profiles/{id}` - Get profile
-- `GET /api/job-search/profiles/{id}/lines` - Get profile lines (single source of truth)
-- `GET /api/job-search/profiles?resumeId={resumeId}` - List profiles
-- `POST /api/job-search/profiles/{id}/search?topK=20` - Search jobs (creates/updates matches)
-- `GET /api/job-search/profiles/{id}/matches` - Get cached matches
-- `GET /api/job-search/profiles/{id}/matching-results?topK=20&refresh=false` - Line-by-line matching results (vector + skill analysis), add `refresh=true` to bypass cache
-- `POST /api/job-search/admin/rebuild-index` - Rebuild Redis index with line-level prefixes (DESTRUCTIVE)
-- `POST /api/job-search/admin/revectorize/listing-lines?batchSize=50` - Parse job descriptions → lines → batch vectorize
-- `POST /api/job-search/admin/revectorize/profile-lines?batchSize=50` - Re-vectorize existing profile lines
-
-**Skill Train** (:8085 - NEW Phase 11.3):
-- `GET /api/job-search/resumes/{resumeId}/skill-train` - Get skill train data (user skills + market skills + job counts)
-- `POST /api/job-search/skill-train/path` - Explore skill path (AND logic, returns job count + related skills)
-
-**Skill Heatmap** (:8085 - NEW Phase 11.4):
-- `GET /api/job-search/skills/heatmap?topN=20` - Get skill co-occurrence matrix (shows how often skill pairs appear together in jobs)
-
-**Swagger & Docs**:
-- **Swagger UI**: http://localhost:8085/swagger-ui.html
-- **OpenAPI Docs**: http://localhost:8085/api-docs
+# 2. Start services
+cd backend && mvn spring-boot:run &              # Resume API :8080
+cd job-search-service && mvn spring-boot:run &  # Job Search :8085
+cd frontend && npm run dev                       # Frontend :3000
+```
 
 ## Environment Setup
 
@@ -208,6 +87,10 @@ app:
     password: ${NEO4J_PASSWORD}
   docling:
     service-url: ${DOCLING_SERVICE_URL:http://localhost:8081}
+    use-runpod: ${DOCLING_USE_RUNPOD:false}
+  runpod:
+    endpoint-id: ${RUNPOD_ENDPOINT_ID}
+    api-key: ${RUNPOD_API_KEY}
   job-crawling:
     adzuna:
       app-id: ${ADZUNA_APP_ID}
@@ -216,6 +99,22 @@ app:
       api-key: ${REED_API_KEY}
     jsearch:
       api-key: ${JSEARCH_API_KEY}
+  file:
+    cleanup:
+      enabled: true
+      retention-days: 7
+spring:
+  mail:
+    host: ${MAIL_HOST:email-smtp.eu-west-2.amazonaws.com}
+    username: ${AWS_SES_USERNAME}
+    password: ${AWS_SES_PASSWORD}
+    from: ${MAIL_FROM:noreply@resumebuddy.cv}
+stripe:
+  api-key: ${STRIPE_SECRET_KEY}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET}
+  price-id-200: ${STRIPE_PRICE_ID_200}
+  price-id-500: ${STRIPE_PRICE_ID_500}
+  price-id-1000: ${STRIPE_PRICE_ID_1000}
 ```
 
 ### Frontend (.env.local)
@@ -223,265 +122,433 @@ app:
 NEXT_PUBLIC_API_URL=http://localhost:8080/api
 ```
 
-## Quick Start
+## Key API Endpoints
 
-### Start All Services
-```bash
-# 1. Start infrastructure (MySQL, Neo4j, Docling)
-./start-with-docker.sh
+**Resume Management** (:8080):
+- `POST /api/resumes/upload` - Upload file
+- `POST /api/resumes/{id}/parse` - Parse with Docling
+- `POST /api/resumes/{id}/analyze` - Line-by-line + structured analysis
+- `DELETE /api/resumes/{id}` - Delete with Neo4j cleanup
 
-# 2. Start Redis for job search
-cd job-search-service && docker-compose up -d && cd ..
+**Job Analysis** (:8080):
+- `POST /api/resumes/{resumeId}/experiences/{expId}/analyze` - Deep analysis with O*NET
+- `GET /api/resumes/{resumeId}/experiences/{expId}/analysis` - Get cached results
 
-# 3. Start Resume API (:8080)
-cd backend && mvn spring-boot:run &
+**Async Queue** (:8080):
+- `POST /api/jobs/resumes/{id}/analyze/async` - Queue resume analysis
+- `GET /api/jobs/{jobId}/status` - Poll status (QUEUED/PROCESSING/COMPLETED/FAILED)
 
-# 4. Start Job Search Service (:8085)
-cd job-search-service && mvn spring-boot:run &
+**Stripe Payments** (:8080):
+- `POST /api/payments/create-checkout-session` - Create Stripe Checkout session
+- `POST /api/payments/webhook` - Stripe webhook (signature verified)
+- `GET /api/payments/success?session_id=xxx` - Verify payment status
 
-# 5. Start Frontend (:3000)
-cd frontend && npm run dev
-```
+**User Profile** (:8080):
+- `GET /api/users/{userId}/profile` - Get full profile with credits
+- `PUT /api/users/{userId}/profile/name` - Update full name
+- `DELETE /api/users/{userId}/account` - Soft delete account
+- `GET /api/users/{userId}/profile/transactions` - Transaction history
 
-### Stop All
-```bash
-./stop-with-docker.sh
-cd job-search-service && docker-compose down
-```
+**Email Notifications** (:8080):
+- `POST /api/notifications/send` - Send email to user (requires X-API-Key)
+- Used by interview-practice-service for round reminders
+- Requires AWS SES SMTP configuration
 
-## Usage Examples
+**Job Search** (:8085):
+- `POST /api/job-search/profiles` - Create profile from experiences
+- `GET /api/job-search/profiles/{id}/matching-results?topK=20&refresh=false` - Get matches
+- `GET /api/job-search/skills/top?limit=30` - Top skills tag cloud
+- `GET /api/job-search/skills/heatmap?topN=20` - Skill co-occurrence matrix
+- `POST /api/job-search/skill-train/path` - Explore skill path
 
-### Manual Job Crawl (Reed.co.uk)
-```bash
-POST http://localhost:8085/api/job-search/admin/crawl
-Content-Type: application/json
+**Admin** (:8085):
+- `POST /api/job-search/admin/crawl` - Manual job crawl (Reed/Adzuna/JSearch)
+- `POST /api/job-search/admin/rebuild-index` - Rebuild Redis index
+- `POST /api/job-search/admin/revectorize/listing-lines?daysBack=14` - Re-vectorize jobs
+- `POST /api/admin/cleanup-files` - Trigger file cleanup
 
-{
-  "source": "REED",
-  "keywords": "java developer",
-  "location": "London",
-  "maxResults": 50,
-  "page": 1,
-  "fullTimeOnly": false,
-  "permanentOnly": true,
-  "maxDaysOld": 7
-}
-```
-
-### Manual Job Crawl (Adzuna)
-```bash
-POST http://localhost:8085/api/job-search/admin/crawl
-Content-Type: application/json
-
-{
-  "source": "ADZUNA",
-  "keywords": "software engineer",
-  "location": "gb:London",
-  "maxResults": 50,
-  "page": 1,
-  "fullTimeOnly": false,
-  "permanentOnly": true,
-  "maxDaysOld": 7
-}
-```
-
-### Manual Job Crawl (JSearch - RapidAPI)
-```bash
-POST http://localhost:8085/api/job-search/admin/crawl
-Content-Type: application/json
-
-{
-  "source": "JSEARCH",
-  "keywords": "java developer",
-  "location": "gb:London",
-  "maxResults": 50,
-  "page": 1,
-  "maxDaysOld": 7
-}
-```
+**Swagger**: http://localhost:8085/swagger-ui.html
 
 ## Key Implementation Files
 
 **Resume API (backend/)**:
-- `JobAnalysisService.java` - Main orchestrator
+- `JobAnalysisService.java` - Main orchestrator (3 LLM calls)
 - `Neo4jGraphService.java` - Graph queries + skill mapping
-- `ONetIntegrationService.java` - O*NET API client
-- `prompts/` - LLM prompt templates
+- `UserCreditService.java` - Token credit management
+- `StripePaymentService.java` - Stripe Checkout + webhook handling
+- `UserProfileService.java` - Profile management + soft delete
+- `FileCleanupService.java` - Auto file cleanup
+- `RunPodDoclingService.java` - RunPod GPU integration
 
 **Job Search Service (job-search-service/)**:
-- `domain/model/` - JobSearchProfile, JobListing, JobMatch entities
-- `domain/service/` - JobPostGenerator, SkillMatcher, JobCrawlerService, JobDescriptionParser
-- `application/service/` - JobSearchApplicationService, JobMatchingApplicationService, JobCrawlingApplicationService
-- `service/` - JobAnalysisService (keyword matching), KeywordSkillMatcher (regex-based), Neo4jJobListingService (direct Neo4j indexing + skill co-occurrence)
-- `infrastructure/redis/` - RedisVectorService
-- `infrastructure/external/` - GrokLLMClient, VectorEmbeddingService, AdzunaApiClient, ReedApiClient
-- `infrastructure/external/jobsources/` - JobSourceApiClient (interface), AdzunaApiClient, ReedApiClient, JSearchApiClient
-- `config/` - Neo4jConfig (Neo4j Driver bean)
-- `dto/adzuna/` - AdzunaJobDto, AdzunaSearchResponse (common format)
-- `dto/reed/` - ReedJobDto, ReedSearchResponse
-- `dto/jsearch/` - JSearchJobDto, JSearchSearchResponse
-- `dto/analysis/` - JobAnalysisRequest, JobAnalysisResponse (skill extraction DTOs)
-- `dto/` - SkillHeatmapResponse (co-occurrence matrix)
-- `api/controller/` - JobSearchController, AdminController
+- `domain/service/` - JobPostGenerator, SkillMatcher, JobCrawlerService
+- `application/service/` - JobSearchApplicationService, JobMatchingApplicationService
+- `infrastructure/redis/` - RedisVectorService (vectors in Redis only)
+- `infrastructure/external/jobsources/` - AdzunaApiClient, ReedApiClient, JSearchApiClient
+- `service/` - Neo4jJobListingService (skill co-occurrence, graph indexing)
 
-**Docling Service (docling-service/)**:
-- `app.py` - FastAPI service with OCR optimizations
-- Dual pipeline configuration:
-  - PDF: Fast text extraction (force_full_page_ocr=False) + OCR fallback
-  - Images (PNG/JPG): Full-page OCR (force_full_page_ocr=True) with 2x scaling
-- EasyOCR with GPU auto-detection, multi-language support (en/fr/de/es)
-- Table structure detection for formatted resume sections
+**Interview Practice Service (interview-practice-service/)**:
+- `main.py` - FastAPI entry point
+- `api/routes/streaming.py` - WebSocket streaming endpoint
+- `domain/agents/interrupt_agent.py` - AI interrupt logic
+- `domain/services/email_scheduler.py` - Daily round reminders
+- `infrastructure/clients/openai_client.py` - Whisper STT + TTS
+- `infrastructure/clients/grok_client.py` - Grok LLM for questions/evaluation
 
 **Frontend**:
-- `JobAnalysisReport.tsx` - Deep analysis UI
-- `LexicalEditor.tsx` - Main editor
+- `LexicalEditor.tsx` - Rich text editor
 - `AnalysisSummary.tsx` - ATS display + Skill Train
+- `JobAnalysisReport.tsx` - Deep analysis + radar chart
 - `SkillFilterCloud.tsx` - Top skills tag cloud
-- `SkillDrilldownModal.tsx` - Skill filtering with AND logic
-- `SkillHeatmap.tsx` - Skill co-occurrence matrix (NEW Phase 11.4)
-- `JobMatchingResults.tsx` - Job matching page (integrates all skill discovery features)
+- `SkillHeatmap.tsx` - Co-occurrence matrix
+- `JobMatchingResults.tsx` - Job matching page
+- `app/credits/page.tsx` - Credit purchase page with 3 packages
+- `app/profile/page.tsx` - User profile + transaction history
+- `app/interview/[sessionId]/[roundNum]/page.tsx` - Interview practice page
+- `components/InterviewPractice.tsx` - WebSocket streaming + live transcript
+- `lib/api/interview.ts` - Interview API client
+- `hooks/useAuth.ts` - Client-side authentication guard
 
-## Key Design Decisions
+## Neo4j Graph Structure
 
-1. **Dual Analysis System**: Line-based (structure) + Structured (ATS extraction)
-2. **Multi-Occupation Mapping**: 2-3 O*NET occupations per job for comprehensive coverage
-3. **Real-Time Graph Queries**: Deep analysis computed on-demand (<500ms)
-4. **Importance-First Sorting**: Skills/tasks sorted by O*NET importance, not just frequency
-5. **Microservice Separation (DDD)**: Job search bounded context separated from resume analysis
-6. **Hybrid Storage**: MySQL (persistence) + Redis (vectors) for optimal performance
-7. **Multi-Experience Profiles**: Aggregate 1-N experiences for comprehensive job search
-8. **Vector-First Matching**: Semantic similarity before rule-based filtering
-9. **Format-Specific OCR**: Separate pipelines for PDFs (fast) vs images (thorough) in Docling service
+**Key Nodes**: `JobExperience`, `Occupation` (O*NET SOC), `Skill`, `ONetSkill`, `ONetTechnology`, `ONetActivity`
 
-## Implementation History (Condensed)
+**Key Relationships**:
+- `(JobExperience)-[:MAPS_TO]->(Occupation)` - Multi-occupation mapping
+- `(JobExperience)-[:REQUIRES_SKILL]->(Skill)` - Technical skills
+- `(Occupation)-[:REQUIRES_SKILL]->(ONetSkill)` - Soft skills
+- `(Skill)-[:DEMONSTRATES]->(ONetSkill)` - LLM-mapped soft skills
 
-**Phases 6-7 (Oct 12-13)** - Resume Analysis & Job Search:
-- Skill credibility report with trust badges and O*NET task mapping
-- DDD microservice (job-search-service) with dual vector system
-- Batch OpenAI embeddings (up to 2048 texts/request)
-- Redis HNSW indexing, <5ms vector searches
+## Production Deployment
 
-**Phase 8 (Oct 14-18)** - Job Crawling & Skill Extraction:
-- Multi-source APIs: Reed (2-stage fetch for full descriptions), Adzuna, JSearch
-- LLM keyword generation (10 base → 30 with senior/lead variants)
-- HTML stripping parser (preserves structure, decodes entities)
-- Keyword-based skill extraction (100+ jobs/sec, $0 cost vs LLM)
-- Neo4j indexing (`JobListing` → `REQUIRES_SKILL` → `Skill`)
-- Batch vectorization (50 jobs in <2s), crawl activity logging
+**Deployment Scripts** (AWS Lightsail):
+```bash
+# Backend (Resume API :8080)
+cd backend && ../deploy-backend.sh
 
-**Phase 9 (Oct 14)** - Line-by-Line Matching:
-- Removed full-doc vectors, pure line-by-line Redis search
-- Newline-first parser (respects job board formatting, 100-150 char chunks)
-- Proficiency-weighted skills: `sum(matched_proficiencies) / sum(all_proficiencies)`
-- 60/40 hybrid ranking (vector + weighted skills)
-- Redis key fix: `listing:line:{db_id}` instead of random UUIDs
+# Job Search Service (:8085)
+cd job-search-service && ../deploy-job-search.sh
 
-**Phase 10 (Oct 18)** - Token Credits & Async Queue:
-- MySQL-based queue (QUEUED → PROCESSING → COMPLETED/FAILED)
-- ACID credit transactions (deduct on start, refund on fail)
-- Costs: Upload=50, Analysis=100, Job exp=50, Profile=25 credits
-- @Scheduled worker (2s polling, max 3 concurrent, retry 3x)
-- Rationale: $0/mo vs $40-100/mo for SQS/Kafka at <100 users
+# Interview Practice Service (:8086 - Docker)
+./deploy-interview-practice.sh
 
-**Phase 11 (Oct 18)** - UX Enhancements:
-- topK selector (50/100/200/300/500/ALL), date filter (7d-3mo)
-- Smart caching: Auto-load cached matches, Force Refresh option
-- Preserves user flags on refresh (stars/saved/applied/redflag)
-- Direct star selection UX (click to set, click again to remove)
-- Reduced logging verbosity (DEBUG for per-job details)
+# Frontend (:3000)
+cd frontend && ../deploy-frontend.sh
+```
+
+**What the scripts do**:
+- Backend/Job Search: Stop service → Build JAR → Upload → Restart systemd service
+- Interview Practice: Build Docker image → Upload tar.gz → Load & start container
+- Frontend: Build Next.js → Upload → Restart systemd service
+- Safe error handling with rollback
+
+**Requirements**:
+- `~/resume-buddy.pem` - SSH key
+- Lightsail IP: 13.43.37.64
+- Systemd services: `resume-api`, `job-search`, `frontend`
+- Docker installed on server for interview-practice
+- Nginx configured for WebSocket proxying (/ws/interview)
+
+## AWS SES Email Setup
+
+The interview-practice-service sends email reminders for scheduled rounds via the backend's notification endpoint. Email is sent using AWS SES (Simple Email Service).
+
+### 1. Verify Domain in AWS SES
+
+1. Go to **AWS Console → SES → Verified identities**
+2. Click **Create identity** → Choose **Domain**
+3. Enter your domain: `resumebuddy.cv`
+4. Select **Easy DKIM** (recommended) → Create identity
+5. AWS will provide DKIM CNAME records to add to your DNS
+
+### 2. Add DKIM Records to Namecheap
+
+1. Go to **Namecheap → Domain List → Manage → Advanced DNS**
+2. Add the 3 CNAME records provided by AWS SES:
+   ```
+   Type: CNAME Record
+   Host: xyz._domainkey
+   Value: xyz.dkim.amazonses.com
+   ```
+3. Wait for DNS propagation (~5-30 minutes)
+4. AWS SES will auto-verify the domain when DNS records are detected
+
+### 3. Create SMTP Credentials
+
+1. Go to **AWS Console → SES → SMTP settings**
+2. Click **Create SMTP credentials**
+3. AWS will generate:
+   - SMTP username (e.g., `AKIAXXXXXXXXXXXXXXXX`)
+   - SMTP password (long base64 string - save this!)
+4. Save both to your backend `.env` file
+
+### 4. Request Production Access (if in Sandbox)
+
+**Note**: New AWS SES accounts start in "Sandbox mode" - you can only send to verified email addresses.
+
+To send to any email:
+1. Go to **SES → Account dashboard**
+2. Click **Request production access**
+3. Fill out the form:
+   - **Use case**: Transactional emails for interview practice reminders
+   - **Expected sending volume**: <500 emails/day
+   - **Compliance**: We have opt-in (users create sessions)
+4. AWS typically approves within 24 hours
+
+### 5. Backend Environment Variables
+
+Add to `backend/.env`:
+
+```bash
+# AWS SES SMTP Configuration
+AWS_SES_USERNAME=AKIAXXXXXXXXXXXXXXXX
+AWS_SES_PASSWORD=your-smtp-password-from-step-3
+MAIL_HOST=email-smtp.eu-west-2.amazonaws.com  # Use your region
+MAIL_FROM=noreply@resumebuddy.cv
+```
+
+**SMTP Endpoints by Region**:
+- `eu-west-2` (London): `email-smtp.eu-west-2.amazonaws.com`
+- `us-east-1` (N. Virginia): `email-smtp.us-east-1.amazonaws.com`
+- `us-west-2` (Oregon): `email-smtp.us-west-2.amazonaws.com`
+
+### 6. Verify Email Sending
+
+Test the notification endpoint:
+
+```bash
+curl -X POST http://localhost:8080/api/notifications/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-internal-api-key-change-in-production" \
+  -d '{
+    "userId": "your-user-id",
+    "subject": "Test Email",
+    "body": "This is a test email from Resume Buddy."
+  }'
+```
+
+Check AWS SES → Sending statistics for delivery metrics.
+
+### 7. Cost Estimate
+
+- **Free tier**: 62,000 emails/month when sending from AWS Lightsail
+- **After free tier**: $0.10 per 1,000 emails
+- **Estimated cost**: ~$0.05/month for MVP (<500 emails)
+
+## Common Issues & Solutions
+
+**Analysis not showing**: Check resume status = "ANALYZED", verify API keys
+**Docling service down**: `cd docling-service && docker-compose logs -f`
+**Neo4j connection**: Verify bolt://localhost:7687 and credentials
+**Job matching returns 0 results**:
+  - `POST /api/job-search/admin/rebuild-index` (rebuild Redis index)
+  - `POST /api/job-search/admin/revectorize/listing-lines?daysBack=14` (re-vectorize)
+**Matches not updating**: Use `?refresh=true` query parameter
+**Redis data lost**: Re-vectorize recent jobs (~$0.10 for 14 days)
+**Job-search-service crashes on AWS Lightsail**:
+  - HikariCP thread starvation from expensive Neo4j queries
+  - Fixed: Reduced pool size to 5, limited matrix queries to 10×10 max
+  - Fixed: Disabled SQL logging (show-sql: false)
+  - Fixed: Added 10s query timeout
+
+## Recent Updates
+
+### Phase 11.20 (Oct 31) - AWS SES Email Notifications ✅
+**Implemented email notification system for interview practice round reminders:**
+
+**Backend Changes:**
+- Added `spring-boot-starter-mail` dependency to pom.xml
+- Created `EmailService` with JavaMailSender for SMTP email sending
+- Created `NotificationController` with `POST /api/notifications/send` endpoint
+- Created `NotificationRequest` DTO (userId, subject, body)
+- Configured AWS SES SMTP in application.yml (host, username, password, from)
+- Endpoint secured with API key authentication (X-API-Key header)
+
+**Interview Practice Integration:**
+- Email scheduler calls backend `/api/notifications/send` endpoint
+- Sends round reminders at scheduled times (daily 9 AM cron job)
+- Round 1 email sent immediately upon session creation
+- Subsequent round emails sent after previous round completion
+
+**AWS SES Setup Required:**
+1. Verify domain (resumebuddy.cv) in AWS SES
+2. Add DKIM CNAME records to Namecheap DNS
+3. Create SMTP credentials in AWS SES console
+4. Add credentials to backend `.env` (AWS_SES_USERNAME, AWS_SES_PASSWORD)
+5. Request production access (to send to any email, not just verified)
+
+**Benefits:**
+- 62,000 free emails/month from AWS Lightsail
+- $0.10 per 1,000 emails after free tier
+- ~$0.05/month estimated cost for MVP
+
+**Files Modified:**
+- `backend/pom.xml` - Added mail dependency
+- `backend/src/main/resources/application.yml` - Added SMTP config
+- Created: `EmailService.java`, `NotificationController.java`, `NotificationRequest.java`
+- `CLAUDE.md` - Added AWS SES setup documentation
+
+### Phase 11.19 (Oct 29) - Job Search Resource Optimization ✅
+**Fixed AWS Lightsail resource exhaustion causing crashes:**
+
+**Database Tuning:**
+- Reduced HikariCP pool: 10→5 connections (Lightsail has limited RAM)
+- Added connection timeout: 20s
+- Added leak detection: 60s threshold
+- Added query timeout: 10s (prevents runaway queries)
+
+**Query Optimization:**
+- Limited skill path matrix: 34×15 → 10×10 (100 pairs vs 510)
+- Limited heatmap matrix: topN capped at 15 (225 pairs max)
+- Added LIMIT 200 to co-occurrence queries
+
+**Logging Reduction:**
+- Disabled SQL logging (show-sql: false)
+- Reduced log levels: DEBUG→INFO, SQL→WARN
+- Silenced HikariCP housekeeping warnings
+
+**Result**: Reduced query load by 80%, eliminated thread starvation warnings
+
+### Phase 11.18 (Oct 27) - Interview Practice Production Deployment ✅
+**Full-stack integration of AI-powered voice interview practice:**
+
+**Frontend (Next.js/React):**
+- Created `/app/interview/[sessionId]/[roundNum]/page.tsx` - Interview practice page
+- `InterviewPractice.tsx` component with full feature parity from HTML test
+- WebSocket client with real-time audio streaming (30ms chunks)
+- Live transcript display with incremental updates
+- AI interrupt handling (gentle/moderate/firm with visual indicators)
+- MediaRecorder management (restart on interrupt, silent restart)
+- Audio playback for questions and interrupts
+- Final evaluation with score display and feedback
+- Debug log panel for troubleshooting
+- API client in `lib/api/interview.ts`
+
+**Backend (Python/FastAPI):**
+- Updated email scheduler URL from `/interview/session/{id}/round/{num}` to `/interview/{id}/{num}`
+- Dockerfile with ffmpeg and audio processing dependencies
+- docker-compose.yml for production deployment
+- .dockerignore for clean builds
+
+**DevOps:**
+- `deploy-interview-practice.sh` script for AWS Lightsail
+- Builds Docker image locally → uploads tar.gz → loads on server
+- Health check verification after deployment
+- Nginx WebSocket proxying configuration documented
+
+**Key Features:**
+- WebSocket streaming at `wss://resumebuddy.cv/ws/interview`
+- Real-time transcription with OpenAI Whisper
+- AI interrupts based on coaching level (CONSERVATIVE/MODERATE/AGGRESSIVE)
+- Scheduled multi-round practice with email reminders
+- 50 credits per session (3 rounds)
+- Cost: ~$0.06 per session (STT + TTS + Grok LLM)
+
+### Phase 11.17 (Oct 25) - Stripe Payment Integration ✅
+**Complete credit purchase system with Stripe Checkout:**
+
+**Backend (Java/Spring Boot):**
+- Added `stripe-java` dependency (v25.13.0) to pom.xml
+- Created `payment_records` table to track all Stripe transactions
+- Added `deleted_at` column to `users` table for soft deletion
+- `PaymentRecord` entity with status tracking (PENDING/COMPLETED/FAILED/REFUNDED)
+- `PaymentPackage` enum defining 3 credit packages (200/$1, 500/$4, 1000/$8)
+- `StripePaymentService`: Creates Checkout sessions, handles webhooks, grants credits
+- `StripePaymentController`: Create session, webhook endpoint (no auth), verify payment
+- `UserProfileService`: Get profile, update name, soft delete, transaction history
+- `UserProfileController`: Profile CRUD endpoints
+- Whitelisted `/api/payments/webhook` in SecurityConfig (Stripe signature verification)
+- Added Stripe configuration to application.yml (API keys, webhook secret, price IDs)
+
+**Frontend (Next.js/TypeScript):**
+- `/credits` page: 3 credit packages with pricing, features, Stripe redirect
+- `/credits/success` page: Payment verification, success/pending/failed states
+- `/profile` page: Edit name, view credits, transaction history table, delete account modal
+- Updated `CreditBalance` component: Clickable badge → redirects to /credits
+- Updated `AppHeader`: Added profile icon button
+- Added API functions: `createCheckoutSession`, `verifyPaymentSuccess`, `getUserProfile`, `updateUserName`, `deleteAccount`, `getTransactionHistory`
+
+**Payment Flow:**
+1. User clicks credit badge → /credits page
+2. Selects package → frontend calls `POST /api/payments/create-checkout-session`
+3. Backend creates Stripe session, saves PENDING payment record
+4. Frontend redirects to Stripe Checkout (hosted page)
+5. User completes payment on Stripe
+6. Stripe redirects to `/credits/success?session_id=xxx`
+7. **Asynchronously:** Stripe webhook → backend verifies signature → grants credits
+8. Payment record updated to COMPLETED
+9. Frontend success page polls to verify credits added
+
+**Setup Requirements:**
+- Create 3 products in Stripe Dashboard with Price IDs
+- Configure webhook endpoint: `https://resumebuddy.cv/api/payments/webhook`
+- Set environment variables: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, price IDs
+- Run SQL migrations: `add_soft_delete_column.sql`, `create_payment_records_table.sql`
+
+### Phase 11.16 (Oct 25) - Resume Analysis Job Check Fix ✅
+**Prevent Duplicate Analysis Jobs on Page Refresh:**
+- Added active job detection on LexicalEditor page load (same pattern as job experience analysis)
+- Backend: `GET /api/jobs/resumes/{resumeId}/check-active` endpoint checks for QUEUED/PROCESSING jobs
+- Frontend: On mount, checks for active job and auto-resumes JobStatusIndicator if found
+- Prevents double-charging (50 credits → 100 credits) when user refreshes during analysis
+- User sees continuous job progress indicator even after refresh
+
+**UI Improvement:**
+- Added blue info banner explaining raw parsed text from Docling (shows before first analysis)
+- Users now understand they're viewing raw PDF extraction and can edit before "Analyze"
+- Banner disappears after first analysis to avoid clutter
+
+### Phase 11.15 (Oct 25) - Security Fixes ✅ [CRITICAL]
+**Client-Side Auth Guards:**
+- Added `useAuth()` hook for authentication verification
+- Protected routes now redirect to login if unauthenticated
+- Applied to: `/resume/[id]`, `/job-search/[profileId]`, `/analysis/[analysisId]`
+- Previously pages were accessible without auth (APIs returned 403 but UI rendered)
+
+**Google OAuth2 Login Fix:**
+- Fixed redirect_uri_mismatch error - OAuth2 endpoints served at root (not /api prefix)
+- Set `OAUTH2_REDIRECT_URI=https://resumebuddy.cv/login/oauth2/code/google` in production .env
+- Added `server.forward-headers-strategy: framework` for reverse proxy support
+- OAuth2 flow: auto creates new users OR links Google to existing email accounts
+- Generates initial credits for new Google users
+- **Required in Google Cloud Console**: Add `https://resumebuddy.cv/login/oauth2/code/google` to Authorized Redirect URIs
+
+### Phase 11.14 (Oct 22) - File Cleanup System ✅
+- Auto-deletes parsed resume files after 7 days (saves disk space)
+- Scheduled cleanup runs daily, configurable retention period
+- Manual cleanup endpoints for admin
+
+### Phase 11.13 (Oct 22) - Adzuna Web Scraping ✅
+- Two-stage fetch: API search → web scraping for full descriptions
+- Smart redirect parsing, site-specific extraction (TotalJobs JSON, Reed/CV-Library CSS)
+- 10-20+ skills/job vs 1-3 with truncated descriptions
+
+### Phase 11.12 (Oct 22) - Vector Storage Optimization ✅
+- Removed PostgreSQL vector backup (50% storage reduction)
+- Vectors now stored ONLY in Redis (AWS Lightsail 2GB)
+- Trade-off: ~$0.10 re-vectorization cost if Redis fails (acceptable for MVP)
+
+### Phase 11.11 (Oct 22) - RunPod Serverless GPU ✅
+- Dual-mode Docling: Local Docker OR RunPod serverless
+- Pay-per-use GPU ($0.0002/sec vs $0.50+/hr always-on)
+- Toggle via `DOCLING_USE_RUNPOD` env var
+
+### Phases 11.9-11.10 (Oct 21) - PostgreSQL Migration ✅
+- Migrated both services from MySQL to Neon PostgreSQL (serverless)
+- Cost savings: Neon free tier vs $15-20/month Aurora
+- JSONB for efficient JSON storage, custom ENUM types
+
+**For detailed implementation history, see [CLAUDE_IMPLEMENTATION_LOG.md](./CLAUDE_IMPLEMENTATION_LOG.md)**
 
 ## MVP Scope - Important Constraints
-
 - This is an MVP - avoid out-of-scope features
 - No setup guides needed - update README/CLAUDE.md instead
 - Focus on implementation, summaries over detailed explanations
 - User handles verification - prioritize making changes
 
-## Common Issues
-
-**Analysis not showing**: Check resume status = "ANALYZED", verify API keys, check logs
-**Docling service down**: `cd docling-service && docker-compose logs -f`
-**Neo4j connection**: Verify bolt://localhost:7687 and credentials
-**Job matching returns 0 results**: Redis index has wrong prefixes. Fix:
-1. `POST http://localhost:8085/api/job-search/admin/rebuild-index` (drops old index)
-2. `POST http://localhost:8085/api/job-search/admin/revectorize/listing-lines` (parse jobs → lines)
-3. `POST http://localhost:8085/api/job-search/admin/revectorize/profile-lines` (re-vectorize profiles)
-4. Restart service to drop old MySQL columns (`redis_vector_key`, `required_skills`)
-
-**Matches not updating after re-vectorizing**: Use `?refresh=true` query parameter:
-- `GET /api/job-search/profiles/{id}/matching-results?refresh=true&topK=20`
-- Forces fresh vector search instead of returning cached results
-- Useful after running `/admin/revectorize/listing-lines` with improved parser
-
-**Phase 11.1 (Oct 18 Evening)** - Reed Full Descriptions & HTML Cleanup:
-- Two-stage Reed fetching: `/search` (list) → `/jobs/{id}` (full description)
-- HTML stripping parser (preserves structure, decodes entities, normalizes whitespace)
-- Result: 10-20+ skills/job (vs 1-2 with truncated descriptions)
-- 500ms rate limiting, Reed now default scheduler source
-- Frontend retry logic for 500 errors, fixed refresh button stuck bug
-
-**Phase 11.2 (Oct 18 Night)** - Neo4j Skill Discovery ✅:
-- **Interactive tag cloud**: Top 30 in-demand skills with job counts (clickable pills)
-- **Drilldown modal**: AND logic filtering, related skill suggestions, date distribution chart
-- **Graph-discovered jobs**: Separate table bypassing vector search, shows skill-based matches
-- **3 new endpoints**: `/skills/top`, `/skills/drilldown`, `/jobs/by-ids`
-- **Neo4j queries**: `getJobsBySkills()` (SIZE check for AND), `getRelatedSkills()` (co-occurrence)
-- **Use cases**: Skill discovery, market insights, career planning, deterministic search
-- **Components**: `SkillFilterCloud.tsx`, `SkillDrilldownModal.tsx`, `DateDistributionChart.tsx`
-
-**Phase 11.3 (Oct 19)** - Skill Train (Interactive Career Path Explorer) ✅:
-- **Horizontal train track UI**: Left-to-right skill path visualization in ATS Analysis Summary
-- **Starting stations**: User's existing skills from resume (solid green borders with ✓)
-- **Gap skills**: Market skills user doesn't have (dashed gray borders)
-- **Interactive exploration**: Click skill → see related skills → build path (AND logic)
-- **Job count badges**: Each station shows number of jobs requiring that skill
-- **Path tracking**: Current path displayed with arrow connectors (→) and total job count
-- **Backtrack/Reset**: Navigate back one step or reset to start
-- **2 new endpoints**: `GET /resumes/{id}/skill-train`, `POST /skill-train/path`
-- **Reuses Neo4j queries**: `getJobsBySkills()`, `getRelatedSkills()`, `getTopInDemandSkills()`
-- **Use cases**: Career planning, skill gap identification, learning roadmap, market demand visibility
-- **Components**: `SkillTrain.tsx` (placed after Skills section in AnalysisSummary)
-- **Performance**: <100ms Neo4j queries, no LLM calls, $0 cost
-
-**Phase 11.4 (Oct 19 Evening)** - Skill Co-occurrence Heatmap ✅:
-- **2D matrix visualization**: Interactive heatmap showing skill pair co-occurrences in job market
-- **Color gradient**: rgba(99,102,241,intensity) from 0 (gray) to max (deep indigo)
-- **Configurable size**: Dropdown selector (10×10, 15×15, 20×20, 25×25)
-- **Interactive cells**: Click non-diagonal cells → opens drilldown modal with both skills
-- **Hover tooltips**: Live display of skill1 + skill2 → count (% of total jobs)
-- **Sticky headers**: Vertical skill labels, scrollable grid for large matrices
-- **Legend**: Visual guide showing color scale from 0 to max co-occurrence
-- **Backend**:
-  - Neo4j query: `getSkillCooccurrenceMatrix(topN)` - Two-step Cypher (get top skills → UNWIND pairs → count jobs)
-  - Endpoint: `GET /api/job-search/skills/heatmap?topN=20`
-  - DTO: `SkillHeatmapResponse` (skillNames, cooccurrenceMatrix, maxCooccurrence, totalJobs)
-- **Frontend**:
-  - Component: `SkillHeatmap.tsx` with CSS Grid table
-  - Placement: Job Search page, after SkillFilterCloud
-  - Integration: onCellClick opens SkillDrilldownModal
-- **Performance**: <200ms for 20×20 matrix, symmetric matrix optimization
-- **Cost**: $0 (pure Neo4j graph traversal, no LLM)
-- **Use cases**: Skill combination discovery, market trend analysis, learning path planning
-
-## Sub-Projects
-
-### Interview Practice Service (Port 8086) - **Experimental MVP**
-Voice-based interview simulation with AI feedback. See [interview-practice-service/CLAUDE.md](./interview-practice-service/CLAUDE.md) for details.
-
-**Status**: Core implementation complete, frontend integration pending
-**Tech**: Python FastAPI + LangGraph (RedisSaver) + Grok LLM + OpenAI Whisper/TTS
-**Features**:
-- Session registration (resume + job context)
-- Voice Q&A (3 rounds per session)
-- Real-time answer evaluation
-- Feedback generation
-- Progress tracking (future)
-
 ## Future Enhancements 📋
 1. AI-generated suggestions for adding missing tasks
 2. "Add to resume" button pre-filling editor
-3. Track user actions on suggestions
-4. Candidate comparison queries
-5. Career path visualization
-6. Export to PDF/ATS-friendly formats
-7. **Interview Practice frontend integration**
+3. Interview Practice frontend integration
+4. Career path visualization
+5. Export to PDF/ATS-friendly formats

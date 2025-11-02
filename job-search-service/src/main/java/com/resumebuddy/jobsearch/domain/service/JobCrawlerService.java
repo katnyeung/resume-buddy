@@ -186,27 +186,22 @@ public class JobCrawlerService {
                 if (lineEmbeddings.size() != savedLines.size()) {
                     log.error("Mismatch: {} lines but {} embeddings", savedLines.size(), lineEmbeddings.size());
                 } else {
-                    // Store line vectors in Redis using database IDs
+                    // Store line vectors in BOTH Redis AND MySQL using database IDs
                     for (int i = 0; i < savedLines.size(); i++) {
                         try {
                             JobListingLine line = savedLines.get(i);
                             float[] embedding = lineEmbeddings.get(i);
 
-                            // CRITICAL: Use database ID in Redis key so matching can find the line
-                            String redisKey = "listing:line:" + line.getId();
-                            redisVectorService.storeVector(redisKey, embedding);
-
-                            // Update line with Redis key
-                            line.setRedisVectorKey(redisKey);
+                            // Store in both Redis (fast search) and MySQL (backup)
+                            // This method saves to Redis immediately and updates MySQL with vector_embedding
+                            redisVectorService.storeJobListingLineVector(line.getId(), embedding);
 
                         } catch (Exception e) {
                             log.error("Failed to store line vector: {}", savedLines.get(i).getLineContent(), e);
                         }
                     }
 
-                    // Batch update redis keys
-                    jobListingLineRepository.saveAll(savedLines);
-                    log.info("Phase 3 complete: Line vectors stored");
+                    log.info("Phase 3 complete: Line vectors stored in Redis + MySQL for backup");
                 }
             }
 

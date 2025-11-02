@@ -20,6 +20,12 @@ export default function CreditBalance({ userId = 'default_user', compact = false
       const data = await getUserCredits(userId);
       setCredits(data);
     } catch (err: any) {
+      // Silently ignore 401 errors (token expired - interceptor will redirect)
+      if (err.response?.status === 401 || err.code === 'ERR_NETWORK') {
+        // Don't log or show error - user is being redirected to login
+        return;
+      }
+
       console.error('Failed to fetch credits:', err);
       // Don't show error for first load - just log it
       if (credits) {
@@ -63,14 +69,15 @@ export default function CreditBalance({ userId = 'default_user', compact = false
   if (compact) {
     return (
       <div
-        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium cursor-pointer ${
+        className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium cursor-pointer hover:opacity-80 transition-opacity ${
           isCritical
             ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-200'
             : isLow
             ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-200'
             : 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-200'
         }`}
-        title={`Total: ${parseFloat(credits.totalCredits || 0).toFixed(0)} | Used: ${parseFloat(credits.usedCredits || 0).toFixed(0)} | Available: ${available.toFixed(0)}`}
+        title={`Click to buy credits | Total: ${parseFloat(credits.totalCredits || 0).toFixed(0)} | Used: ${parseFloat(credits.usedCredits || 0).toFixed(0)} | Available: ${available.toFixed(0)}`}
+        onClick={() => window.location.href = '/credits'}
       >
         <svg
           className="w-4 h-4"
@@ -170,7 +177,7 @@ export default function CreditBalance({ userId = 'default_user', compact = false
         <div className="mt-3 pt-3 border-t border-gray-300 dark:border-gray-600">
           <div className="text-xs text-gray-500 dark:text-gray-400 space-y-1">
             <div className="font-medium mb-1">Cost per analysis:</div>
-            <div>• Resume analysis: 100 credits</div>
+            <div>• Resume analysis: 50 credits</div>
             <div>• Job experience: 50 credits</div>
             <div>• Job profile: 25 credits</div>
           </div>

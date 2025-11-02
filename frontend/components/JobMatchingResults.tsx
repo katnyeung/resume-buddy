@@ -9,12 +9,13 @@ import SkillHeatmap from './SkillHeatmap';
 
 interface JobMatchingResultsProps {
   profileId: string;
+  resumeId?: string;
 }
 
 type SortField = 'matchScore' | 'skillMatch' | 'postedDate' | 'fetchedDate';
 type SortDirection = 'asc' | 'desc';
 
-export default function JobMatchingResults({ profileId }: JobMatchingResultsProps) {
+export default function JobMatchingResults({ profileId, resumeId }: JobMatchingResultsProps) {
   const [results, setResults] = useState<JobMatchingResultsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [isManualRefresh, setIsManualRefresh] = useState(false); // Track manual button click
@@ -353,7 +354,7 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
               {formatDate(match.fetchedAt)}
             </td>
 
-            {/* Actions Column - Merged 3 buttons */}
+            {/* Actions Column - Merged 4 buttons */}
             <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-center justify-center gap-2">
                 {/* Saved Button - 3 Star Rating (Click individual star to set rating) */}
@@ -402,6 +403,18 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </button>
+
+                {/* Practice Interview Button */}
+                <a
+                  href={`/interview/register/${match.listingId}?profileId=${profileId}&resumeId=${resumeId || ''}`}
+                  className="p-1.5 rounded-lg transition-colors text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50"
+                  title="Practice interview for this job"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </a>
 
                 {/* RedFlag Button */}
                 <button
@@ -693,7 +706,6 @@ export default function JobMatchingResults({ profileId }: JobMatchingResultsProp
                 </svg>
                 Discover Jobs by Skills
               </h4>
-              <p className="text-xs text-gray-500 mb-3">Click any skill to see related jobs from Neo4j graph</p>
               <SkillFilterCloud onSkillClick={handleSkillClick} />
             </div>
 

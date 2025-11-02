@@ -17,7 +17,7 @@ import { TRANSFORMERS } from '@lexical/markdown';
 import type { EditorState } from 'lexical';
 import OnChangePlugin from './plugins/OnChangePlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
-import { getResumeLines, saveEditorState, getEditorState, analyzeResume, analyzeResumeAsync, getResume, getStructuredAnalysis, analyzeJob, analyzeJobAsync } from '@/lib/api';
+import { getResumeLines, saveEditorState, getEditorState, analyzeResume, analyzeResumeAsync, getResume, getStructuredAnalysis, analyzeJob, analyzeJobAsync, checkActiveJobForResume } from '@/lib/api';
 import { resumeLinesToEditorState } from '@/lib/lexicalUtils';
 import { getCurrentUserId } from '@/lib/userUtils';
 import { ResumeLine, ResumeAnalysisDto, ATSReport } from '@/lib/types';
@@ -52,6 +52,15 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       try {
         setLoading(true);
         setIsLoaded(false);
+
+        // Check if there's an active resume analysis job
+        const activeJobId = await checkActiveJobForResume(resumeId);
+        if (activeJobId) {
+          console.log('Found active resume analysis job:', activeJobId);
+          setResumeAnalysisJobId(activeJobId);
+          setAnalyzing(true);
+          setAnalysisStatus('Resuming active analysis job...');
+        }
 
         // Check resume status first
         const resume = await getResume(resumeId);
@@ -171,7 +180,7 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
     } catch (error: any) {
       console.error('Analysis error:', error);
       if (error.response?.status === 402) {
-        setAnalysisStatus('Insufficient credits! Need 100 credits for resume analysis.');
+        setAnalysisStatus('Insufficient credits! Need 50 credits for resume analysis.');
       } else {
         setAnalysisStatus('Error queueing analysis: ' + (error.message || 'Unknown error'));
       }
@@ -368,7 +377,7 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
                 onClick={handleAnalyze}
                 disabled={analyzing}
                 className="px-5 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                title="Re-analyze the ATS detail and format"
+                title="Re-analyze the ATS detail and format (costs 50 credits)"
               >
                 {analyzing ? (
                   <>
@@ -384,38 +393,49 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                     Re-Analyze
+                    <span className="ml-1 px-1.5 py-0.5 bg-purple-500 rounded text-xs font-medium">
+                      -50
+                    </span>
                   </>
                 )}
               </button>
               <span className="text-[10px] text-gray-500">
-                Re-analyze the ATS detail and format
+                Costs 50 credits • Re-analyze ATS details
               </span>
             </div>
           ) : (
             // Analyze button (first time)
-            <button
-              onClick={handleAnalyze}
-              disabled={analyzing}
-              className="px-5 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-              title="Analyze resume with AI"
-            >
-              {analyzing ? (
-                <>
-                  <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  Analyzing...
-                </>
-              ) : (
-                <>
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                  Analyze
-                </>
-              )}
-            </button>
+            <div className="flex flex-col items-end gap-0.5">
+              <button
+                onClick={handleAnalyze}
+                disabled={analyzing}
+                className="px-5 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                title="Analyze resume with AI (costs 50 credits)"
+              >
+                {analyzing ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Analyzing...
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                    Analyze
+                    <span className="ml-1 px-1.5 py-0.5 bg-purple-500 rounded text-xs font-medium">
+                      -50
+                    </span>
+                  </>
+                )}
+              </button>
+              <span className="text-[10px] text-gray-500">
+                Costs 50 credits • AI-powered ATS analysis
+              </span>
+            </div>
           )}
         </div>
       </div>
@@ -437,6 +457,21 @@ export default function LexicalEditor({ resumeId }: LexicalEditorProps) {
       {/* Lexical Editor - key prop forces remount when editorState changes */}
       <LexicalComposer key={resumeId} initialConfig={initialConfig}>
         <div className={`relative bg-white border-x ${analyzedLines.length > 0 ? '' : 'border-t'} border-b ${analyzedLines.length > 0 ? '' : 'rounded-b-lg'}`}>
+          {/* Raw Text Notice - Only show before first analysis */}
+          {!structuredAnalysis && (
+            <div className="bg-blue-50 border-b border-blue-200 px-4 py-2.5">
+              <div className="flex items-start gap-2">
+                <svg className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div className="text-sm text-blue-900">
+                  <strong className="font-semibold">Raw Parsed Text:</strong> This is the text extracted directly from your PDF by our parser.
+                  You may see formatting issues (dates/locations misaligned, line breaks in wrong places).
+                  <strong className="font-semibold ml-1">Feel free to edit and fix any errors before clicking "Analyze".</strong>
+                </div>
+              </div>
+            </div>
+          )}
           <ToolbarPlugin onSave={handleSave} saving={saving} />
           <RichTextPlugin
             contentEditable={

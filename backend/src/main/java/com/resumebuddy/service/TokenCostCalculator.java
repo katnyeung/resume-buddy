@@ -11,7 +11,7 @@ import java.math.BigDecimal;
 @Slf4j
 public class TokenCostCalculator {
 
-    @Value("${app.token-costs.resume-analysis:100}")
+    @Value("${app.token-costs.resume-analysis:50}")
     private int resumeAnalysisCost;
 
     @Value("${app.token-costs.job-experience-analysis:50}")

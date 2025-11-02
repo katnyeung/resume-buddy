@@ -67,6 +67,13 @@ public class JobAnalysisResultDto {
     // Task Demonstration Analysis (PHASE 11.3)
     private List<TaskDemonstrationDto> taskDemonstrationAnalysis;
 
+    // Task Coverage Insights (LLM-generated, PHASE 11.5)
+    private List<SkillThemeDto> skillThemes;
+    private String taskCoverageSummary;
+    private List<String> taskCoverageStrengths;
+    private List<String> taskCoverageGaps;
+    private String taskUsageGuide;
+
     private LocalDateTime createdAt;
 
     @Data
@@ -375,5 +382,19 @@ public class JobAnalysisResultDto {
         private String lineId;
         private Integer sequence;
         private String text;
+    }
+
+    // ==================== PHASE 11.5: LLM-Generated Task Coverage Insights ====================
+
+    /**
+     * Skill theme with coverage score for radar chart visualization
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SkillThemeDto {
+        private String name;        // e.g., "Backend Development"
+        private Integer score;      // 0-10 coverage score
+        private Integer taskCount;  // Number of tasks in this theme
     }
 }

@@ -61,6 +61,43 @@ public class UserCreditController {
     }
 
     /**
+     * Deduct credits from user account
+     * Used by interview-practice-service and other microservices
+     */
+    @PostMapping("/{userId}/credits/deduct")
+    public ResponseEntity<Map<String, Object>> deductCredits(
+            @PathVariable String userId,
+            @RequestBody Map<String, Object> request) {
+
+        try {
+            BigDecimal amount = new BigDecimal(request.get("amount").toString());
+            String jobId = (String) request.getOrDefault("jobId", "UNKNOWN");
+            String description = (String) request.getOrDefault("description", "Credit deduction");
+
+            log.info("Deducting {} credits from user {} for job {}", amount, userId, jobId);
+            userCreditService.deductCredits(userId, amount, jobId, description);
+
+            // Get updated balance
+            UserCredit userCredit = userCreditService.getUserCredit(userId);
+
+            return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Credits deducted successfully",
+                "amountDeducted", amount,
+                "remainingCredits", userCredit.getAvailableCredits()
+            ));
+
+        } catch (Exception e) {
+            log.error("Failed to deduct credits for user {}", userId, e);
+            return ResponseEntity.badRequest()
+                .body(Map.of(
+                    "success", false,
+                    "error", e.getMessage()
+                ));
+        }
+    }
+
+    /**
      * Admin endpoint: Grant credits to user
      */
     @PostMapping("/admin/credits/grant")

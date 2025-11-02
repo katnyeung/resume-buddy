@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import JobAnalysisReport from '@/components/JobAnalysisReport';
 import AppHeader from '@/components/AppHeader';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function AnalysisPage() {
   const params = useParams();
@@ -11,6 +12,7 @@ export default function AnalysisPage() {
   const [analysis, setAnalysis] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const { isAuthenticated, isLoading: authLoading } = useAuth();
 
   useEffect(() => {
     const fetchAnalysis = async () => {
@@ -24,8 +26,9 @@ export default function AnalysisPage() {
           headers['Authorization'] = `Bearer ${token}`;
         }
 
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
         const response = await fetch(
-          `http://localhost:8080/api/resumes/analysis/${params.analysisId}`,
+          `${apiUrl}/resumes/analysis/${params.analysisId}`,
           { headers }
         );
 
@@ -45,15 +48,21 @@ export default function AnalysisPage() {
     fetchAnalysis();
   }, [params.analysisId]);
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading analysis...</p>
+          <p className="mt-4 text-gray-600">
+            {authLoading ? 'Verifying authentication...' : 'Loading analysis...'}
+          </p>
         </div>
       </div>
     );
+  }
+
+  if (!isAuthenticated) {
+    return null; // Will redirect via useAuth hook
   }
 
   if (error) {

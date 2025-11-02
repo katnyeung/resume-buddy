@@ -38,6 +38,9 @@ public class User {
     @Column(name = "auth_provider", nullable = false, length = 20)
     private AuthProvider authProvider = AuthProvider.EMAIL;
 
+    @Column(name = "role", nullable = false, length = 20)
+    private String role = "USER"; // Default role: USER, can be ADMIN
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -46,8 +49,18 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     public enum AuthProvider {
         EMAIL,
         GOOGLE
+    }
+
+    /**
+     * Check if user account is deleted
+     */
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 }

@@ -38,16 +38,16 @@ public class Resume {
     @Column(name = "file_size")
     private Long fileSize;
 
-    @Column(name = "parsed_content", columnDefinition = "JSON")
+    @Column(name = "parsed_content", columnDefinition = "TEXT")
     private String parsedContent;
 
-    @Column(name = "editor_state", columnDefinition = "LONGTEXT")
+    @Column(name = "editor_state", columnDefinition = "TEXT")
     private String editorState; // Lexical editor state as JSON
 
     @Column(name = "status", length = 20)
     private String status; // UPLOADED, PARSING, PARSED, FAILED
 
-    @Column(name = "ats_report", columnDefinition = "LONGTEXT")
+    @Column(name = "ats_report", columnDefinition = "TEXT")
     private String atsReport; // JSON string containing ATS quality report
 
     @Column(name = "ats_score")

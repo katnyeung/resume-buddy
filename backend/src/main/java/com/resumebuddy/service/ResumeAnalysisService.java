@@ -56,21 +56,18 @@ public class ResumeAnalysisService {
     @PostConstruct
     public void loadPromptTemplates() {
         try {
-            // Load system prompt
-            ClassPathResource systemPromptResource = new ClassPathResource("prompts/system-prompt.txt");
-            systemPromptTemplate = StreamUtils.copyToString(
-                systemPromptResource.getInputStream(),
-                StandardCharsets.UTF_8
-            );
-            log.info("Loaded system prompt template");
+            // Use inline system prompt (no separate file needed)
+            systemPromptTemplate = "You are a resume analysis expert with expertise in ATS optimization and structured data extraction. " +
+                "You analyze resumes line by line and provide structured analysis in JSON format. " +
+                "Always return valid JSON with all required fields.";
 
             // Load analysis prompt
-            ClassPathResource analysisPromptResource = new ClassPathResource("prompts/resume-analysis-prompt.txt");
+            ClassPathResource analysisPromptResource = new ClassPathResource("prompts/4-resume-analysis-line-by-line.txt");
             analysisPromptTemplate = StreamUtils.copyToString(
                 analysisPromptResource.getInputStream(),
                 StandardCharsets.UTF_8
             );
-            log.info("Loaded analysis prompt template");
+            log.info("Loaded resume analysis prompt template");
 
         } catch (IOException e) {
             log.error("Error loading prompt templates", e);
@@ -279,7 +276,7 @@ public class ResumeAnalysisService {
                 Map.of("role", "user", "content", prompt)
             ));
             requestBody.put("temperature", 0.3);  // Lower temperature for more consistent results
-            requestBody.put("max_tokens", 16000);  // Increased for large resumes with dual output
+            requestBody.put("max_tokens", 32000);  // Increased to handle large resume analysis output
 
             // Set headers
             HttpHeaders headers = new HttpHeaders();
@@ -577,8 +574,8 @@ public class ResumeAnalysisService {
 
     /**
      * Parse various date formats commonly found in resumes
-     * Supports: "YYYY-MM-DD", "YYYY-MM", "YYYY", "Month YYYY", "MM/YYYY", etc.
-     * Returns a comparable date for sorting
+     * Supports: "YYYY-MM-DD", "YYYY-MM", "MM/YYYY", "October 2021", "Jan 2021", "YYYY"
+     * Returns a comparable date for sorting (unparseable dates return LocalDate.MIN)
      */
     private LocalDate parseDate(String dateStr) {
         if (dateStr == null || dateStr.trim().isEmpty()) {
@@ -613,6 +610,14 @@ public class ResumeAnalysisService {
         try {
             // Try month year format: "October 2021"
             YearMonth ym = YearMonth.parse(normalized, DateTimeFormatter.ofPattern("MMMM yyyy"));
+            return ym.atDay(1);
+        } catch (DateTimeParseException e) {
+            // Continue to next format
+        }
+
+        try {
+            // Try abbreviated month year format: "Jan 2021", "Oct 2021"
+            YearMonth ym = YearMonth.parse(normalized, DateTimeFormatter.ofPattern("MMM yyyy", java.util.Locale.ENGLISH));
             return ym.atDay(1);
         } catch (DateTimeParseException e) {
             // Continue to next format

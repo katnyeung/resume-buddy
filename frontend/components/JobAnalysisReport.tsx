@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Legend } from 'recharts';
 
 interface JobAnalysisReportProps {
   analysis: any; // Will be typed properly from API
@@ -562,13 +563,16 @@ export default function JobAnalysisReport({ analysis }: JobAnalysisReportProps) 
         </div>
       )}
 
-      {/* Task Coverage Analysis (PHASE 11.3) - Task-first credibility view */}
+      {/* Task Coverage Analysis (PHASE 11.3/11.5) - With radar chart and LLM insights */}
       {analysis.taskDemonstrationAnalysis && analysis.taskDemonstrationAnalysis.length > 0 && (
-        <TaskCoverageTable
-          tasks={analysis.taskDemonstrationAnalysis}
-          resumeId={analysis.resumeId}
-          experienceId={analysis.experienceId}
-        />
+        <>
+          <TaskCoverageSummary analysis={analysis} />
+          <TaskCoverageTable
+            tasks={analysis.taskDemonstrationAnalysis}
+            resumeId={analysis.resumeId}
+            experienceId={analysis.experienceId}
+          />
+        </>
       )}
 
       {/* PHASE 6: DEEP GRAPH ANALYSIS - Priority Order */}
@@ -744,6 +748,140 @@ function TrustBadge({ evidenceStrength, linesCount, onClick }: {
 }
 
 // ==================== TASK COVERAGE TABLE (PHASE 11.3) ====================
+
+// Task Coverage Summary with Radar Chart (PHASE 11.5)
+function TaskCoverageSummary({ analysis }: { analysis: any }) {
+  const [showGaps, setShowGaps] = useState(false);
+
+  // Prepare radar chart data from LLM-generated skill themes
+  const radarData = analysis.skillThemes?.map((theme: any) => ({
+    name: theme.name,
+    score: theme.score,
+    fullMark: 10
+  })) || [];
+
+  // If no LLM data yet, show loading state
+  if (!analysis.skillThemes || radarData.length === 0) {
+    return (
+      <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-6 mb-6">
+        <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+          <span>📊</span> Your Skill Profile
+        </h2>
+        <div className="bg-white rounded-lg p-8 text-center border border-indigo-100">
+          <p className="text-gray-500">Generating skill profile insights...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border border-indigo-200 rounded-lg p-6 mb-6">
+      <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+        <span>📊</span> Your Skill Profile
+      </h2>
+
+      {/* Radar Chart */}
+      <div className="bg-white rounded-lg p-6 mb-4 border border-indigo-100">
+        <ResponsiveContainer width="100%" height={400}>
+          <RadarChart data={radarData}>
+            <PolarGrid stroke="#e5e7eb" />
+            <PolarAngleAxis
+              dataKey="name"
+              tick={{ fill: '#4b5563', fontSize: 12 }}
+            />
+            <PolarRadiusAxis
+              angle={90}
+              domain={[0, 10]}
+              tick={{ fill: '#9ca3af', fontSize: 10 }}
+            />
+            <Radar
+              name="Your Coverage"
+              dataKey="score"
+              stroke="#6366f1"
+              fill="#6366f1"
+              fillOpacity={0.6}
+            />
+          </RadarChart>
+        </ResponsiveContainer>
+
+        {/* Legend */}
+        <div className="mt-4 flex justify-center gap-8 text-sm">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-indigo-500"></div>
+            <span className="text-gray-700">Your Coverage</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full border-2 border-gray-300 bg-transparent"></div>
+            <span className="text-gray-500">Target: 8-10 for senior roles</span>
+          </div>
+        </div>
+      </div>
+
+      {/* LLM Career Summary */}
+      {analysis.taskCoverageSummary && (
+        <div className="bg-white rounded-lg p-4 mb-4 border border-indigo-100">
+          <h3 className="text-sm font-semibold text-gray-800 mb-2">💬 Career Summary</h3>
+          <p className="text-sm text-gray-700 leading-relaxed">
+            {analysis.taskCoverageSummary}
+          </p>
+        </div>
+      )}
+
+      {/* Key Strengths */}
+      {analysis.taskCoverageStrengths?.length > 0 && (
+        <div className="bg-white rounded-lg p-4 mb-4 border border-green-100">
+          <h3 className="text-sm font-semibold text-green-800 mb-3">✅ Key Strengths</h3>
+          <ul className="space-y-2">
+            {analysis.taskCoverageStrengths.map((strength: string, i: number) => (
+              <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                <span className="text-green-600 mt-0.5">•</span>
+                <span>{strength}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Growth Areas (Collapsible) */}
+      {analysis.taskCoverageGaps?.length > 0 && (
+        <div className="bg-white rounded-lg p-4 mb-4 border border-amber-200">
+          <button
+            onClick={() => setShowGaps(!showGaps)}
+            className="w-full flex items-center justify-between text-left"
+          >
+            <h3 className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+              <span>💡</span> Growth Opportunities
+            </h3>
+            <span className="text-gray-400">{showGaps ? '▼' : '▶'}</span>
+          </button>
+
+          {showGaps && (
+            <ul className="mt-3 space-y-2">
+              {analysis.taskCoverageGaps.map((gap: string, i: number) => (
+                <li key={i} className="text-sm text-gray-700 flex items-start gap-2">
+                  <span className="text-amber-600 mt-0.5">•</span>
+                  <span>{gap}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {/* Usage Guide */}
+      {analysis.taskUsageGuide && (
+        <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+          <h3 className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-2">
+            <span>📖</span> How to Use This Data
+          </h3>
+          <p className="text-sm text-blue-800 leading-relaxed">
+            {analysis.taskUsageGuide}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function TaskCoverageTable({ tasks, resumeId, experienceId }: {
   tasks: any[],

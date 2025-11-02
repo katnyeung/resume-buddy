@@ -14,6 +14,9 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
@@ -25,13 +28,39 @@ public class DoclingHttpService {
 
     private final ObjectMapper objectMapper;
     private final RestTemplate restTemplate = new RestTemplate();
+    private final RunPodDoclingService runPodDoclingService;
 
     @Value("${app.docling.service-url:http://localhost:8081}")
     private String doclingServiceUrl;
 
-    public ParsedResume parseResume(MultipartFile file, String resumeId) {
-        log.info("Starting Docling HTTP parsing for resume: {}", file.getOriginalFilename());
+    @Value("${app.docling.use-runpod:false}")
+    private boolean useRunPod;
 
+    /**
+     * Parse resume from byte array (used when file is already stored in database)
+     */
+    public ParsedResume parseResumeFromBytes(byte[] fileContent, String filename, String contentType, String resumeId) {
+        log.info("Starting Docling parsing for resume: {} (useRunPod={})", filename, useRunPod);
+
+        // Delegate to RunPod if configured
+        if (useRunPod) {
+            return runPodDoclingService.parseResumeFromBytes(fileContent, filename, contentType, resumeId);
+        }
+
+        // For local Docling, convert to MultipartFile
+        MultipartFile file = new ByteArrayMultipartFile(fileContent, filename, contentType);
+        return parseResume(file, resumeId);
+    }
+
+    public ParsedResume parseResume(MultipartFile file, String resumeId) {
+        log.info("Starting Docling parsing for resume: {} (useRunPod={})", file.getOriginalFilename(), useRunPod);
+
+        // Delegate to RunPod if configured
+        if (useRunPod) {
+            return runPodDoclingService.parseResume(file, resumeId);
+        }
+
+        // Otherwise use local/HTTP Docling service
         try {
             // Check if Docling service is available
             if (!isDoclingServiceAvailable()) {
@@ -55,25 +84,6 @@ public class DoclingHttpService {
         }
     }
 
-    public ParsedResume parseResumeFromUrl(String fileUrl, String resumeId) {
-        log.info("Starting Docling HTTP parsing from URL: {}", fileUrl);
-
-        try {
-            // Skip health check - just try to call Docling service directly
-            JsonNode doclingResult = callDoclingServiceWithUrl(fileUrl);
-
-            if (doclingResult != null && doclingResult.get("success").asBoolean()) {
-                return convertDoclingToParsedResumeFromUrl(doclingResult, fileUrl, resumeId);
-            } else {
-                log.warn("Docling parsing failed, creating basic parsed resume");
-                return createBasicParsedResumeFromUrl(fileUrl, resumeId);
-            }
-
-        } catch (Exception e) {
-            log.error("Error in Docling HTTP parsing from URL: ", e);
-            return createBasicParsedResumeFromUrl(fileUrl, resumeId);
-        }
-    }
 
     private boolean isDoclingServiceAvailable() {
         try {
@@ -141,38 +151,6 @@ public class DoclingHttpService {
         }
     }
 
-    private JsonNode callDoclingServiceWithUrl(String fileUrl) {
-        try {
-            // Create JSON request body
-            Map<String, String> requestBody = new HashMap<>();
-            requestBody.put("file_url", fileUrl);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-
-            HttpEntity<Map<String, String>> requestEntity = new HttpEntity<>(requestBody, headers);
-
-            // Call Docling service with URL
-            log.info("Calling Docling service at: {}/parse-url with URL: {}", doclingServiceUrl, fileUrl);
-            ResponseEntity<JsonNode> response = restTemplate.postForEntity(
-                doclingServiceUrl + "/parse-url",
-                requestEntity,
-                JsonNode.class
-            );
-
-            if (response.getStatusCode() == HttpStatus.OK) {
-                log.info("Successfully received response from Docling service for URL parsing");
-                return response.getBody();
-            } else {
-                log.error("Docling service returned error status: {}", response.getStatusCode());
-                return null;
-            }
-
-        } catch (Exception e) {
-            log.error("Error calling Docling service with URL: ", e);
-            return null;
-        }
-    }
 
     private ParsedResume convertDoclingToParsedResume(JsonNode doclingResult, MultipartFile file, String resumeId) {
         ParsedResume parsedResume = new ParsedResume();
@@ -193,44 +171,6 @@ public class DoclingHttpService {
         return parsedResume;
     }
 
-    private ParsedResume convertDoclingToParsedResumeFromUrl(JsonNode doclingResult, String fileUrl, String resumeId) {
-        ParsedResume parsedResume = new ParsedResume();
-        parsedResume.setId(resumeId);
-
-        // Extract filename from URL or use default
-        String filename = extractFilenameFromUrl(fileUrl);
-        parsedResume.setFilename(filename);
-
-        // Get content type from Docling result
-        String contentType = doclingResult.get("content_type").asText();
-        parsedResume.setContentType(contentType);
-
-        parsedResume.setCreatedAt(LocalDateTime.now());
-        parsedResume.setUpdatedAt(LocalDateTime.now());
-
-        // Get the full text and markdown
-        String fullText = doclingResult.get("text").asText();
-        String markdown = doclingResult.get("markdown").asText();
-
-        // Set original text only - clean for LLM processing
-        parsedResume.setOriginalText(fullText);
-
-        log.info("Successfully converted Docling URL result to ParsedResume");
-        return parsedResume;
-    }
-
-    private String extractFilenameFromUrl(String fileUrl) {
-        try {
-            String[] urlParts = fileUrl.split("/");
-            String lastPart = urlParts[urlParts.length - 1];
-            if (lastPart.equals("file")) {
-                return "resume_" + urlParts[urlParts.length - 2] + ".pdf";
-            }
-            return lastPart;
-        } catch (Exception e) {
-            return "resume.pdf";
-        }
-    }
 
     private ParsedResume createBasicParsedResume(MultipartFile file, String resumeId) {
         ParsedResume parsedResume = new ParsedResume();
@@ -246,24 +186,6 @@ public class DoclingHttpService {
         return parsedResume;
     }
 
-    private ParsedResume createBasicParsedResumeFromUrl(String fileUrl, String resumeId) {
-        ParsedResume parsedResume = new ParsedResume();
-        parsedResume.setId(resumeId);
-
-        // Extract filename from URL
-        String filename = extractFilenameFromUrl(fileUrl);
-        parsedResume.setFilename(filename);
-
-        // Default content type
-        parsedResume.setContentType("application/pdf");
-        parsedResume.setCreatedAt(LocalDateTime.now());
-        parsedResume.setUpdatedAt(LocalDateTime.now());
-
-        // No text extraction available for fallback
-        parsedResume.setOriginalText("");
-
-        return parsedResume;
-    }
 
 
     public String convertToJson(ParsedResume parsedResume) {
@@ -272,6 +194,63 @@ public class DoclingHttpService {
         } catch (Exception e) {
             log.error("Error converting parsed resume to JSON", e);
             return "{}";
+        }
+    }
+
+    /**
+     * Simple MultipartFile implementation for byte arrays
+     */
+    private static class ByteArrayMultipartFile implements MultipartFile {
+        private final byte[] content;
+        private final String name;
+        private final String originalFilename;
+        private final String contentType;
+
+        public ByteArrayMultipartFile(byte[] content, String originalFilename, String contentType) {
+            this.content = content;
+            this.name = "file";
+            this.originalFilename = originalFilename;
+            this.contentType = contentType;
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public String getOriginalFilename() {
+            return originalFilename;
+        }
+
+        @Override
+        public String getContentType() {
+            return contentType;
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return content == null || content.length == 0;
+        }
+
+        @Override
+        public long getSize() {
+            return content.length;
+        }
+
+        @Override
+        public byte[] getBytes() throws IOException {
+            return content;
+        }
+
+        @Override
+        public InputStream getInputStream() throws IOException {
+            return new ByteArrayInputStream(content);
+        }
+
+        @Override
+        public void transferTo(java.io.File dest) throws IOException, IllegalStateException {
+            throw new UnsupportedOperationException("transferTo not supported");
         }
     }
 }

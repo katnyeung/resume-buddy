@@ -39,7 +39,7 @@ public class JobSearchProfile {
      * List of experience IDs from resume-api that were used to generate this profile
      * Stored as JSON array
      */
-    @Column(name = "source_experience_ids", columnDefinition = "JSON", nullable = false)
+    @Column(name = "source_experience_ids", columnDefinition = "TEXT", nullable = false)
     private String sourceExperienceIds;
 
     /**

@@ -193,7 +193,11 @@ HOW TO GENERATE THE ATS REPORT:
 
 - **improvements**: Array of STRUCTURE-FOCUSED suggestions (NO line references)
   - IMPORTANT: Provide 4-8 improvement suggestions (aim for 5-6 typically)
-  - EXCLUDE: Do NOT suggest improvements related to name, address, phone numbers, or email format (these may be masked/redacted for privacy)
+  - FOCUS ON: Resume structure, organization, formatting consistency, and content distribution
+  - EXCLUDE: Do NOT suggest:
+    - Skill categorization/grouping (skills grouped together is fine as-is)
+    - LinkedIn/GitHub URL formats (may be shown as text, not clickable links)
+    - Basic contact info formatting (name, address, phone, email)
   - Look at your lineAnalysis to identify:
     - Sections with too few lines (e.g., SKILLS section has only 2 lines - suggest adding more)
     - Missing standard sections (no EDUCATION, no CERTIFICATIONS detected in lineAnalysis)
@@ -201,19 +205,24 @@ HOW TO GENERATE THE ATS REPORT:
     - Vague or thin analysis notes suggesting insufficient detail
     - Missing quantifiable metrics (numbers, percentages, timeframes)
     - Lack of action verbs or achievement-oriented language
-    - Section ordering that could be improved
-    - Missing professional links (LinkedIn, GitHub, portfolio) - but NOT basic contact info
-    - Formatting inconsistencies between similar sections
+    - Section ordering that could be improved for better flow
+    - Formatting inconsistencies between similar sections (job entries, education items)
     - Missing or vague dates in experience/education
-  - Examples:
-    - "Skills section appears sparse - consider adding more technical skills for better coverage"
-    - "Some job entries lack detailed descriptions - expand responsibilities and achievements"
-    - "Missing education section - include academic background for completeness"
-    - "Consider adding LinkedIn or GitHub profile to showcase professional presence"
-    - "Add quantifiable metrics to job achievements (e.g., improved performance by 40%)"
-    - "Consider adding certifications section to highlight professional credentials"
-    - "Some job descriptions lack specific timeframes - add duration or project timelines"
-    - "Include more action verbs to strengthen impact statements"
+    - Chronological consistency (earlier jobs less detailed than recent ones)
+    - Resume layout optimization (section placement, visual hierarchy)
+  - Examples of GOOD suggestions:
+    - "Some experience entries lack descriptive bullets - add achievements for better balance"
+    - "Earlier job roles show uneven detail compared to recent ones - expand descriptions for chronological consistency"
+    - "Include quantifiable metrics in all experience bullets where possible to strengthen impact"
+    - "Consider adding a projects section to highlight specific initiatives mentioned in experience"
+    - "Add specific timeframes or project durations to demonstrate scope of work"
+    - "Experience section could benefit from consistent formatting (all jobs should have similar detail level)"
+    - "Consider reordering sections to put strongest qualifications first (e.g., Experience before Education)"
+    - "Some job descriptions lack context - add company size, industry, or team structure for clarity"
+  - Examples of BAD suggestions (DO NOT USE):
+    - "Consider categorizing skills into Backend, DevOps, Cloud" (skills grouping is fine)
+    - "Add full URLs for LinkedIn and GitHub" (may already be present as text)
+    - "Add clickable links to contact section" (formatting limitation)
 
 - **contentBalance**: "sparse" | "balanced" | "verbose"
   - Look at lineAnalysis group sizes and analysis notes:

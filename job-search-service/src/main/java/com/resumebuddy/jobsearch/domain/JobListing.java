@@ -65,7 +65,7 @@ public class JobListing {
     /**
      * Complete raw API response data (preserves all source fields)
      */
-    @Column(name = "raw_data", columnDefinition = "JSON")
+    @Column(name = "raw_data", columnDefinition = "TEXT")
     private String rawData;
 
     @CreationTimestamp
@@ -87,6 +87,6 @@ public class JobListing {
      * JSON array format: ["Java", "Spring Boot", "Docker"]
      * Used for quick skill lookups without re-parsing description
      */
-    @Column(name = "extracted_skills", columnDefinition = "JSON")
+    @Column(name = "extracted_skills", columnDefinition = "TEXT")
     private String extractedSkills;
 }

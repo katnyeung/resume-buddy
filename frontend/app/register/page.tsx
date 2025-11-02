@@ -4,12 +4,15 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
+import LegalCheckbox from '@/components/LegalCheckbox';
+import Image from 'next/image';
 
 export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -18,6 +21,11 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+
+    if (!agreedToTerms) {
+      setError('Please agree to the Terms of Service and Privacy Notice');
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError('Passwords do not match');
@@ -42,13 +50,24 @@ export default function RegisterPage() {
   };
 
   const handleGoogleSignup = () => {
-    window.location.href = 'http://localhost:8080/oauth2/authorization/google';
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+    const baseUrl = apiUrl.replace('/api', ''); // Remove /api to get base URL
+    window.location.href = `${baseUrl}/oauth2/authorization/google`;
   };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-gray-100 flex items-center justify-center px-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
         <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <Image
+              src="/logo.png"
+              alt="Resume Buddy"
+              width={80}
+              height={92}
+              className="object-contain"
+            />
+          </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
           <p className="text-gray-600">Start enhancing your resume with AI</p>
         </div>
@@ -121,9 +140,18 @@ export default function RegisterPage() {
             />
           </div>
 
+          {/* Legal Consent */}
+          <div className="pt-4 border-t border-gray-200">
+            <LegalCheckbox
+              checked={agreedToTerms}
+              onChange={setAgreedToTerms}
+              required={true}
+            />
+          </div>
+
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !agreedToTerms}
             className="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
           >
             {loading ? 'Creating account...' : 'Create Account'}
