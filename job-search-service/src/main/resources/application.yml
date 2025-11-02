@@ -3,43 +3,62 @@ spring:
     name: job-search-service
 
   datasource:
-    url: jdbc:mysql://localhost:3306/jobsearch?useSSL=false&serverTimezone=UTC&createDatabaseIfNotExist=true
-    username: ${DB_USERNAME:root}
-    password: ${DB_PASSWORD:}
-    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 5
+      minimum-idle: 2
+      connection-timeout: 20000
+      idle-timeout: 300000
+      max-lifetime: 600000
+      leak-detection-threshold: 60000
 
   jpa:
     hibernate:
       ddl-auto: update
       naming:
         physical-strategy: org.hibernate.boot.model.naming.PhysicalNamingStrategyStandardImpl
-    database-platform: org.hibernate.dialect.MySQL8Dialect
-    show-sql: true
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: false
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.MySQL8Dialect
+        dialect: org.hibernate.dialect.PostgreSQLDialect
         jdbc:
+          lob:
+            non_contextual_creation: true  # Required for PostgreSQL BYTEA
           batch_size: 20
         order_inserts: true
         order_updates: true
+        use_streams_for_binary: false  # Force BYTEA instead of OID for byte[]
+        query:
+          query_timeout: 10000
 
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
 
+  # Neo4j Configuration (for job listing indexing - shared with backend)
+  neo4j:
+    uri: ${NEO4J_URI}
+    authentication:
+      username: ${NEO4J_USERNAME}
+      password: ${NEO4J_PASSWORD4}
+    database: ${NEO4J_DATABASE}
+
 server:
   port: 8085
+  forward-headers-strategy: framework
 
-# Swagger/OpenAPI Configuration
 springdoc:
-  api-docs:
-    path: /api-docs
   swagger-ui:
     path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs
     operationsSorter: method
     tagsSorter: alpha
-  packages-to-scan: com.resumebuddy.jobsearch.controller
 
 # Custom Application Properties
 app:
@@ -47,10 +66,19 @@ app:
   resume-api:
     base-url: ${RESUME_API_URL:http://localhost:8080/api}
 
-  # OpenAI Embedding API
+  # Security Configuration (must match resume-buddy-api JWT secret)
+  security:
+    jwt:
+      secret: ${JWT_SECRET}
+    # Internal API Key for service-to-service authentication
+    # Used by interview-practice-service and other microservices
+    internal-api-key: ${INTERNAL_API_KEY}
+
+  # OpenAI API (for embeddings only - vector search)
   openai:
     api-key: ${OPENAI_API_KEY}
     embedding-model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
 
   # Grok LLM API (for job post generation)
   grok:
@@ -58,8 +86,61 @@ app:
     model: ${GROK_MODEL:grok-4-fast-reasoning}
     base-url: ${GROK_BASE_URL:https://api.x.ai/v1}
 
+  # Job Crawling Configuration
+  job-crawling:
+    enabled: ${JOB_CRAWLING_ENABLED:false} # Enable scheduler in production
+    schedule: ${JOB_CRAWLING_SCHEDULE:0 0 2 * * *} # Cron: Daily at 2 AM
+    max-days-old: ${JOB_CRAWLING_MAX_DAYS_OLD:7} # Only crawl jobs posted within last N days
+
+    # Adzuna API
+    adzuna:
+      app-id: ${ADZUNA_APP_ID}
+      app-key: ${ADZUNA_APP_KEY}
+      base-url: ${ADZUNA_BASE_URL}
+      default-country: ${ADZUNA_COUNTRY:gb}  # Changed default from 'us' to 'gb' for UK
+      scraping:
+        enabled: ${ADZUNA_SCRAPING_ENABLED:true}  # Enable web scraping for full descriptions
+        delay-ms: ${ADZUNA_SCRAPING_DELAY:800}  # Delay between scrapes (ms)
+        max-retries: ${ADZUNA_SCRAPING_MAX_RETRIES:3}  # Retry attempts on failure
+        timeout-seconds: ${ADZUNA_SCRAPING_TIMEOUT:10}  # HTTP timeout per scrape
+
+    # Reed.co.uk API
+    reed:
+      api-key: ${REED_API_KEY}
+      base-url: ${REED_BASE_URL}
+
+    # JSearch API (RapidAPI)
+    jsearch:
+      api-key: ${JSEARCH_API_KEY}
+      base-url: ${JSEARCH_BASE_URL}
+      rapidapi-host: ${JSEARCH_RAPIDAPI_HOST}
+
+    # DevITJobs.uk RSS Feed
+    devitjobs:
+      feed-url: ${DEVITJOBS_FEED_URL:https://devitjobs.uk/job_feed.xml}
+
+    # Fantastic Jobs LinkedIn API (RapidAPI) - uses same RapidAPI key as JSearch
+    fantasticjobs:
+      api-key: ${FANTASTICJOBS_API_KEY}
+      base-url: ${FANTASTICJOBS_BASE_URL}
+      rapidapi-host: ${FANTASTICJOBS_RAPIDAPI_HOST}
+
+    # Theirstack API (50M+ jobs, 195 countries, 16+ job boards)
+    theirstack:
+      api-key: ${THEIRSTACK_API_KEY}
+      base-url: ${THEIRSTACK_BASE_URL}
+
+  # Market Insights Configuration (Phase 1: Skill Extraction)
+  market-insights:
+    enabled: ${MARKET_INSIGHTS_ENABLED:true} # Feature flag
+    analysis:
+      batch-size: ${MARKET_INSIGHTS_BATCH_SIZE:50} # Jobs per batch
+      # Future: Add scheduled analysis cron (Phase 2)
+      # schedule: "0 0 3 * * *" # Nightly at 3 AM
+
 logging:
   level:
-    com.resumebuddy.jobsearch: DEBUG
-    org.springframework.web: INFO
-    org.hibernate.SQL: DEBUG
+    com.resumebuddy.jobsearch: INFO
+    org.springframework.web: WARN
+    org.hibernate.SQL: WARN
+    com.zaxxer.hikari: WARN
