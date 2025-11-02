@@ -103,6 +103,12 @@ app:
     cleanup:
       enabled: true
       retention-days: 7
+spring:
+  mail:
+    host: ${MAIL_HOST:email-smtp.eu-west-2.amazonaws.com}
+    username: ${AWS_SES_USERNAME}
+    password: ${AWS_SES_PASSWORD}
+    from: ${MAIL_FROM:noreply@resumebuddy.cv}
 stripe:
   api-key: ${STRIPE_SECRET_KEY}
   webhook-secret: ${STRIPE_WEBHOOK_SECRET}
@@ -142,6 +148,11 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 - `PUT /api/users/{userId}/profile/name` - Update full name
 - `DELETE /api/users/{userId}/account` - Soft delete account
 - `GET /api/users/{userId}/profile/transactions` - Transaction history
+
+**Email Notifications** (:8080):
+- `POST /api/notifications/send` - Send email to user (requires X-API-Key)
+- Used by interview-practice-service for round reminders
+- Requires AWS SES SMTP configuration
 
 **Job Search** (:8085):
 - `POST /api/job-search/profiles` - Create profile from experiences
@@ -238,6 +249,92 @@ cd frontend && ../deploy-frontend.sh
 - Docker installed on server for interview-practice
 - Nginx configured for WebSocket proxying (/ws/interview)
 
+## AWS SES Email Setup
+
+The interview-practice-service sends email reminders for scheduled rounds via the backend's notification endpoint. Email is sent using AWS SES (Simple Email Service).
+
+### 1. Verify Domain in AWS SES
+
+1. Go to **AWS Console → SES → Verified identities**
+2. Click **Create identity** → Choose **Domain**
+3. Enter your domain: `resumebuddy.cv`
+4. Select **Easy DKIM** (recommended) → Create identity
+5. AWS will provide DKIM CNAME records to add to your DNS
+
+### 2. Add DKIM Records to Namecheap
+
+1. Go to **Namecheap → Domain List → Manage → Advanced DNS**
+2. Add the 3 CNAME records provided by AWS SES:
+   ```
+   Type: CNAME Record
+   Host: xyz._domainkey
+   Value: xyz.dkim.amazonses.com
+   ```
+3. Wait for DNS propagation (~5-30 minutes)
+4. AWS SES will auto-verify the domain when DNS records are detected
+
+### 3. Create SMTP Credentials
+
+1. Go to **AWS Console → SES → SMTP settings**
+2. Click **Create SMTP credentials**
+3. AWS will generate:
+   - SMTP username (e.g., `AKIAXXXXXXXXXXXXXXXX`)
+   - SMTP password (long base64 string - save this!)
+4. Save both to your backend `.env` file
+
+### 4. Request Production Access (if in Sandbox)
+
+**Note**: New AWS SES accounts start in "Sandbox mode" - you can only send to verified email addresses.
+
+To send to any email:
+1. Go to **SES → Account dashboard**
+2. Click **Request production access**
+3. Fill out the form:
+   - **Use case**: Transactional emails for interview practice reminders
+   - **Expected sending volume**: <500 emails/day
+   - **Compliance**: We have opt-in (users create sessions)
+4. AWS typically approves within 24 hours
+
+### 5. Backend Environment Variables
+
+Add to `backend/.env`:
+
+```bash
+# AWS SES SMTP Configuration
+AWS_SES_USERNAME=AKIAXXXXXXXXXXXXXXXX
+AWS_SES_PASSWORD=your-smtp-password-from-step-3
+MAIL_HOST=email-smtp.eu-west-2.amazonaws.com  # Use your region
+MAIL_FROM=noreply@resumebuddy.cv
+```
+
+**SMTP Endpoints by Region**:
+- `eu-west-2` (London): `email-smtp.eu-west-2.amazonaws.com`
+- `us-east-1` (N. Virginia): `email-smtp.us-east-1.amazonaws.com`
+- `us-west-2` (Oregon): `email-smtp.us-west-2.amazonaws.com`
+
+### 6. Verify Email Sending
+
+Test the notification endpoint:
+
+```bash
+curl -X POST http://localhost:8080/api/notifications/send \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: dev-internal-api-key-change-in-production" \
+  -d '{
+    "userId": "your-user-id",
+    "subject": "Test Email",
+    "body": "This is a test email from Resume Buddy."
+  }'
+```
+
+Check AWS SES → Sending statistics for delivery metrics.
+
+### 7. Cost Estimate
+
+- **Free tier**: 62,000 emails/month when sending from AWS Lightsail
+- **After free tier**: $0.10 per 1,000 emails
+- **Estimated cost**: ~$0.05/month for MVP (<500 emails)
+
 ## Common Issues & Solutions
 
 **Analysis not showing**: Check resume status = "ANALYZED", verify API keys
@@ -255,6 +352,41 @@ cd frontend && ../deploy-frontend.sh
   - Fixed: Added 10s query timeout
 
 ## Recent Updates
+
+### Phase 11.20 (Oct 31) - AWS SES Email Notifications ✅
+**Implemented email notification system for interview practice round reminders:**
+
+**Backend Changes:**
+- Added `spring-boot-starter-mail` dependency to pom.xml
+- Created `EmailService` with JavaMailSender for SMTP email sending
+- Created `NotificationController` with `POST /api/notifications/send` endpoint
+- Created `NotificationRequest` DTO (userId, subject, body)
+- Configured AWS SES SMTP in application.yml (host, username, password, from)
+- Endpoint secured with API key authentication (X-API-Key header)
+
+**Interview Practice Integration:**
+- Email scheduler calls backend `/api/notifications/send` endpoint
+- Sends round reminders at scheduled times (daily 9 AM cron job)
+- Round 1 email sent immediately upon session creation
+- Subsequent round emails sent after previous round completion
+
+**AWS SES Setup Required:**
+1. Verify domain (resumebuddy.cv) in AWS SES
+2. Add DKIM CNAME records to Namecheap DNS
+3. Create SMTP credentials in AWS SES console
+4. Add credentials to backend `.env` (AWS_SES_USERNAME, AWS_SES_PASSWORD)
+5. Request production access (to send to any email, not just verified)
+
+**Benefits:**
+- 62,000 free emails/month from AWS Lightsail
+- $0.10 per 1,000 emails after free tier
+- ~$0.05/month estimated cost for MVP
+
+**Files Modified:**
+- `backend/pom.xml` - Added mail dependency
+- `backend/src/main/resources/application.yml` - Added SMTP config
+- Created: `EmailService.java`, `NotificationController.java`, `NotificationRequest.java`
+- `CLAUDE.md` - Added AWS SES setup documentation
 
 ### Phase 11.19 (Oct 29) - Job Search Resource Optimization ✅
 **Fixed AWS Lightsail resource exhaustion causing crashes:**

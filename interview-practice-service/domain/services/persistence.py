@@ -100,6 +100,12 @@ async def persist_round_to_database(
         # Final score
         round_record.score = state.get("final_score")
 
+        # Final feedback (from last interaction's final_summary)
+        last_interaction = state["interactions"][-1] if state["interactions"] else {}
+        feedback_text = last_interaction.get("final_summary") or last_interaction.get("feedback", "")
+        round_record.feedback_text = feedback_text
+        print(f"[Persistence] Saving feedback_text ({len(feedback_text) if feedback_text else 0} chars): {feedback_text[:100] if feedback_text else 'None'}...")
+
         # Status
         round_record.status = "COMPLETED"
         round_record.completed_at = datetime.utcnow()

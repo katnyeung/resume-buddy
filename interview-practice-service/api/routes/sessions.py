@@ -86,6 +86,7 @@ async def create_scheduled_session(
             user_id=request.user_id,
             resume_id=request.resume_id,
             job_listing_id=request.job_listing_id,
+            experience_id=request.experience_id,
             interview_type=request.interview_type.value,
             difficulty_level=request.difficulty_level.value,
             interrupt_level=request.interrupt_level.value,
@@ -163,7 +164,7 @@ Your interview practice session is ready! This is Round 1 of {session.total_roun
 
 🎤 Start Round 1:
 Click the link below whenever you're ready:
-https://resumebuddy.cv/interview/session/{session.id}/round/1
+https://resumebuddy.cv/interview/{session.id}/1
 
 💡 Quick Tips:
 • Find a quiet space
@@ -266,8 +267,56 @@ async def get_round_info(
         "status": round_record.status,
         "questionText": round_record.question_text,
         "answerText": round_record.answer_text,
-        "score": float(round_record.score) if round_record.score else None
+        "score": float(round_record.score) if round_record.score else None,
+        "feedbackText": round_record.feedback_text
     }
+
+
+@router.get("/users/{user_id}/sessions")
+async def get_user_sessions(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    """Get all interview sessions for a user with their rounds."""
+    sessions = db.query(InterviewSession).filter(
+        InterviewSession.user_id == user_id
+    ).order_by(InterviewSession.scheduled_date.desc()).all()
+
+    result = []
+    for session in sessions:
+        # Get all rounds for this session
+        rounds = db.query(SessionRound).filter(
+            SessionRound.session_id == session.id
+        ).order_by(SessionRound.round_number).all()
+
+        result.append({
+            "id": str(session.id),
+            "userId": str(session.user_id),
+            "resumeId": str(session.resume_id),
+            "jobListingId": str(session.job_listing_id) if session.job_listing_id else None,
+            "interviewType": session.interview_type,
+            "difficultyLevel": session.difficulty_level,
+            "totalRounds": session.total_rounds,
+            "completedRounds": session.completed_rounds,
+            "overallScore": float(session.overall_score) if session.overall_score else None,
+            "status": session.status,
+            "scheduledDate": session.scheduled_date.isoformat(),
+            "createdAt": session.created_at.isoformat() if session.created_at else None,
+            "rounds": [
+                {
+                    "id": str(r.id),
+                    "roundNumber": r.round_number,
+                    "scheduledDate": r.scheduled_date.isoformat(),
+                    "scheduledTime": r.scheduled_time.isoformat() if r.scheduled_time else None,
+                    "status": r.status,
+                    "score": float(r.score) if r.score else None,
+                    "completedAt": r.completed_at.isoformat() if r.completed_at else None
+                }
+                for r in rounds
+            ]
+        })
+
+    return result
 
 
 # ==================== ROUND PRACTICE ENDPOINTS ====================

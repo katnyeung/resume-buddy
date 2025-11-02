@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Montserrat } from "next/font/google";
 import { AuthProvider } from "@/contexts/AuthContext";
-import Footer from "@/components/Footer";
+import ConditionalFooter from "@/components/ConditionalFooter";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -37,7 +37,7 @@ export default function RootLayout({
       >
         <AuthProvider>
           <div className="flex-1">{children}</div>
-          <Footer />
+          <ConditionalFooter />
         </AuthProvider>
       </body>
     </html>

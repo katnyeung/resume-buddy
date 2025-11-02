@@ -4,11 +4,11 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import ResumeList from '@/components/ResumeList';
-import CreditBalance from '@/components/CreditBalance';
+import AppHeader from '@/components/AppHeader';
 import { listResumes, deleteResume } from '@/lib/api';
-import { getCurrentUserId } from '@/lib/userUtils';
 import { Resume } from '@/lib/types';
 import Link from 'next/link';
+import Image from 'next/image';
 
 export default function HomePage() {
   const router = useRouter();
@@ -66,7 +66,16 @@ export default function HomePage() {
         {/* Navigation */}
         <nav className="px-6 py-4 border-b border-gray-200 bg-white/80 backdrop-blur-sm">
           <div className="max-w-7xl mx-auto flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-blue-600">Resume Buddy</h1>
+            <div className="flex items-center gap-3">
+              <Image
+                src="/logo.png"
+                alt="Resume Buddy"
+                width={40}
+                height={46}
+                className="object-contain"
+              />
+              <h1 className="text-2xl font-bold text-blue-600">Resume Buddy</h1>
+            </div>
             <div className="flex gap-4">
               <Link
                 href="/login"
@@ -185,27 +194,10 @@ export default function HomePage() {
 
   // Show authenticated dashboard
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-12 px-4">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8 flex justify-between items-center">
-          <div>
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">Resume Buddy</h1>
-            <p className="text-gray-600 text-lg">
-              Welcome back, {user?.fullName}
-            </p>
-          </div>
-          <div className="flex items-center gap-4">
-            <CreditBalance userId={getCurrentUserId()} compact={true} />
-            <button
-              onClick={logout}
-              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-300 transition-colors"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
+      <AppHeader title="My Resumes" />
 
+      <div className="max-w-7xl mx-auto py-8 px-4">
         {/* Actions */}
         <div className="mb-8 flex justify-between items-center">
           <button

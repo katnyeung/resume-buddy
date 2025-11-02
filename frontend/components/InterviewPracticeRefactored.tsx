@@ -33,6 +33,15 @@ export default function InterviewPractice({
   const [sensitivity, setSensitivity] = useState<number>(8);
   const [regenerating, setRegenerating] = useState(false);
 
+  // Context selection state
+  const [showSetup, setShowSetup] = useState<boolean>(true);
+  const [contextOptions, setContextOptions] = useState({
+    use_job_data: true,
+    use_description_lines: true,
+    use_coach_questions: true,
+    use_stars_analysis: true
+  });
+
   // Audio element ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -146,12 +155,18 @@ export default function InterviewPractice({
             if (currentWs && currentWs.readyState === WebSocket.OPEN) {
               currentWs.send(JSON.stringify({ text: 'recording_restarted' }));
               console.log('[Audio] Sent recording_restarted signal');
+
+              // Signal backend that frontend is ready to start answering (prevents TTS leakage)
+              currentWs.send(JSON.stringify({ text: 'ready_for_answer' }));
+              console.log('[Audio] Sent ready_for_answer signal');
             }
           } else {
             console.error('[Audio] createAndStartMediaRecorder returned null!');
           }
         } else {
-          console.warn('[Audio] NOT restarting MediaRecorder - conditions not met');
+          // Initial question case: TTS finished but no MediaRecorder to restart
+          // User will manually click "Start Recording", signal will be sent then
+          console.log('[Audio] TTS finished (initial question) - waiting for user to start recording');
         }
 
         resolve();
@@ -175,6 +190,10 @@ export default function InterviewPractice({
             if (currentWs && currentWs.readyState === WebSocket.OPEN) {
               currentWs.send(JSON.stringify({ text: 'recording_restarted' }));
               console.log('[Audio] Sent recording_restarted signal');
+
+              // Signal backend that frontend is ready to start answering
+              currentWs.send(JSON.stringify({ text: 'ready_for_answer' }));
+              console.log('[Audio] Sent ready_for_answer signal');
             }
           }
         }
@@ -192,7 +211,6 @@ export default function InterviewPractice({
 
     switch (msg.type) {
       case 'question':
-      case 'followup':
         console.log(`[DEBUG] Received ${msg.type}, MediaRecorder state:`, mediaRecorderRef.current?.state);
 
         // CRITICAL: Stop MediaRecorder BEFORE playing audio (match test_streaming.html line 505)
@@ -202,13 +220,26 @@ export default function InterviewPractice({
           console.log('[Audio] Stopped MediaRecorder before TTS');
         }
 
-        // Add question message to chat
-        setMessages(prev => [...prev, {
-          type: 'question',
-          text: msg.text || msg.question,
-          canRegenerate: msg.can_regenerate,
-          isRegenerated: msg.is_regenerated
-        }]);
+        // Disable Regenerate on all previous questions/followups when new question arrives
+        setMessages(prev => {
+          // Remove "Generating Question..." system message if present
+          const filteredPrev = prev.filter(m => m.type !== 'system');
+
+          const updatedPrev = filteredPrev.map(m => {
+            if (m.type === 'question' || m.type === 'followup') {
+              return { ...m, canRegenerate: false };
+            }
+            return m;
+          });
+
+          // Add new question with canRegenerate
+          return [...updatedPrev, {
+            type: 'question',
+            text: msg.text || msg.question,
+            canRegenerate: msg.can_regenerate,
+            isRegenerated: msg.is_regenerated
+          }];
+        });
 
         // Play audio if provided
         if (msg.audio_base64) {
@@ -222,23 +253,91 @@ export default function InterviewPractice({
         setRegenerating(false);
         break;
 
+      case 'followup':
+        console.log(`[DEBUG] Received followup, MediaRecorder state:`, mediaRecorderRef.current?.state);
+
+        // CRITICAL: Stop MediaRecorder BEFORE playing audio
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          mediaRecorderRef.current.stop();
+          console.log('[Audio] Stopped MediaRecorder before TTS (followup)');
+        }
+
+        // Mark last transcript as complete (not partial)
+        setMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.type === 'transcript') {
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMsg, isPartial: false }
+            ];
+          }
+          return prev;
+        });
+
+        // Disable Regenerate on all previous questions/followups when new followup arrives
+        setMessages(prev => {
+          const updatedPrev = prev.map(m => {
+            if (m.type === 'question' || m.type === 'followup') {
+              return { ...m, canRegenerate: false };
+            }
+            return m;
+          });
+
+          // Add new followup with canRegenerate
+          return [...updatedPrev, {
+            type: 'followup',
+            feedback: msg.feedback,
+            question: msg.question,
+            satisfactionLevel: msg.satisfaction_level,
+            canRegenerate: msg.can_regenerate || false,
+            isRegenerated: msg.is_regenerated || false
+          }];
+        });
+
+        // Play audio if provided
+        if (msg.audio_base64) {
+          try {
+            await playAudio(msg.audio_base64);
+          } catch (error) {
+            console.error('Audio play error:', error);
+          }
+        }
+
+        // Remove typing indicator AFTER audio starts (or if no audio)
+        setMessages(prev => prev.filter(m => m.type !== 'typing_indicator'));
+
+        // Reset transcript for next answer
+        setCurrentTranscript('');
+        break;
+
       case 'transcript':
         // Update current transcript (partial)
         setCurrentTranscript(prev => prev + msg.text + ' ');
 
-        // Update or add transcript message
+        // Update or add transcript message (KEEP typing indicator while AI is thinking)
         setMessages(prev => {
-          const lastMsg = prev[prev.length - 1];
+          // Keep typing indicator if it exists (AI is still thinking after transcription)
+          const typingIndicator = prev.find(m => m.type === 'typing_indicator');
+          const withoutTyping = prev.filter(m => m.type !== 'typing_indicator');
+          const lastMsg = withoutTyping[withoutTyping.length - 1];
+
+          let updatedMessages: ChatMessage[];
           if (lastMsg && lastMsg.type === 'transcript') {
             // Update existing transcript
-            return [
-              ...prev.slice(0, -1),
-              { type: 'transcript', text: lastMsg.text + msg.text + ' ', isPartial: true }
+            updatedMessages = [
+              ...withoutTyping.slice(0, -1),
+              { type: 'transcript' as const, text: lastMsg.text + msg.text + ' ', isPartial: true }
             ];
           } else {
             // Add new transcript message
-            return [...prev, { type: 'transcript', text: msg.text + ' ', isPartial: true }];
+            updatedMessages = [...withoutTyping, { type: 'transcript' as const, text: msg.text + ' ', isPartial: true }];
           }
+
+          // Re-add typing indicator if it existed (AI is still evaluating)
+          if (typingIndicator) {
+            return [...updatedMessages, typingIndicator];
+          }
+          return updatedMessages;
         });
         break;
 
@@ -249,12 +348,27 @@ export default function InterviewPractice({
           console.log('[Audio] Stopped MediaRecorder before TTS (interrupt)');
         }
 
-        setMessages(prev => [...prev, {
-          type: 'interrupt',
-          interruptType: msg.interrupt_type,
-          reason: msg.reason,
-          text: msg.text
-        }]);
+        // Mark last transcript as complete (user was interrupted)
+        setMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.type === 'transcript') {
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMsg, isPartial: false }
+            ];
+          }
+          return prev;
+        });
+
+        // Add interrupt message
+        setMessages(prev => {
+          return [...prev, {
+            type: 'interrupt',
+            interruptType: msg.interrupt_type,
+            reason: msg.reason,
+            text: msg.text
+          }];
+        });
 
         if (msg.audio_base64) {
           try {
@@ -263,6 +377,9 @@ export default function InterviewPractice({
             console.error('Audio play error:', error);
           }
         }
+
+        // Remove typing indicator AFTER audio starts (or if no audio)
+        setMessages(prev => prev.filter(m => m.type !== 'typing_indicator'));
         break;
 
       case 'feedback':
@@ -272,13 +389,27 @@ export default function InterviewPractice({
           console.log('[Audio] Stopped MediaRecorder before TTS (feedback)');
         }
 
+        // Mark last transcript as complete (not partial)
+        setMessages(prev => {
+          const lastMsg = prev[prev.length - 1];
+          if (lastMsg && lastMsg.type === 'transcript') {
+            return [
+              ...prev.slice(0, -1),
+              { ...lastMsg, isPartial: false }
+            ];
+          }
+          return prev;
+        });
+
         // Followup with feedback
-        setMessages(prev => [...prev, {
-          type: 'followup',
-          feedback: msg.feedback || msg.reasoning,
-          question: msg.question || msg.followup_question,
-          satisfactionLevel: msg.satisfaction_level || msg.score
-        }]);
+        setMessages(prev => {
+          return [...prev, {
+            type: 'followup',
+            feedback: msg.feedback || msg.reasoning,
+            question: msg.question || msg.followup_question,
+            satisfactionLevel: msg.satisfaction_level || msg.score
+          }];
+        });
 
         if (msg.audio_base64) {
           try {
@@ -287,6 +418,9 @@ export default function InterviewPractice({
             console.error('Audio play error:', error);
           }
         }
+
+        // Remove typing indicator AFTER audio starts (or if no audio)
+        setMessages(prev => prev.filter(m => m.type !== 'typing_indicator'));
 
         // Reset transcript for next answer
         setCurrentTranscript('');
@@ -299,7 +433,7 @@ export default function InterviewPractice({
           console.log('[Audio] Stopped MediaRecorder before TTS (evaluation)');
         }
 
-        // Mark last transcript as complete (not partial)
+        // Mark last transcript as complete (not partial) - keep typing indicator
         setMessages(prev => {
           const lastMsg = prev[prev.length - 1];
           if (lastMsg && lastMsg.type === 'transcript') {
@@ -325,6 +459,9 @@ export default function InterviewPractice({
             console.error('Audio play error:', error);
           }
         }
+
+        // Remove typing indicator AFTER audio starts (or if no audio)
+        setMessages(prev => prev.filter(m => m.type !== 'typing_indicator'));
 
         stopRecording();
         break;
@@ -400,7 +537,13 @@ export default function InterviewPractice({
       setAudioStream(stream);
       setupMicrophoneMonitoring(stream);
 
-      // Create WebSocket
+      // Build query params from context options
+      const params = new URLSearchParams();
+      Object.entries(contextOptions).forEach(([key, value]) => {
+        params.append(key, String(value));
+      });
+
+      // Create WebSocket with context options
       const newWs = createInterviewWebSocket(
         sessionId,
         roundNumber,
@@ -412,12 +555,20 @@ export default function InterviewPractice({
         (event) => {
           console.log('WebSocket closed');
           setStatus('disconnected');
-        }
+        },
+        params.toString() // Pass query params
       );
 
       newWs.onopen = () => {
         console.log('WebSocket connected');
         setStatus('connected');
+        setShowSetup(false); // Hide setup UI after successful connection
+
+        // Add "Generating Question..." message to chat
+        setMessages([{
+          type: 'system',
+          text: '🤔 Generating your first question...'
+        }]);
       };
 
       setWs(newWs);
@@ -486,6 +637,12 @@ export default function InterviewPractice({
 
     // Start VAD silence detection (statusRef.current is now 'recording')
     startSilenceDetection();
+
+    // Signal backend that we're ready to start answering (for initial question case)
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ text: 'ready_for_answer' }));
+      console.log('[Frontend] Sent ready_for_answer signal (user started recording)');
+    }
   };
 
   // Voice Activity Detection - triggers transcription requests
@@ -534,6 +691,10 @@ export default function InterviewPractice({
         if (!hasSpokenYet) {
           hasSpokenYet = true;
           console.log(`[VAD] User started speaking (RMS: ${rms.toFixed(1)})`);
+
+          // Show typing indicator on user side (user is speaking)
+          setMessages(prev => [...prev, { type: 'typing_indicator', side: 'user' }]);
+          console.log('[VAD] Added typing indicator (listening, user side)');
         }
         // Speech detected - reset silence timer
         silenceStart = null;
@@ -578,6 +739,14 @@ export default function InterviewPractice({
             lastTranscriptionRequest = now;
             vadActive = false; // Stop VAD after final transcription
             console.log('[VAD] transcribe_final sent, VAD stopped');
+
+            // Show typing indicator on AI side (AI is thinking)
+            // Remove any existing typing indicators first, then add new one
+            setMessages(prev => {
+              const withoutTyping = prev.filter(m => m.type !== 'typing_indicator');
+              return [...withoutTyping, { type: 'typing_indicator', side: 'ai' }];
+            });
+            console.log('[VAD] Added typing indicator (AI thinking, AI side)');
           } else {
             console.error('[VAD] Cannot send transcribe_final - ws state:', currentWs?.readyState);
           }
@@ -620,13 +789,21 @@ export default function InterviewPractice({
 
   // Handle regenerate question
   const handleRegenerate = () => {
+    console.log('[Regenerate] Button clicked');
+    console.log('[Regenerate] ws exists:', !!ws);
+    console.log('[Regenerate] ws.readyState:', ws?.readyState);
+    console.log('[Regenerate] WebSocket.OPEN constant:', WebSocket.OPEN);
+
     if (!ws || ws.readyState !== WebSocket.OPEN) {
+      console.error('[Regenerate] WebSocket not ready!');
       alert('WebSocket is not connected');
       return;
     }
 
+    console.log('[Regenerate] Sending regenerate_question message...');
     setRegenerating(true);
     regenerateQuestion(ws);
+    console.log('[Regenerate] Message sent');
   };
 
   // Cleanup on unmount ONLY (not on every state change!)
@@ -675,15 +852,19 @@ export default function InterviewPractice({
   const isRecording = status === 'recording';
 
   return (
-    <div className="flex h-[calc(100vh-200px)] bg-gray-50">
+    <div className="flex h-[calc(100vh-200px)] bg-gray-50 overflow-hidden">
       {/* Left Panel: Context (30%) */}
       <InterviewContext
         jobListing={jobListing}
         resumeExperience={resumeExperience}
+        showSetup={showSetup}
+        contextOptions={contextOptions}
+        setContextOptions={setContextOptions}
+        isDisconnected={isDisconnected}
       />
 
       {/* Right Panel: Chat + Controls (70%) */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 flex flex-col overflow-y-auto">
         {/* Microphone Controls */}
         <div className="bg-white border-b border-gray-200 p-4">
           <div className="max-w-4xl mx-auto space-y-3">
@@ -753,7 +934,7 @@ export default function InterviewPractice({
                   onClick={startRecording}
                   className="px-6 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 font-medium"
                 >
-                  Start Recording
+                  Click me when you ready to begin
                 </button>
               )}
 

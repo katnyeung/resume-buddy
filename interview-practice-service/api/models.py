@@ -34,6 +34,7 @@ class RoundIntervalEnum(str, Enum):
 class CreateSessionRequest(BaseModel):
     user_id: UUID = Field(..., description="User ID (UUID)")
     resume_id: UUID = Field(..., description="Resume ID to analyze (UUID)")
+    experience_id: Optional[UUID] = Field(None, description="Optional experience ID to focus interview on (UUID)")
     job_listing_id: Optional[UUID] = Field(None, description="Optional job listing ID for context (UUID)")
     interview_type: InterviewType = Field(InterviewType.TECHNICAL, description="Interview type")
     difficulty_level: DifficultyLevel = Field(DifficultyLevel.MID, description="Difficulty level based on seniority")

@@ -37,6 +37,15 @@ export default function InterviewPractice({ sessionId, roundNumber }: InterviewP
   const [feedback, setFeedback] = useState<string>('');
   const [showEvaluation, setShowEvaluation] = useState(false);
 
+  // Context selection state
+  const [showSetup, setShowSetup] = useState<boolean>(true);
+  const [contextOptions, setContextOptions] = useState({
+    use_job_data: true,
+    use_description_lines: true,
+    use_coach_questions: true,
+    use_stars_analysis: true
+  });
+
   // Logs
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logContainerRef = useRef<HTMLDivElement>(null);
@@ -234,9 +243,15 @@ export default function InterviewPractice({ sessionId, roundNumber }: InterviewP
     }
   };
 
-  // Connect to WebSocket
+  // Connect to WebSocket with context options
   const connect = () => {
-    const wsUrl = `ws://localhost:8086/ws/interview/${sessionId}/rounds/${roundNumber}/stream`;
+    // Build query params from context options
+    const params = new URLSearchParams();
+    Object.entries(contextOptions).forEach(([key, value]) => {
+      params.append(key, String(value));
+    });
+
+    const wsUrl = `ws://localhost:8086/ws/interview/${sessionId}/rounds/${roundNumber}/stream?${params.toString()}`;
     addLog(`Connecting to ${wsUrl}...`, 'info');
 
     const newWs = createInterviewWebSocket(
@@ -250,12 +265,14 @@ export default function InterviewPractice({ sessionId, roundNumber }: InterviewP
       (event) => {
         addLog('WebSocket closed', 'warning');
         updateStatus('disconnected');
-      }
+      },
+      params.toString() // Pass query params to WebSocket helper
     );
 
     newWs.onopen = () => {
       addLog('WebSocket connected!', 'success');
       updateStatus('connected');
+      setShowSetup(false); // Hide setup UI after successful connection
     };
 
     setWs(newWs);
@@ -376,6 +393,98 @@ export default function InterviewPractice({ sessionId, roundNumber }: InterviewP
           {getStatusText()}
         </div>
 
+        {/* Context Selection Setup (shown before connecting) */}
+        {showSetup && status === 'disconnected' && (
+          <div className="mb-6 p-6 bg-blue-50 border border-blue-200 rounded-lg">
+            <h2 className="text-xl font-semibold mb-3 text-blue-900">
+              📋 Customize Your Interview Focus
+            </h2>
+            <p className="text-sm text-gray-700 mb-4">
+              Select which context to include when generating interview questions.
+              This helps you focus on specific areas you want to practice.
+            </p>
+
+            <div className="space-y-3">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={contextOptions.use_job_data}
+                  onChange={(e) => setContextOptions({
+                    ...contextOptions,
+                    use_job_data: e.target.checked
+                  })}
+                  className="mt-1 w-4 h-4"
+                />
+                <div>
+                  <div className="font-medium text-gray-900">Target Job Description</div>
+                  <div className="text-sm text-gray-600">
+                    Include requirements from the job posting you're applying for
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={contextOptions.use_description_lines}
+                  onChange={(e) => setContextOptions({
+                    ...contextOptions,
+                    use_description_lines: e.target.checked
+                  })}
+                  className="mt-1 w-4 h-4"
+                />
+                <div>
+                  <div className="font-medium text-gray-900">Your Actual Accomplishments</div>
+                  <div className="text-sm text-gray-600">
+                    Include the specific bullet points from your resume experience
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={contextOptions.use_coach_questions}
+                  onChange={(e) => setContextOptions({
+                    ...contextOptions,
+                    use_coach_questions: e.target.checked
+                  })}
+                  className="mt-1 w-4 h-4"
+                />
+                <div>
+                  <div className="font-medium text-gray-900">Coach Questions</div>
+                  <div className="text-sm text-gray-600">
+                    Include suggested areas to probe from the career coach analysis
+                  </div>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={contextOptions.use_stars_analysis}
+                  onChange={(e) => setContextOptions({
+                    ...contextOptions,
+                    use_stars_analysis: e.target.checked
+                  })}
+                  className="mt-1 w-4 h-4"
+                />
+                <div>
+                  <div className="font-medium text-gray-900">STARS Improvement Areas</div>
+                  <div className="text-sm text-gray-600">
+                    Include suggestions to add more depth (Situation, Task, Action, Result, Scale)
+                  </div>
+                </div>
+              </label>
+            </div>
+
+            <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+              💡 <strong>Tip:</strong> For more focused practice, disable areas you've already covered.
+              All options are enabled by default for comprehensive questions.
+            </div>
+          </div>
+        )}
+
         {/* Controls */}
         <div className="flex gap-3 mb-6">
           <button
@@ -383,7 +492,7 @@ export default function InterviewPractice({ sessionId, roundNumber }: InterviewP
             disabled={status !== 'disconnected'}
             className="px-6 py-3 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Connect
+            {showSetup ? 'Start Interview' : 'Connect'}
           </button>
           <button
             onClick={startRecording}

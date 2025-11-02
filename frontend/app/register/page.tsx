@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 import LegalCheckbox from '@/components/LegalCheckbox';
+import Image from 'next/image';
 
 export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
@@ -58,6 +59,15 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-gray-100 flex items-center justify-center px-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
         <div className="text-center mb-8">
+          <div className="flex justify-center mb-4">
+            <Image
+              src="/logo.png"
+              alt="Resume Buddy"
+              width={80}
+              height={92}
+              className="object-contain"
+            />
+          </div>
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Create Account</h1>
           <p className="text-gray-600">Start enhancing your resume with AI</p>
         </div>

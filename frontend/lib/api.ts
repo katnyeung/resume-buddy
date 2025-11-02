@@ -220,10 +220,7 @@ export const deleteJobAnalysis = async (resumeId: string, experienceId: string):
 };
 
 // Job Search Service (port 8085)
-// TEMPORARY: Hardcoded for production deployment debugging
-const JOB_SEARCH_API_URL = typeof window !== 'undefined'
-  ? 'https://resumebuddy.cv/api'
-  : (process.env.NEXT_PUBLIC_JOB_SEARCH_API_URL || 'https://resumebuddy.cv/api');
+const JOB_SEARCH_API_URL = process.env.NEXT_PUBLIC_JOB_SEARCH_API_URL || 'http://localhost:8085/api';
 
 const jobSearchClient = axios.create({
   baseURL: JOB_SEARCH_API_URL,

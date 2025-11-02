@@ -77,7 +77,7 @@ export default function JobSearchPage() {
 
         {/* Job Matching Results */}
         <div className="mt-8">
-          <JobMatchingResults profileId={profileId} />
+          <JobMatchingResults profileId={profileId} resumeId={resumeId || undefined} />
         </div>
       </div>
     </div>

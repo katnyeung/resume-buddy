@@ -32,6 +32,7 @@ export interface SessionRoundInfo {
   questionText?: string;
   answerText?: string;
   score?: number;
+  feedbackText?: string;
 }
 
 /**
@@ -71,6 +72,23 @@ export async function getRoundInfo(sessionId: string, roundNumber: number): Prom
 }
 
 /**
+ * Get all sessions for a user
+ */
+export async function getUserSessions(userId: string): Promise<SessionInfo[]> {
+  const response = await fetch(`${INTERVIEW_API_URL}/api/interview/users/${userId}/sessions`);
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('User sessions error:', errorText);
+    throw new Error(`Failed to fetch user sessions: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  console.log('User sessions response:', data);
+  return data;
+}
+
+/**
  * Create WebSocket connection for streaming interview
  */
 export function createInterviewWebSocket(
@@ -78,7 +96,8 @@ export function createInterviewWebSocket(
   roundNumber: number,
   onMessage: (data: any) => void,
   onError?: (error: Event) => void,
-  onClose?: (event: CloseEvent) => void
+  onClose?: (event: CloseEvent) => void,
+  queryParams?: string
 ): WebSocket {
   // Use wss:// for production, ws:// for local dev
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -86,7 +105,7 @@ export function createInterviewWebSocket(
     ? window.location.host
     : 'localhost:8086';
 
-  const wsUrl = `${protocol}//${host}/ws/interview/${sessionId}/rounds/${roundNumber}/stream`;
+  const wsUrl = `${protocol}//${host}/ws/interview/${sessionId}/rounds/${roundNumber}/stream${queryParams ? '?' + queryParams : ''}`;
 
   const ws = new WebSocket(wsUrl);
 
@@ -165,9 +184,16 @@ export async function getConversationHistory(
  * Send regenerate question message via WebSocket
  */
 export function regenerateQuestion(ws: WebSocket) {
+  console.log('[regenerateQuestion] Function called');
+  console.log('[regenerateQuestion] WebSocket readyState:', ws.readyState);
+
   if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ text: "regenerate_question" }));
+    const message = JSON.stringify({ text: "regenerate_question" });
+    console.log('[regenerateQuestion] Sending message:', message);
+    ws.send(message);
+    console.log('[regenerateQuestion] Message sent successfully');
   } else {
+    console.error('[regenerateQuestion] WebSocket not open!');
     throw new Error("WebSocket is not connected");
   }
 }
@@ -190,7 +216,15 @@ export async function getJobListing(jobListingId: string): Promise<JobListing> {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
   const jobSearchUrl = baseUrl.replace(':8080', ':8085');
 
-  const response = await fetch(`${jobSearchUrl}/job-search/listings/${jobListingId}`);
+  // Get auth token from localStorage
+  const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+
+  const response = await fetch(`${jobSearchUrl}/job-search/listings/${jobListingId}`, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token && { 'Authorization': `Bearer ${token}` })
+    }
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to fetch job listing: ${response.statusText}`);
@@ -210,13 +244,14 @@ export interface ResumeExperience {
   descriptionLines: Array<{
     text: string;
     value?: string;
+    potentialQuestions?: string[];
+    starsAnalysis?: string[];
   }>;
   extractedSkills?: Array<{
     skill: string;
     proficiency?: string;
   }>;
-  potentialQuestions?: string[];
-  starsAnalysis?: string[];
+  improvementAreas?: string[];
 }
 
 export async function getResumeExperience(
@@ -225,12 +260,91 @@ export async function getResumeExperience(
 ): Promise<ResumeExperience> {
   const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
 
+  // Get auth token from localStorage
+  const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') : null;
+
   const response = await fetch(
-    `${baseUrl}/resumes/${resumeId}/experiences/${experienceId}/analysis`
+    `${baseUrl}/resumes/${resumeId}/experiences/${experienceId}/analysis`,
+    {
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token && { 'Authorization': `Bearer ${token}` })
+      }
+    }
   );
 
   if (!response.ok) {
     throw new Error(`Failed to fetch resume experience: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  // Transform backend structure to frontend interface
+  // Backend returns descriptionLineMappings, we need descriptionLines
+  const descriptionLineMappings = data.descriptionLineMappings || [];
+
+  // Keep nested structure: potentialQuestions and starsAnalysis stay with their description lines
+  const descriptionLines = descriptionLineMappings.map((mapping: any) => ({
+    text: mapping.text || mapping.descriptionLine || '',
+    value: mapping.value,
+    potentialQuestions: mapping.recruiterInsights?.potentialQuestions || [],
+    starsAnalysis: mapping.recruiterInsights?.starsAnalysis || []
+  }));
+
+  return {
+    id: experienceId,
+    jobTitle: data.jobTitle || data.normalizedTitle || '',
+    seniorityLevel: data.seniorityLevel || '',
+    normalizedTitle: data.normalizedTitle,
+    descriptionLines,
+    extractedSkills: data.extractedSkills || [],
+    improvementAreas: data.improvementAreas || []
+  };
+}
+
+/**
+ * Create a new interview practice session
+ */
+export interface CreateSessionRequest {
+  user_id: string;
+  resume_id: string;
+  job_listing_id?: string;
+  experience_id?: string;
+  interview_type: 'TECHNICAL' | 'BEHAVIORAL' | 'LEADERSHIP';
+  difficulty_level: 'JUNIOR' | 'MID' | 'SENIOR' | 'STAFF';
+  interrupt_level: 'CONSERVATIVE' | 'MODERATE' | 'AGGRESSIVE';
+  scheduled_date: string; // YYYY-MM-DD
+  scheduled_time: string; // HH:MM:SS
+  timezone: string;
+  total_rounds: number;
+  round_interval: 'DAILY' | 'EVERY_2_DAYS' | 'WEEKLY';
+}
+
+export interface CreateSessionResponse {
+  session_id: string;
+  status: string;
+  message: string;
+  scheduled_datetime: string;
+}
+
+export async function createInterviewSession(
+  request: CreateSessionRequest
+): Promise<CreateSessionResponse> {
+  const response = await fetch(
+    `${INTERVIEW_API_URL}/api/interview/sessions/create`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(request),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Create session error:', errorText);
+    throw new Error(`Failed to create interview session: ${response.statusText}`);
   }
 
   return response.json();

@@ -8,6 +8,9 @@ JOBSEARCH_API_URL = os.getenv("JOBSEARCH_API_URL", "http://localhost:8085/api/jo
 JOBSEARCH_API_KEY = os.getenv("JOBSEARCH_API_KEY", "dev-internal-api-key-change-in-production")
 TIMEOUT = 30.0  # 30 seconds timeout
 
+# Debug: Print API key on startup
+print(f"[DEBUG] JOBSEARCH_API_KEY loaded: {JOBSEARCH_API_KEY[:10]}..." if JOBSEARCH_API_KEY else "[DEBUG] JOBSEARCH_API_KEY is None/empty")
+
 
 def _get_headers() -> Dict[str, str]:
     """Get headers with API key for service-to-service auth."""
@@ -39,10 +42,11 @@ async def get_job_listing(job_id: int) -> Optional[Dict[str, Any]]:
     """
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
         try:
-            response = await client.get(
-                f"{JOBSEARCH_API_URL}/listings/{job_id}",
-                headers=_get_headers()
-            )
+            headers = _get_headers()
+            url = f"{JOBSEARCH_API_URL}/listings/{job_id}"
+            print(f"[DEBUG] Requesting Job Search API: {url}")
+            print(f"[DEBUG] Headers: X-API-Key={headers.get('X-API-Key', 'MISSING')[:10]}...")
+            response = await client.get(url, headers=headers)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:

@@ -6,10 +6,12 @@ import React, { useRef, useEffect } from 'react';
 export type ChatMessage =
   | { type: 'question'; text: string; canRegenerate?: boolean; isRegenerated?: boolean }
   | { type: 'transcript'; text: string; isPartial?: boolean }
-  | { type: 'followup'; feedback: string; question: string; satisfactionLevel: number }
+  | { type: 'followup'; feedback: string; question: string; satisfactionLevel: number; canRegenerate?: boolean; isRegenerated?: boolean }
   | { type: 'evaluation'; score: number; feedback: string }
   | { type: 'interrupt'; interruptType: string; reason: string; text: string }
-  | { type: 'completion'; message: string };
+  | { type: 'completion'; message: string }
+  | { type: 'system'; text: string }
+  | { type: 'typing_indicator'; side: 'user' | 'ai' };
 
 interface InterviewChatProps {
   messages: ChatMessage[];
@@ -23,10 +25,18 @@ export default function InterviewChat({
   regenerating = false
 }: InterviewChatProps) {
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Use setTimeout to ensure DOM is updated before scrolling
+    const timer = setTimeout(() => {
+      if (chatEndRef.current) {
+        chatEndRef.current.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      }
+    }, 150);
+
+    return () => clearTimeout(timer);
   }, [messages]);
 
   const renderMessage = (message: ChatMessage, index: number) => {
@@ -39,12 +49,12 @@ export default function InterviewChat({
             </div>
             <div className="flex-1">
               <div className="bg-blue-100 border border-blue-300 rounded-lg p-4 max-w-[80%]">
-                <p className="text-gray-900 leading-relaxed">{message.text}</p>
+                {/* Regenerate button at top */}
                 {message.canRegenerate && onRegenerate && (
                   <button
                     onClick={onRegenerate}
                     disabled={regenerating}
-                    className="mt-3 flex items-center gap-2 px-3 py-1.5 bg-white border border-blue-400 rounded-md text-sm text-blue-700 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="mb-3 flex items-center gap-2 px-3 py-1.5 bg-white border border-blue-400 rounded-md text-sm text-blue-700 hover:bg-blue-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -53,8 +63,9 @@ export default function InterviewChat({
                   </button>
                 )}
                 {message.isRegenerated && (
-                  <p className="mt-2 text-xs text-blue-600 italic">✨ Question regenerated</p>
+                  <p className="mb-2 text-xs text-blue-600 italic">✨ Question regenerated</p>
                 )}
+                <p className="text-gray-900 leading-relaxed">{message.text}</p>
               </div>
             </div>
           </div>
@@ -66,12 +77,6 @@ export default function InterviewChat({
             <div className="flex-1">
               <div className="bg-gray-200 border border-gray-300 rounded-lg p-4 max-w-[80%] ml-auto">
                 <p className="text-gray-900 leading-relaxed">{message.text}</p>
-                {message.isPartial && (
-                  <div className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                    <div className="animate-pulse w-2 h-2 bg-gray-500 rounded-full"></div>
-                    <span>Listening...</span>
-                  </div>
-                )}
               </div>
             </div>
             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-white font-semibold">
@@ -88,7 +93,7 @@ export default function InterviewChat({
             </div>
             <div className="flex-1">
               <div className="bg-orange-50 border border-orange-300 rounded-lg p-4 max-w-[80%]">
-                <div className="flex items-center gap-2 mb-2">
+                <div className="flex items-center gap-2 mb-3">
                   <span className="px-2 py-0.5 bg-orange-200 text-orange-800 text-xs font-semibold rounded">
                     🔄 FOLLOW-UP
                   </span>
@@ -96,8 +101,17 @@ export default function InterviewChat({
                     Score: {message.satisfactionLevel}/100
                   </span>
                 </div>
-                <p className="text-sm text-gray-700 mb-2">{message.feedback}</p>
-                <p className="text-gray-900 font-medium leading-relaxed">{message.question}</p>
+                {/* Feedback - Make it prominent */}
+                <div className="mb-3 pb-3 border-b border-orange-200">
+                  <p className="text-xs text-orange-700 font-semibold mb-1">FEEDBACK:</p>
+                  <p className="text-sm text-gray-800 leading-relaxed">{message.feedback}</p>
+                </div>
+                {/* Next Question */}
+                <div>
+                  <p className="text-xs text-orange-700 font-semibold mb-1">NEXT QUESTION:</p>
+                  <p className="text-gray-900 font-medium leading-relaxed">{message.question}</p>
+                </div>
+                {/* No Regenerate button for followup questions - only for initial question */}
               </div>
             </div>
           </div>
@@ -166,6 +180,54 @@ export default function InterviewChat({
           </div>
         );
 
+      case 'system':
+        return (
+          <div key={index} className="flex justify-center my-4">
+            <div className="bg-blue-50 border border-blue-200 rounded-lg px-6 py-3 flex items-center gap-2">
+              <div className="flex gap-1">
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+              </div>
+              <p className="text-sm text-blue-700 font-medium">{message.text}</p>
+            </div>
+          </div>
+        );
+
+      case 'typing_indicator':
+        // Show on right (user side) for "listening", left (AI side) for "thinking"
+        if (message.side === 'user') {
+          return (
+            <div key={index} className="flex gap-3 items-start mb-4 justify-end">
+              <div className="bg-gray-200 border border-gray-300 rounded-lg px-5 py-3">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                  <div className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                  <div className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                </div>
+              </div>
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-white font-semibold">
+                YOU
+              </div>
+            </div>
+          );
+        } else {
+          return (
+            <div key={index} className="flex gap-3 items-start mb-4">
+              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-semibold">
+                AI
+              </div>
+              <div className="bg-blue-100 border border-blue-300 rounded-lg px-5 py-3">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" style={{animationDelay: '0ms'}}></div>
+                  <div className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" style={{animationDelay: '150ms'}}></div>
+                  <div className="w-2 h-2 bg-gray-600 rounded-full animate-bounce" style={{animationDelay: '300ms'}}></div>
+                </div>
+              </div>
+            </div>
+          );
+        }
+
       default:
         return null;
     }
@@ -174,7 +236,7 @@ export default function InterviewChat({
   return (
     <div className="flex-1 flex flex-col h-full bg-gray-50">
       {/* Messages Container */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div ref={containerRef} className="flex-1 p-6">
         {messages.length === 0 ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center text-gray-500">

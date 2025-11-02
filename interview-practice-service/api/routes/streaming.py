@@ -5,6 +5,7 @@ import tempfile
 import os
 import asyncio
 from pathlib import Path
+from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -22,24 +23,61 @@ from domain.services.persistence import persist_round_to_database
 router = APIRouter(prefix="/ws/interview", tags=["websocket"])
 
 
+# Custom exception for regenerate requests
+class RegenerateRequestException(Exception):
+    """Raised when user requests to regenerate the current question."""
+    pass
+
+
+async def wait_for_ready_signal(websocket: WebSocket):
+    """
+    Wait for frontend to signal it's ready to answer (MediaRecorder restarted after TTS).
+    This prevents TTS audio leakage into the user's answer recording.
+    Also handles regenerate_question requests.
+    Returns: "ready" or "regenerate"
+    """
+    import json
+    print(f"[WebSocket] Waiting for 'ready_for_answer' or 'regenerate_question' signal from client...")
+
+    while True:
+        message = await websocket.receive()
+        if message["type"] == "websocket.receive":
+            if "bytes" in message:
+                # Ignore audio chunks while waiting for ready signal
+                continue
+            elif "text" in message:
+                msg = json.loads(message["text"])
+                if msg.get("text") == "ready_for_answer":
+                    print(f"[WebSocket] Client is ready, proceeding to collect answer")
+                    return "ready"
+                elif msg.get("text") == "regenerate_question":
+                    print(f"[WebSocket] Regenerate request received during ready wait")
+                    return "regenerate"
+                else:
+                    print(f"[WebSocket] Ignoring unknown message: {msg.get('text')}")
+
+
 async def collect_user_answer(
     websocket: WebSocket,
     session_id: str,
     round_number: int,
     question_text: str,
-    session: InterviewSession,
+    interrupt_level: str,
+    interview_type: str,
+    difficulty_level: str,
     audio_buffer: AudioBuffer,
     interrupt_agent: InterruptAgent,
     last_interrupt_time: float
-) -> tuple[str, float]:
+) -> tuple[str, float, bool]:
     """
     Collect user's voice answer with real-time transcription and AI interrupts.
 
     Returns:
-        tuple: (full_transcript, updated_last_interrupt_time)
+        tuple: (full_transcript, updated_last_interrupt_time, interrupt_occurred)
     """
     full_transcript = ""
     start_time = time.time()
+    interrupt_occurred = False  # Track if AI interrupted during this answer
     chunks_received = 0
     failed_transcriptions = 0
     MAX_FAILED_TRANSCRIPTIONS = 3
@@ -88,6 +126,16 @@ async def collect_user_answer(
                     # Fallback: treat as plain string
                     msg = data["text"]
                     print(f"[WebSocket] Received text (non-JSON): {msg}")
+
+                if msg == "regenerate_question":
+                    print(f"[WebSocket] Regenerate requested during answer collection")
+                    raise RegenerateRequestException("User requested question regeneration")
+
+                if msg == "ready_for_answer":
+                    # Frontend signals MediaRecorder restarted - ignore during answer collection
+                    # (This is only used BEFORE collect_user_answer() is called)
+                    print(f"[WebSocket] Received ready_for_answer during collection (ignoring)")
+                    continue
 
                 if msg == "end_answer":
                     print(f"[WebSocket] Client requested end")
@@ -182,7 +230,7 @@ async def collect_user_answer(
                                 word_count = len(full_transcript.split())
 
                                 # Skip interrupts if interrupt_level is NONE or not set
-                                interrupt_enabled = session.interrupt_level and session.interrupt_level != "NONE"
+                                interrupt_enabled = interrupt_level and interrupt_level != "NONE"
 
                                 if interrupt_enabled and word_count > 20:  # At least 20 words before considering interrupt
                                     current_time = time.time()
@@ -201,14 +249,15 @@ async def collect_user_answer(
                                         decision = await interrupt_agent.analyze(
                                             transcript=full_transcript,
                                             question=question_text,
-                                            interview_type=session.interview_type,
-                                            difficulty_level=session.difficulty_level,
-                                            interrupt_level=session.interrupt_level,
+                                            interview_type=interview_type,
+                                            difficulty_level=difficulty_level,
+                                            interrupt_level=interrupt_level,
                                             duration_seconds=duration_seconds
                                         )
 
                                         if decision["should_interrupt"]:
                                             print(f"[WebSocket] AI decided to interrupt: {decision['reason']}")
+                                            interrupt_occurred = True  # Mark that interrupt happened
 
                                             audio_buffer.clear()
                                             audio_buffer.reset_accumulator()
@@ -233,6 +282,9 @@ async def collect_user_answer(
                                                 "restart_recording": True
                                             })
 
+                                            # Wait for frontend to finish playing interrupt TTS and restart recording
+                                            _ = await wait_for_ready_signal(websocket)
+
                                             last_interrupt_time = current_time
                                             start_time = time.time()
                                             print(f"[WebSocket] Reset recording timer after interrupt")
@@ -253,14 +305,18 @@ async def collect_user_answer(
         print(f"Client disconnected from session {session_id}")
         raise
 
-    return full_transcript.strip(), last_interrupt_time
+    return full_transcript.strip(), last_interrupt_time, interrupt_occurred
 
 
 @router.websocket("/{session_id}/rounds/{round_number}/stream")
 async def stream_interview_round(
     websocket: WebSocket,
     session_id: str,
-    round_number: int
+    round_number: int,
+    use_job_data: bool = True,
+    use_description_lines: bool = True,
+    use_coach_questions: bool = True,
+    use_stars_analysis: bool = True
 ):
     """
     Real-time streaming interview with AI interruptions.
@@ -279,7 +335,16 @@ async def stream_interview_round(
     9. Server sends final evaluation
     10. Connection closes
     """
-    print(f"[WebSocket] Connection attempt: session={session_id}, round={round_number}")
+    print(f"\n{'='*80}")
+    print(f"[WebSocket] NEW CONNECTION ATTEMPT")
+    print(f"{'='*80}")
+    print(f"  session_id: {session_id}")
+    print(f"  round_number: {round_number}")
+    print(f"  use_job_data: {use_job_data}")
+    print(f"  use_description_lines: {use_description_lines}")
+    print(f"  use_coach_questions: {use_coach_questions}")
+    print(f"  use_stars_analysis: {use_stars_analysis}")
+    print(f"{'='*80}\n")
 
     try:
         await manager.connect(session_id, websocket)
@@ -329,9 +394,27 @@ async def stream_interview_round(
         if round_record.status == "PENDING":
             print(f"[WebSocket] Marking round as IN_PROGRESS")
             round_record.status = "IN_PROGRESS"
-            round_record.started_at = db.func.now()
+            round_record.started_at = datetime.utcnow()
             db.commit()
             print(f"[WebSocket] Round status updated")
+
+        # Extract all needed attributes BEFORE closing database (avoid DetachedInstanceError)
+        user_id = session.user_id
+        resume_id = session.resume_id
+        experience_id = session.experience_id
+        job_listing_id = session.job_listing_id
+        interview_type = session.interview_type
+        difficulty_level = session.difficulty_level
+        interrupt_level = session.interrupt_level
+        total_rounds = session.total_rounds
+
+        print(f"[WebSocket] Session data extracted:")
+        print(f"  user_id: {user_id}")
+        print(f"  resume_id: {resume_id}")
+        print(f"  experience_id: {experience_id}")
+        print(f"  job_listing_id: {job_listing_id}")
+        print(f"  interview_type: {interview_type}")
+        print(f"  difficulty_level: {difficulty_level}")
 
         # Close database connection early (WebSocket session can last minutes, avoid timeout)
         # We'll create a new session when we need to save results at the end
@@ -357,12 +440,15 @@ async def stream_interview_round(
         job_data = None
 
         try:
-            print(f"[WebSocket] Fetching resume data...")
-            resume_data = await get_resume_analysis(str(session.resume_id)) or {}
-            print(f"[WebSocket] Resume data fetched")
+            print(f"[WebSocket] Fetching resume data for resume_id={resume_id}...")
+            resume_data = await get_resume_analysis(str(resume_id)) or {}
+            print(f"[WebSocket] Resume data fetched: {len(resume_data)} keys")
+            if resume_data:
+                print(f"[WebSocket] Resume data keys: {list(resume_data.keys())[:5]}...")
 
             # Fetch job analysis data for richer context (skill assessments, O*NET mappings)
-            experience_id_to_use = session.experience_id  # User-selected experience
+            experience_id_to_use = experience_id  # User-selected experience
+            print(f"[WebSocket] experience_id from session: {experience_id_to_use}")
 
             # Fallback: If no experience_id in session, use first experience from resume
             if not experience_id_to_use and resume_data.get("structuredData"):
@@ -372,27 +458,49 @@ async def stream_interview_round(
                     print(f"[WebSocket] No experience_id in session, using first experience: {experience_id_to_use}")
 
             if experience_id_to_use:
-                print(f"[WebSocket] Fetching job analysis for experience {experience_id_to_use}...")
-                job_analysis_data = await get_job_analysis(str(session.resume_id), str(experience_id_to_use))
+                print(f"[WebSocket] Fetching job analysis for resume_id={resume_id}, experience_id={experience_id_to_use}...")
+                job_analysis_data = await get_job_analysis(str(resume_id), str(experience_id_to_use))
                 if job_analysis_data:
-                    print(f"[WebSocket] Job analysis data fetched (with skill assessments)")
+                    print(f"[WebSocket] ✅ Job analysis data fetched: {len(job_analysis_data)} keys")
+                    if isinstance(job_analysis_data, dict):
+                        print(f"[WebSocket] Job analysis keys: {list(job_analysis_data.keys())[:10]}...")
+                else:
+                    print(f"[WebSocket] ⚠️ Job analysis returned None/empty")
+            else:
+                print(f"[WebSocket] ⚠️ No experience_id available - cannot fetch job analysis")
         except Exception as e:
-            print(f"[WebSocket] Warning: Could not fetch resume/analysis data: {e}")
+            print(f"[WebSocket] ❌ ERROR fetching resume/analysis data: {e}")
+            import traceback
+            print(traceback.format_exc())
             # Continue with empty resume data
 
         try:
-            if session.job_listing_id:
-                print(f"[WebSocket] Fetching job listing data...")
-                job_data = await get_job_listing(str(session.job_listing_id))
-                print(f"[WebSocket] Job listing data fetched (includes description)")
+            if job_listing_id:
+                print(f"[WebSocket] Fetching job listing data for job_listing_id={job_listing_id}...")
+                job_data = await get_job_listing(str(job_listing_id))
+                if job_data:
+                    print(f"[WebSocket] ✅ Job listing data fetched: {len(job_data)} keys")
+                    if isinstance(job_data, dict):
+                        print(f"[WebSocket] Job listing keys: {list(job_data.keys())[:10]}...")
+                        # Log if description is present
+                        desc = job_data.get("description") or job_data.get("jobDescription") or ""
+                        print(f"[WebSocket] Job description length: {len(desc)} chars")
+                else:
+                    print(f"[WebSocket] ⚠️ Job listing returned None/empty")
+            else:
+                print(f"[WebSocket] ⚠️ No job_listing_id in session - skipping job fetch")
         except Exception as e:
-            print(f"[WebSocket] Warning: Could not fetch job data: {e}")
+            print(f"[WebSocket] ❌ ERROR fetching job data: {e}")
+            import traceback
+            print(traceback.format_exc())
             # Continue with empty job data
 
-        # Check if there are previous rounds - extract already-asked topics
+        # Check if there are previous rounds - extract already-asked topics + previous feedback
         asked_topics = []
+        previous_round_performance = None
         if round_number > 1:
-            # Query previous rounds to get their questions
+            # Query previous rounds to get their questions and feedback
+            db_gen = None
             try:
                 db_gen = get_db()
                 db = next(db_gen)
@@ -400,7 +508,7 @@ async def stream_interview_round(
                     SessionRound.session_id == session_id,
                     SessionRound.round_number < round_number,
                     SessionRound.status == "COMPLETED"
-                ).all()
+                ).order_by(SessionRound.round_number.desc()).all()
 
                 # Extract keywords from previous questions (simple approach)
                 common_tech = ["spring boot", "kubernetes", "docker", "terraform", "jenkins",
@@ -416,27 +524,59 @@ async def stream_interview_round(
 
                 if asked_topics:
                     print(f"[WebSocket] Already asked about: {', '.join(set(asked_topics))}")
+
+                # Get most recent round's evaluation for comparison
+                if previous_rounds:
+                    last_round = previous_rounds[0]
+
+                    # Get score and feedback from database columns (NOT evaluation_json)
+                    final_score = last_round.score if last_round.score is not None else 0
+                    final_feedback = last_round.feedback_text or ""
+
+                    if final_score > 0 or final_feedback:  # Only include if we have data
+                        previous_round_performance = {
+                            "round_number": last_round.round_number,
+                            "final_score": int(final_score * 100) if final_score < 1 else int(final_score),  # Handle 0-1 or 0-100 range
+                            "final_feedback": final_feedback
+                        }
+                        print(f"[WebSocket] Previous round {last_round.round_number} score: {previous_round_performance['final_score']}/100")
+                        print(f"[WebSocket] Previous round feedback: {final_feedback[:100]}...")  # First 100 chars
+
             except Exception as e:
                 print(f"[WebSocket] Warning: Could not fetch previous rounds: {e}")
+            finally:
+                # Properly close database session to prevent SSL connection errors
+                if db_gen:
+                    try:
+                        next(db_gen, None)  # Trigger cleanup in generator
+                    except StopIteration:
+                        pass
 
         initial_state = {
             "session_id": session_id,
-            "user_id": session.user_id,
+            "user_id": user_id,
             "resume_data": resume_data,
             "job_analysis_data": job_analysis_data,  # Rich analysis with skill assessments
             "job_data": job_data,  # Job listing with description
-            "interview_type": session.interview_type,
-            "difficulty_level": session.difficulty_level,
-            "interrupt_level": session.interrupt_level,
+            "interview_type": interview_type,
+            "difficulty_level": difficulty_level,
+            "interrupt_level": interrupt_level,
             "current_round": round_number,
-            "max_rounds": session.total_rounds,
+            "max_rounds": total_rounds,
             "current_question_num": 0,
             "max_questions": 1,
             "question": "",
             "user_answer": "",
             "conversation_history": [],
             "score": 0.0,
-            "asked_topics": list(set(asked_topics))  # Unique topics already covered
+            "asked_topics": list(set(asked_topics)),  # Unique topics already covered
+            "previous_round_performance": previous_round_performance,  # Previous round's score and feedback
+            "context_flags": {
+                "use_job_data": use_job_data,
+                "use_description_lines": use_description_lines,
+                "use_coach_questions": use_coach_questions,
+                "use_stars_analysis": use_stars_analysis
+            }
         }
 
         # Initialize Redis state for this round
@@ -471,6 +611,52 @@ async def stream_interview_round(
             "pause_recording": True,  # Tell client to stop recording during playback
             "can_regenerate": True  # Tell client this is the initial question (can be regenerated)
         })
+
+        # Wait for frontend signal (could be ready_for_answer or regenerate_question)
+        signal = await wait_for_ready_signal(websocket)
+
+        # Handle regenerate immediately if requested
+        regeneration_loop = True
+        while regeneration_loop and signal == "regenerate":
+            print(f"[WebSocket] Regenerating initial question...")
+
+            # Remove last interaction from Redis
+            await redis_store.remove_last_interaction(session_id, round_number)
+
+            # Generate new question with same context
+            result = await generate_question(initial_state)
+            question_text = result["question"]
+
+            # Generate TTS for new question
+            question_audio_path = os.path.join(tempfile.gettempdir(), f"question_{session_id}_{round_number}_regen.mp3")
+            await text_to_speech(question_text, question_audio_path)
+
+            with open(question_audio_path, "rb") as f:
+                question_audio_base64 = base64.b64encode(f.read()).decode()
+
+            # Save new question to Redis
+            await redis_store.add_interaction(session_id, round_number, {
+                "interaction_num": 1,
+                "question": question_text
+            })
+            print(f"[Redis] Saved regenerated question")
+
+            # Send new question to client
+            await websocket.send_json({
+                "type": "question",
+                "text": question_text,
+                "audio_base64": question_audio_base64,
+                "pause_recording": True,
+                "can_regenerate": True,
+                "is_regenerated": True
+            })
+
+            # Clean up temp file
+            if os.path.exists(question_audio_path):
+                os.remove(question_audio_path)
+
+            print(f"[WebSocket] Sent regenerated question, waiting for next signal...")
+            signal = await wait_for_ready_signal(websocket)
 
         # OUTER LOOP: Multi-turn conversation (keep asking follow-ups until Grok is satisfied)
         attempt_count = 0
@@ -533,6 +719,9 @@ async def stream_interview_round(
                                     if os.path.exists(question_audio_path):
                                         os.remove(question_audio_path)
 
+                                    # Wait for frontend to signal MediaRecorder restarted
+                                    _ = await wait_for_ready_signal(websocket)  # Ignore return value here
+
                                     print(f"[WebSocket] Sent regenerated question, looping back for another possible regenerate")
                                     attempt_count = 0  # Reset attempt counter
                                     # Continue inner loop - check for another regenerate
@@ -555,17 +744,19 @@ async def stream_interview_round(
 
                 # If we captured the first audio chunk, add it to the buffer
                 if first_audio_chunk:
-                    audio_buffer.add_chunk(first_audio_chunk)
+                    audio_buffer.append(first_audio_chunk)
                     print(f"[WebSocket] Added captured first audio chunk to buffer")
 
             # Collect user's answer using helper function
             try:
-                full_transcript, last_interrupt_time = await collect_user_answer(
+                full_transcript, last_interrupt_time, interrupt_occurred = await collect_user_answer(
                     websocket=websocket,
                     session_id=session_id,
                     round_number=round_number,
                     question_text=question_text,
-                    session=session,
+                    interrupt_level=interrupt_level,
+                    interview_type=interview_type,
+                    difficulty_level=difficulty_level,
                     audio_buffer=audio_buffer,
                     interrupt_agent=interrupt_agent,
                     last_interrupt_time=last_interrupt_time
@@ -580,6 +771,55 @@ async def stream_interview_round(
                     manager.disconnect(session_id)
                     return
                 raise
+            except RegenerateRequestException:
+                print(f"[WebSocket] Regenerating current question...")
+
+                # Add current question to asked_topics to avoid duplicate
+                initial_state["asked_topics"] = initial_state.get("asked_topics", []) + [question_text]
+
+                # Generate new question (reusing same state/context)
+                regen_result = await generate_question(initial_state)
+                question_text = regen_result["question"]
+
+                # Update result to preserve any conversation history
+                result.update(regen_result)
+
+                # Generate TTS for regenerated question
+                regen_audio_path = os.path.join(tempfile.gettempdir(), f"question_{session_id}_{round_number}_regen_{time.time()}.mp3")
+                await text_to_speech(question_text, regen_audio_path)
+
+                with open(regen_audio_path, "rb") as f:
+                    regen_audio_base64 = base64.b64encode(f.read()).decode()
+
+                # Remove last interaction from Redis and add regenerated question
+                await redis_store.remove_last_interaction(session_id, round_number)
+                interaction_count = await redis_store.get_interaction_count(session_id, round_number)
+                await redis_store.add_interaction(session_id, round_number, {
+                    "interaction_num": interaction_count + 1,
+                    "question": question_text
+                })
+                print(f"[Redis] Saved regenerated question")
+
+                # Send regenerated question to client
+                await websocket.send_json({
+                    "type": "question",
+                    "text": question_text,
+                    "audio_base64": regen_audio_base64,
+                    "can_regenerate": True,
+                    "is_regenerated": True
+                })
+
+                # Clean up temp file
+                if os.path.exists(regen_audio_path):
+                    os.remove(regen_audio_path)
+
+                # Wait for frontend to signal MediaRecorder restarted
+                _ = await wait_for_ready_signal(websocket)
+
+                # Reset audio buffer and continue outer loop (don't increment attempt_count)
+                audio_buffer.reset_for_next_question()
+                print(f"[WebSocket] Sent regenerated question, continuing loop")
+                continue  # Go back to start of while True loop, wait for new answer
 
             # Wait 2 seconds to ensure any pending transcription completes
             print(f"[WebSocket] Waiting 2s for final transcription to complete...")
@@ -589,6 +829,9 @@ async def stream_interview_round(
             if awaiting_first_answer:
                 awaiting_first_answer = False
                 print(f"[WebSocket] First answer received, regeneration disabled")
+
+            # Note: No need for artificial delay after interrupt - frontend ready signal handles timing
+            # The wait_for_ready_signal() before followup questions naturally prevents chain effects
 
             # Log final transcript
             word_count = len(full_transcript.split())
@@ -632,10 +875,10 @@ async def stream_interview_round(
             # Evaluate complete answer and decide: followup or final eval
             state_values = result.copy()
             state_values["user_answer"] = full_transcript
-            state_values["interview_type"] = session.interview_type
-            state_values["difficulty_level"] = session.difficulty_level
+            state_values["interview_type"] = interview_type
+            state_values["difficulty_level"] = difficulty_level
             state_values["current_round"] = round_number
-            state_values["max_rounds"] = session.total_rounds
+            state_values["max_rounds"] = total_rounds
 
             eval_result = await evaluate_answer(state_values)
 
@@ -690,7 +933,8 @@ async def stream_interview_round(
                     "feedback": feedback_text,
                     "question": followup_question_text,
                     "audio_base64": followup_audio_base64,
-                    "satisfaction_level": satisfaction_level
+                    "satisfaction_level": satisfaction_level,
+                    "can_regenerate": True  # Allow regenerating followup questions
                 })
 
                 # Clean up temp file
@@ -711,7 +955,8 @@ async def stream_interview_round(
                 # Reset audio buffer for next answer
                 audio_buffer.reset_for_next_question()
 
-                print(f"[WebSocket] Follow-up sent, continuing to next answer (no draining)")
+                # Wait for frontend to signal MediaRecorder restarted (prevents TTS leakage)
+                _ = await wait_for_ready_signal(websocket)
 
                 # CONTINUE THE OUTER LOOP - collect next answer
                 continue
@@ -755,7 +1000,9 @@ async def stream_interview_round(
 
                 # Persist conversation from Redis to PostgreSQL
                 print(f"[WebSocket] Persisting conversation to database...")
-                db_new = next(get_db())
+                # Import SessionLocal directly to avoid generator double-close issue
+                from infrastructure.database import SessionLocal
+                db_new = SessionLocal()
                 try:
                     await persist_round_to_database(session_id, round_number, db_new, redis_store)
                     print(f"[WebSocket] Successfully persisted to database")
@@ -765,6 +1012,7 @@ async def stream_interview_round(
                     print(traceback.format_exc())
                 finally:
                     db_new.close()
+                    print(f"[WebSocket] Database session closed")
 
                 # Send simple completion message
                 await websocket.send_json({
