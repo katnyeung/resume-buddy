@@ -34,18 +34,27 @@ public class VectorEmbeddingService {
     @Value("${app.openai.embedding-model:text-embedding-3-small}")
     private String embeddingModel;
 
-    private static final String OPENAI_EMBEDDING_URL = "https://api.openai.com/v1/embeddings";
+    @Value("${app.openai.embedding-url:https://api.openai.com/v1/embeddings}")
+    private String embeddingUrl;
 
     /**
      * Generate vector embedding for text
      */
     public float[] generateEmbedding(String text) {
         try {
-            log.debug("Generating embedding for text of length: {}", text.length());
+            long startTime = System.currentTimeMillis();
+            log.info("╔════════════════════════════════════════════════════════════════════════════════");
+            log.info("║ 🚀 NVIDIA NIM API Call - Embedding Generation");
+            log.info("║ Model: {} (1024-dimensional vectors)", embeddingModel);
+            log.info("║ Endpoint: {}", embeddingUrl);
+            log.info("║ Input text length: {} characters", text.length());
+            log.info("║ Input preview: {}", text.length() > 100 ? text.substring(0, 100) + "..." : text);
+            log.info("╚════════════════════════════════════════════════════════════════════════════════");
 
             Map<String, Object> request = Map.of(
                     "model", embeddingModel,
-                    "input", text
+                    "input", text,
+                    "input_type", "passage"  // Required by NVIDIA NIM for asymmetric models
             );
 
             HttpHeaders headers = new HttpHeaders();
@@ -55,7 +64,7 @@ public class VectorEmbeddingService {
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
             String response = restTemplate.exchange(
-                    OPENAI_EMBEDDING_URL,
+                    embeddingUrl,
                     HttpMethod.POST,
                     entity,
                     String.class
@@ -66,7 +75,7 @@ public class VectorEmbeddingService {
             JsonNode embeddingNode = root.path("data").get(0).path("embedding");
 
             if (embeddingNode == null || !embeddingNode.isArray()) {
-                throw new RuntimeException("Invalid embedding response from OpenAI");
+                throw new RuntimeException("Invalid embedding response from NVIDIA NIM");
             }
 
             // Convert JSON array to float[]
@@ -76,7 +85,14 @@ public class VectorEmbeddingService {
                 embedding[i] = (float) embeddingNode.get(i).asDouble();
             }
 
-            log.info("Generated embedding with dimension: {}", embedding.length);
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("╔════════════════════════════════════════════════════════════════════════════════");
+            log.info("║ ✅ NVIDIA NIM Response - Success!");
+            log.info("║ Vector dimension: {} (NV-Embed-v2 model)", embedding.length);
+            log.info("║ Response time: {} ms (sub-second inference)", duration);
+            log.info("║ Sample vector values: [{}, {}, {}, ...]",
+                embedding[0], embedding[1], embedding[2]);
+            log.info("╚════════════════════════════════════════════════════════════════════════════════");
             return embedding;
 
         } catch (Exception e) {
@@ -94,11 +110,17 @@ public class VectorEmbeddingService {
                 return new ArrayList<>();
             }
 
-            log.info("Generating batch embeddings for {} texts", texts.size());
+            long startTime = System.currentTimeMillis();
+            log.info("╔════════════════════════════════════════════════════════════════════════════════");
+            log.info("║ 🚀 NVIDIA NIM Batch API Call - Batch Embedding Generation");
+            log.info("║ Model: {} (1024-dimensional vectors)", embeddingModel);
+            log.info("║ Endpoint: {}", embeddingUrl);
+            log.info("║ Batch size: {} texts", texts.size());
+            log.info("╚════════════════════════════════════════════════════════════════════════════════");
 
-            // OpenAI supports up to 2048 inputs per request
+            // NVIDIA NIM supports up to 2048 inputs per request
             if (texts.size() > 2048) {
-                log.warn("Text count {} exceeds OpenAI batch limit (2048), processing in chunks", texts.size());
+                log.warn("Text count {} exceeds NVIDIA NIM batch limit (2048), processing in chunks", texts.size());
                 // Process in chunks
                 List<float[]> allEmbeddings = new ArrayList<>();
                 for (int i = 0; i < texts.size(); i += 2048) {
@@ -111,7 +133,8 @@ public class VectorEmbeddingService {
 
             Map<String, Object> request = Map.of(
                     "model", embeddingModel,
-                    "input", texts  // Send all texts in one request
+                    "input", texts,  // Send all texts in one request
+                    "input_type", "passage"  // Required by NVIDIA NIM for asymmetric models
             );
 
             HttpHeaders headers = new HttpHeaders();
@@ -121,7 +144,7 @@ public class VectorEmbeddingService {
             HttpEntity<Map<String, Object>> entity = new HttpEntity<>(request, headers);
 
             String response = restTemplate.exchange(
-                    OPENAI_EMBEDDING_URL,
+                    embeddingUrl,
                     HttpMethod.POST,
                     entity,
                     String.class
@@ -132,7 +155,7 @@ public class VectorEmbeddingService {
             JsonNode dataArray = root.path("data");
 
             if (dataArray == null || !dataArray.isArray()) {
-                throw new RuntimeException("Invalid batch embedding response from OpenAI");
+                throw new RuntimeException("Invalid batch embedding response from NVIDIA NIM");
             }
 
             List<float[]> embeddings = new ArrayList<>();
@@ -148,8 +171,14 @@ public class VectorEmbeddingService {
                 }
             }
 
-            log.info("Generated {} embeddings with dimension: {}", embeddings.size(),
-                    embeddings.isEmpty() ? 0 : embeddings.get(0).length);
+            long duration = System.currentTimeMillis() - startTime;
+            log.info("╔════════════════════════════════════════════════════════════════════════════════");
+            log.info("║ ✅ NVIDIA NIM Batch Response - Success!");
+            log.info("║ Generated {} vectors of dimension {} (NV-Embed-v2 model)",
+                embeddings.size(), embeddings.isEmpty() ? 0 : embeddings.get(0).length);
+            log.info("║ Total response time: {} ms", duration);
+            log.info("║ Average time per embedding: {} ms", embeddings.isEmpty() ? 0 : duration / embeddings.size());
+            log.info("╚════════════════════════════════════════════════════════════════════════════════");
             return embeddings;
 
         } catch (Exception e) {

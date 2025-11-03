@@ -48,7 +48,7 @@ import java.util.List;
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 @Tag(name = "Admin", description = "Administrative operations for job crawling and maintenance")
-@PreAuthorize("hasRole('ADMIN')")
+// @PreAuthorize("hasRole('ADMIN')") // Disabled for MVP - admin endpoints are public (see SecurityConfig.java line 50)
 public class AdminController {
 
     private final JobCrawlingApplicationService jobCrawlingService;

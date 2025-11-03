@@ -32,7 +32,7 @@ public class RedisVectorService {
     private final JobSearchProfileLineRepository jobSearchProfileLineRepository;
 
     private static final String VECTOR_INDEX = "idx:vectors";
-    private static final int VECTOR_DIM = 1536; // OpenAI embedding dimension
+    private static final int VECTOR_DIM = 1024; // NVIDIA NV-EmbedQA-E5-v5 embedding dimension (was 1536 for OpenAI)
 
     /**
      * Initialize vector index on startup

@@ -19,7 +19,6 @@ import java.util.Map;
 @Slf4j
 @RestController
 @RequestMapping("/api/resumes")
-@CrossOrigin(origins = "http://localhost:3000")
 @RequiredArgsConstructor
 @Tag(name = "Job Analysis", description = "AI-powered job analysis with O*NET integration and recruiter insights")
 public class JobAnalysisController {

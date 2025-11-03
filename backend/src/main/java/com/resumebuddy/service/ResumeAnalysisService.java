@@ -276,7 +276,7 @@ public class ResumeAnalysisService {
                 Map.of("role", "user", "content", prompt)
             ));
             requestBody.put("temperature", 0.3);  // Lower temperature for more consistent results
-            requestBody.put("max_tokens", 32000);  // Increased to handle large resume analysis output
+            requestBody.put("max_tokens", 2500);  // Reduced for Nemotron 8k context (NVIDIA hackathon requirement)
 
             // Set headers
             HttpHeaders headers = new HttpHeaders();

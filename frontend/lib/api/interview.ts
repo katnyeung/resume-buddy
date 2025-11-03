@@ -3,8 +3,8 @@
  * Handles HTTP requests and WebSocket connections for interview practice service
  */
 
-// Interview practice service runs on separate port (8086)
-const INTERVIEW_API_URL = process.env.NEXT_PUBLIC_INTERVIEW_API_URL || 'http://localhost:8086';
+// Interview practice service routes through Ingress at /api/interview
+const INTERVIEW_API_URL = process.env.NEXT_PUBLIC_INTERVIEW_API_URL || '/api';
 
 export interface SessionInfo {
   id: string;
@@ -39,7 +39,7 @@ export interface SessionRoundInfo {
  * Get session information
  */
 export async function getSessionInfo(sessionId: string): Promise<SessionInfo> {
-  const response = await fetch(`${INTERVIEW_API_URL}/api/interview/sessions/${sessionId}/info`);
+  const response = await fetch(`${INTERVIEW_API_URL}/interview/sessions/${sessionId}/info`);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -57,7 +57,7 @@ export async function getSessionInfo(sessionId: string): Promise<SessionInfo> {
  */
 export async function getRoundInfo(sessionId: string, roundNumber: number): Promise<SessionRoundInfo> {
   const response = await fetch(
-    `${INTERVIEW_API_URL}/api/interview/sessions/${sessionId}/rounds/${roundNumber}/info`
+    `${INTERVIEW_API_URL}/interview/sessions/${sessionId}/rounds/${roundNumber}/info`
   );
 
   if (!response.ok) {
@@ -75,7 +75,7 @@ export async function getRoundInfo(sessionId: string, roundNumber: number): Prom
  * Get all sessions for a user
  */
 export async function getUserSessions(userId: string): Promise<SessionInfo[]> {
-  const response = await fetch(`${INTERVIEW_API_URL}/api/interview/users/${userId}/sessions`);
+  const response = await fetch(`${INTERVIEW_API_URL}/interview/users/${userId}/sessions`);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -170,7 +170,7 @@ export async function getConversationHistory(
   roundNumber: number
 ): Promise<ConversationHistory> {
   const response = await fetch(
-    `${INTERVIEW_API_URL}/api/interview/sessions/${sessionId}/rounds/${roundNumber}/conversation`
+    `${INTERVIEW_API_URL}/interview/sessions/${sessionId}/rounds/${roundNumber}/conversation`
   );
 
   if (!response.ok) {
@@ -331,7 +331,7 @@ export async function createInterviewSession(
   request: CreateSessionRequest
 ): Promise<CreateSessionResponse> {
   const response = await fetch(
-    `${INTERVIEW_API_URL}/api/interview/sessions/create`,
+    `${INTERVIEW_API_URL}/interview/sessions/create`,
     {
       method: 'POST',
       headers: {

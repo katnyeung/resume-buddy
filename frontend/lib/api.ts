@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { Resume, ResumeLine, ResumeLineUpdateDto, BatchUpdateResponse, ResumeAnalysisDto } from './types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api';
+// Use relative path - Nginx Ingress handles routing
+const API_BASE_URL = '/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

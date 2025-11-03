@@ -30,7 +30,6 @@ import java.util.Optional;
 @Slf4j
 @RestController
 @RequestMapping("/api/resumes")
-@CrossOrigin(origins = "http://localhost:3000")
 @RequiredArgsConstructor
 @Tag(name = "Resume Management", description = "Resume upload and basic operations")
 public class ResumeController {
