@@ -42,8 +42,8 @@ spec:
               key: POSTGRES_PASSWORD_INTERVIEW
         - name: POSTGRES_SSLMODE
           value: "require"
-        - name: DATABASE_URL
-          value: "postgresql://neondb_owner:***REMOVED***@ep-patient-glitter-ab3sjksl-pooler.eu-west-2.aws.neon.tech:5432/neondb?sslmode=require"
+        # DATABASE_URL removed - app should construct from individual env vars above
+        # This prevents hardcoding passwords in YAML files
 
         # Redis
         - name: REDIS_URI
