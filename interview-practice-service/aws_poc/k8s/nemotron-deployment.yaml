@@ -1,0 +1,121 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nim-services
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nemotron-nano-8b
+  namespace: nim-services
+  labels:
+    app: nemotron-reasoning
+    service: nvidia-nim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nemotron-reasoning
+  template:
+    metadata:
+      labels:
+        app: nemotron-reasoning
+        service: nvidia-nim
+    spec:
+      imagePullSecrets:
+      - name: ngc-secret
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - embedding-service
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: nemotron-nim
+        image: nvcr.io/nim/nvidia/llama-3.1-nemotron-nano-8b-v1:latest
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+            memory: "12Gi"
+          requests:
+            nvidia.com/gpu: 1
+            memory: "8Gi"
+            cpu: "2"
+        env:
+        - name: NIM_CACHE_PATH
+          value: /opt/nim/.cache
+        - name: NGC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ngc-api-key
+              key: NGC_API_KEY
+        - name: NIM_MODEL_PROFILE
+          value: "4f904d571fe60ff24695b5ee2aa42da58cb460787a968f1e8a09f5a7e862728d"
+        - name: NIM_MAX_MODEL_LEN
+          value: "8192"
+        ports:
+        - containerPort: 8000
+          name: http
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /v1/health/live
+            port: 8000
+          initialDelaySeconds: 360
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 5
+        readinessProbe:
+          httpGet:
+            path: /v1/health/ready
+            port: 8000
+          initialDelaySeconds: 360
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 5
+        volumeMounts:
+        - name: cache
+          mountPath: /opt/nim/.cache
+      volumes:
+      - name: cache
+        emptyDir:
+          sizeLimit: 30Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nemotron-service
+  namespace: nim-services
+  labels:
+    app: nemotron-reasoning
+spec:
+  type: LoadBalancer
+  selector:
+    app: nemotron-reasoning
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http
+  sessionAffinity: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nemotron-internal
+  namespace: nim-services
+  labels:
+    app: nemotron-reasoning
+spec:
+  type: ClusterIP
+  selector:
+    app: nemotron-reasoning
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+    name: http

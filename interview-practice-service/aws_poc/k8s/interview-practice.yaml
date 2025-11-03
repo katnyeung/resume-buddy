@@ -1,0 +1,140 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: interview-practice
+  namespace: app-services
+  labels:
+    app: interview-practice
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: interview-practice
+  template:
+    metadata:
+      labels:
+        app: interview-practice
+    spec:
+      containers:
+      - name: interview-practice
+        image: katnyeung/interview-practice:latest
+        ports:
+        - containerPort: 8086
+        env:
+        # Database
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: POSTGRES_HOST_INTERVIEW
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: POSTGRES_DB_INTERVIEW
+        - name: POSTGRES_USER
+          value: "neondb_owner"
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: POSTGRES_PASSWORD_INTERVIEW
+        - name: POSTGRES_SSLMODE
+          value: "require"
+        - name: DATABASE_URL
+          value: "postgresql://neondb_owner:***REMOVED***@ep-patient-glitter-ab3sjksl-pooler.eu-west-2.aws.neon.tech:5432/neondb?sslmode=require"
+
+        # Redis
+        - name: REDIS_URI
+          value: "redis://redis-service.app-services.svc.cluster.local:6379"
+        - name: REDIS_HOST
+          value: "redis-service.app-services.svc.cluster.local"
+        - name: REDIS_PORT
+          value: "6379"
+
+        # NIM Services (for hackathon - use Nemotron instead of Grok)
+        - name: NEMOTRON_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: NEMOTRON_URL
+        - name: EMBED_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: EMBED_URL
+
+        # API Keys (still need OpenAI for Whisper STT/TTS)
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: OPENAI_API_KEY
+        - name: XAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: XAI_API_KEY
+
+        # Grok/Nemotron Configuration (USING EKS NIM!)
+        - name: GROK_BASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: GROK_BASE_URL
+        - name: GROK_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: GROK_MODEL
+
+        # External APIs
+        - name: RESUME_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: RESUME_API_URL
+        - name: JOBSEARCH_API_URL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: JOBSEARCH_API_URL
+
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "200m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8086
+          initialDelaySeconds: 30
+          periodSeconds: 10
+
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8086
+          initialDelaySeconds: 15
+          periodSeconds: 5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: interview-practice-service
+  namespace: app-services
+spec:
+  selector:
+    app: interview-practice
+  ports:
+  - protocol: TCP
+    port: 8086
+    targetPort: 8086
+    name: http
+  type: ClusterIP

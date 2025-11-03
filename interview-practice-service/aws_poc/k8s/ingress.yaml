@@ -1,0 +1,74 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: app-ingress
+  namespace: app-services
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      # Interview Practice Service - /api/interview/* (most specific)
+      - path: /api/interview
+        pathType: Prefix
+        backend:
+          service:
+            name: interview-practice-service
+            port:
+              number: 8086
+
+      # WebSocket for interview streaming - /ws/interview/*
+      - path: /ws/interview
+        pathType: Prefix
+        backend:
+          service:
+            name: interview-practice-service
+            port:
+              number: 8086
+
+      # Job Search Service - /api/job-search/*
+      - path: /api/job-search
+        pathType: Prefix
+        backend:
+          service:
+            name: job-search-service
+            port:
+              number: 8085
+
+      # Backend API - /api/* (NO rewrite - keep /api prefix)
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: resume-api-service
+            port:
+              number: 8080
+
+      # Backend OAuth2 - /login/oauth2/* (NO rewrite)
+      - path: /login/oauth2
+        pathType: Prefix
+        backend:
+          service:
+            name: resume-api-service
+            port:
+              number: 8080
+
+      # Backend OAuth2 - /oauth2/* (NO rewrite)
+      - path: /oauth2
+        pathType: Prefix
+        backend:
+          service:
+            name: resume-api-service
+            port:
+              number: 8080
+
+      # Frontend - serve at root (MUST be last)
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: frontend-service
+            port:
+              number: 3000

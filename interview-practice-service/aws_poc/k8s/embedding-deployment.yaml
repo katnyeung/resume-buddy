@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nv-embed-v2
+  namespace: nim-services
+  labels:
+    app: embedding-service
+    service: nvidia-nim
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: embedding-service
+  template:
+    metadata:
+      labels:
+        app: embedding-service
+        service: nvidia-nim
+    spec:
+      imagePullSecrets:
+      - name: ngc-secret
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - nemotron-reasoning
+            topologyKey: kubernetes.io/hostname
+      containers:
+      - name: embedding-nim
+        image: nvcr.io/nim/nvidia/nv-embedqa-e5-v5:latest
+        resources:
+          limits:
+            nvidia.com/gpu: 1
+            memory: "12Gi"
+          requests:
+            nvidia.com/gpu: 1
+            memory: "8Gi"
+            cpu: "2"
+        env:
+        - name: NIM_CACHE_PATH
+          value: /opt/nim/.cache
+        - name: NGC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: ngc-api-key
+              key: NGC_API_KEY
+        ports:
+        - containerPort: 8001
+          name: http
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /v2/health/live
+            port: 8080
+          initialDelaySeconds: 120
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /v2/health/ready
+            port: 8080
+          initialDelaySeconds: 60
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        volumeMounts:
+        - name: cache
+          mountPath: /opt/nim/.cache
+      volumes:
+      - name: cache
+        emptyDir:
+          sizeLimit: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-service
+  namespace: nim-services
+  labels:
+    app: embedding-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: embedding-service
+  ports:
+  - port: 8001
+    targetPort: 8001
+    protocol: TCP
+    name: http
+  sessionAffinity: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: embedding-internal
+  namespace: nim-services
+  labels:
+    app: embedding-service
+spec:
+  type: ClusterIP
+  selector:
+    app: embedding-service
+  ports:
+  - port: 8001
+    targetPort: 8001
+    protocol: TCP
+    name: http

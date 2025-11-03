@@ -1,0 +1,118 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: app-services
+  labels:
+    name: app-services
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: app-services
+data:
+  # Database URLs (Neon PostgreSQL) - Each service has its own database!
+  SPRING_DATASOURCE_URL_RESUME: "jdbc:postgresql://ep-rough-waterfall-abm4iuwl-pooler.eu-west-2.aws.neon.tech:5432/resumebuddy?sslmode=require"
+  SPRING_DATASOURCE_URL_JOBSEARCH: "jdbc:postgresql://ep-late-darkness-abuh1za8-pooler.eu-west-2.aws.neon.tech:5432/jobsearch?sslmode=require"
+  POSTGRES_HOST_INTERVIEW: "ep-patient-glitter-ab3sjksl-pooler.eu-west-2.aws.neon.tech"
+  POSTGRES_DB_INTERVIEW: "neondb"
+
+  # Redis (internal to cluster)
+  REDIS_HOST: "redis-service.app-services.svc.cluster.local"
+  REDIS_PORT: "6379"
+
+  # NIM Services (cross-namespace)
+  NEMOTRON_URL: "http://nemotron-service.nim-services.svc.cluster.local:8000"
+  EMBED_URL: "http://embedding-service.nim-services.svc.cluster.local:8001"
+
+  # Service URLs (internal)
+  RESUME_API_URL: "http://resume-api-service.app-services.svc.cluster.local:8080/api"
+  JOBSEARCH_API_URL: "http://job-search-service.app-services.svc.cluster.local:8085"
+  INTERVIEW_API_URL: "http://interview-practice-service.app-services.svc.cluster.local:8086"
+
+  # Frontend (use external LoadBalancer for browser access)
+  NEXT_PUBLIC_API_URL: "http://aadd215e979f843a9bca43d0a4031613-1908660711.us-east-1.elb.amazonaws.com:8080/api"
+
+  # CORS Configuration (allow frontend LoadBalancer)
+  CORS_ALLOWED_ORIGINS: "http://a584fd5db6a56488595f1e1a82017ea2-1299701032.us-east-1.elb.amazonaws.com:3000,http://localhost:3000"
+
+  # Frontend and Server URLs (LoadBalancer for EKS demo)
+  FRONTEND_URL: "http://a584fd5db6a56488595f1e1a82017ea2-1299701032.us-east-1.elb.amazonaws.com:3000"
+  SERVER_URL: "http://aadd215e979f843a9bca43d0a4031613-1908660711.us-east-1.elb.amazonaws.com:8080"
+
+  # Neo4j Aura
+  NEO4J_URI: "neo4j+s://f187fe15.databases.neo4j.io"
+  NEO4J_USERNAME: "neo4j"
+  NEO4J_DATABASE: "Instance02"
+
+  # O*NET
+  ONET_USERNAME: "resume_buddy"
+
+  # File upload (RunPod for production)
+  DOCLING_SERVICE_URL: "https://api.runpod.ai/v2/khifa2wo4o0p5x/run"
+  DOCLING_USE_RUNPOD: "true"
+
+  # Grok LLM (NOW USING NEMOTRON NIM ON EKS!)
+  GROK_BASE_URL: "http://nemotron-service.nim-services.svc.cluster.local:8000"
+  GROK_MODEL: "nvidia/llama-3.1-nemotron-nano-8b-v1"
+
+  # OpenAI Models
+  OPENAI_MODEL: "grok-4-fast-reasoning"
+  OPENAI_BASE_URL: "https://api.x.ai/v1"
+  OPENAI_EMBEDDING_MODEL: "NV-Embed-v2"
+  OPENAI_EMBEDDING_URL: "http://embedding-service.nim-services.svc.cluster.local:8001/v1/embeddings"
+
+  # Mail
+  MAIL_HOST: "email-smtp.eu-west-2.amazonaws.com"
+  MAIL_FROM: "noreply@resumebuddy.cv"
+
+  SERVER_PORT: "8080"
+
+  # OAuth
+  OAUTH2_REDIRECT_URI: "https://resumebuddy.cv/login/oauth2/code/google"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: app-services
+type: Opaque
+stringData:
+  # Database passwords
+  SPRING_DATASOURCE_PASSWORD: "your-neon-password"
+  POSTGRES_PASSWORD_INTERVIEW: "your-neon-password"
+
+  # API Keys
+  OPENAI_API_KEY: "your-openai-key"
+  XAI_API_KEY: "your-xai-key"
+  ONET_PASSWORD: "your-onet-password"
+  NGC_API_KEY: "your-ngc-key"
+
+  # Job Crawling APIs
+  ADZUNA_APP_ID: "your-adzuna-id"
+  ADZUNA_APP_KEY: "your-adzuna-key"
+  REED_API_KEY: "your-reed-api-key"
+  JSEARCH_API_KEY: "your-jsearch-api-key"
+
+  # Stripe
+  STRIPE_SECRET_KEY: "your-stripe-key"
+  STRIPE_WEBHOOK_SECRET: "your-stripe-webhook-secret"
+  STRIPE_PRICE_ID_200: "price_xxx"
+  STRIPE_PRICE_ID_500: "price_xxx"
+  STRIPE_PRICE_ID_1000: "price_xxx"
+
+  # AWS SES
+  AWS_SES_USERNAME: "your-ses-username"
+  AWS_SES_PASSWORD: "your-ses-password"
+
+  # RunPod
+  RUNPOD_ENDPOINT_ID: "your-runpod-id"
+  RUNPOD_API_KEY: "your-runpod-key"
+
+---
+# NOTE: Before applying, replace all "your-*" placeholders with actual values
+# You can also create this from a .env file using:
+# kubectl create secret generic app-secrets -n app-services --from-env-file=.env
