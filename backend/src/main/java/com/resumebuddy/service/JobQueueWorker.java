@@ -1,8 +1,8 @@
 package com.resumebuddy.service;
 
 import com.resumebuddy.model.JobQueueEntry;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -19,13 +19,30 @@ import java.util.stream.Collectors;
  */
 @Service
 @Slf4j
-@RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.job-queue.enabled", havingValue = "true", matchIfMissing = true)
 public class JobQueueWorker {
 
-    private final JobQueueService jobQueueService;
     private final UserCreditService userCreditService;
     private final JobExecutor jobExecutor;
+
+    // Support both PostgreSQL and Redis job queue implementations
+    private final JobQueueService postgresQueueService;
+    private final RedisJobQueueService redisQueueService;
+
+    @Value("${app.job-queue.storage:postgres}")
+    private String storageType;
+
+    public JobQueueWorker(
+        UserCreditService userCreditService,
+        JobExecutor jobExecutor,
+        JobQueueService postgresQueueService,
+        @Autowired(required = false) RedisJobQueueService redisQueueService
+    ) {
+        this.userCreditService = userCreditService;
+        this.jobExecutor = jobExecutor;
+        this.postgresQueueService = postgresQueueService;
+        this.redisQueueService = redisQueueService;
+    }
 
     @Value("${app.job-queue.max-concurrent-workers:3}")
     private int maxConcurrentWorkers;
@@ -33,30 +50,73 @@ public class JobQueueWorker {
     @Value("${app.job-queue.user-rate-limit:2}")
     private int maxJobsPerUser;
 
+    // Helper methods to abstract storage type
+    private boolean canProcessMoreJobs(int maxConcurrent) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.canProcessMoreJobs(maxConcurrent)
+            : postgresQueueService.canProcessMoreJobs(maxConcurrent);
+    }
+
+    private List<JobQueueEntry> fetchNextJobs(int maxJobs) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.fetchNextJobs(maxJobs)
+            : postgresQueueService.fetchNextJobs(maxJobs);
+    }
+
+    private boolean userCanProcessMoreJobs(String userId, int maxPerUser) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.userCanProcessMoreJobs(userId, maxPerUser)
+            : postgresQueueService.userCanProcessMoreJobs(userId, maxPerUser);
+    }
+
+    private boolean tryStartJob(String jobId) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.tryStartJob(jobId)
+            : postgresQueueService.tryStartJob(jobId);
+    }
+
+    private void completeJob(String jobId, Object result, BigDecimal actualCredits) {
+        if ("redis".equalsIgnoreCase(storageType) && redisQueueService != null) {
+            redisQueueService.completeJob(jobId, result, actualCredits);
+        } else {
+            postgresQueueService.completeJob(jobId, result, actualCredits);
+        }
+    }
+
+    private void failJob(String jobId, String errorMessage, BigDecimal creditsToRefund) {
+        if ("redis".equalsIgnoreCase(storageType) && redisQueueService != null) {
+            redisQueueService.failJob(jobId, errorMessage, creditsToRefund);
+        } else {
+            postgresQueueService.failJob(jobId, errorMessage, creditsToRefund);
+        }
+    }
+
     /**
-     * Poll queue every 2 seconds and process jobs
+     * Poll queue at configured interval (default: 5 minutes) and process jobs
+     * Increased from 2s to allow Neon database to scale-to-zero during idle periods
+     * With Redis storage, can use shorter intervals (10s) since Redis is always in memory
      */
-    @Scheduled(fixedDelayString = "${app.job-queue.poll-interval-ms:2000}")
+    @Scheduled(fixedDelayString = "${app.job-queue.poll-interval-ms:300000}")
     public void processQueue() {
         try {
             // Check global rate limit
-            if (!jobQueueService.canProcessMoreJobs(maxConcurrentWorkers)) {
+            if (!canProcessMoreJobs(maxConcurrentWorkers)) {
                 log.debug("Max concurrent jobs reached ({}), skipping poll", maxConcurrentWorkers);
                 return;
             }
 
             // Fetch next jobs
-            List<JobQueueEntry> jobs = jobQueueService.fetchNextJobs(maxConcurrentWorkers);
+            List<JobQueueEntry> jobs = fetchNextJobs(maxConcurrentWorkers);
 
             if (jobs.isEmpty()) {
                 return;
             }
 
-            log.info("Fetched {} jobs from queue", jobs.size());
+            log.info("Fetched {} jobs from {} queue", jobs.size(), storageType);
 
             // Filter by user rate limit
             List<JobQueueEntry> eligibleJobs = jobs.stream()
-                .filter(job -> jobQueueService.userCanProcessMoreJobs(job.getUserId(), maxJobsPerUser))
+                .filter(job -> userCanProcessMoreJobs(job.getUserId(), maxJobsPerUser))
                 .collect(Collectors.toList());
 
             if (eligibleJobs.size() < jobs.size()) {
@@ -88,7 +148,7 @@ public class JobQueueWorker {
 
         try {
             // Try to lock job
-            if (!jobQueueService.tryStartJob(jobId)) {
+            if (!tryStartJob(jobId)) {
                 log.debug("Failed to lock job {}, already taken by another worker", jobId);
                 return;
             }
@@ -103,7 +163,7 @@ public class JobQueueWorker {
             BigDecimal actualCredits = jobExecutor.calculateActualCredits(job, result);
 
             // Mark as completed
-            jobQueueService.completeJob(jobId, result, actualCredits);
+            completeJob(jobId, result, actualCredits);
 
             log.info("Job {} completed successfully", jobId);
 
@@ -111,7 +171,7 @@ public class JobQueueWorker {
             log.error("Job {} failed with error", jobId, e);
 
             // Refund credits (they were deducted at queue time)
-            jobQueueService.failJob(
+            failJob(
                 jobId,
                 e.getMessage(),
                 job.getEstimatedCredits() // Refund estimated amount

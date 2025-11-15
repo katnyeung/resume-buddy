@@ -8,12 +8,13 @@ spring:
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      connection-timeout: 60000        # 60 seconds (up from default 30s)
-      validation-timeout: 10000        # 10 seconds
-      max-lifetime: 1800000            # 30 minutes
-      idle-timeout: 600000             # 10 minutes
-      maximum-pool-size: 5             # Limit pool size
-      minimum-idle: 2
+      maximum-pool-size: 5
+      minimum-idle: 0                  # Allow pool to drain to zero for Neon scale-to-zero
+      connection-timeout: 20000        # 20 seconds
+      idle-timeout: 60000              # 60 seconds - faster release
+      max-lifetime: 300000             # 5 minutes - faster rotation
+      keepalive-time: 30000            # 30 seconds - validate without keeping alive
+      leak-detection-threshold: 60000  # 60 seconds
 
   # OAuth2 Configuration
   security:
@@ -87,7 +88,14 @@ spring:
       password: ${NEO4J_PASSWORD}
     database: ${NEO4J_DATABASE}
 
+  # Spring Data Configuration
   data:
+    # Redis (for job queue)
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+    # Neo4j
     neo4j:
       database: ${NEO4J_DATABASE}
 
@@ -170,8 +178,9 @@ app:
   # Job Queue Configuration
   job-queue:
     enabled: ${JOB_QUEUE_ENABLED:true}
+    storage: ${JOB_QUEUE_STORAGE:redis}  # "postgres" or "redis" - redis recommended for internal apps
     max-concurrent-workers: ${JOB_QUEUE_MAX_WORKERS:3}  # Max 3 jobs processing simultaneously
-    poll-interval-ms: ${JOB_QUEUE_POLL_INTERVAL:60000}   # Poll every 2 seconds
+    poll-interval-ms: ${JOB_QUEUE_POLL_INTERVAL:10000}  # Poll every 10s with Redis (300000 for Postgres)
     user-rate-limit: ${JOB_QUEUE_USER_LIMIT:2}          # Max 2 jobs per user simultaneously
 
 # Stripe Payment Configuration

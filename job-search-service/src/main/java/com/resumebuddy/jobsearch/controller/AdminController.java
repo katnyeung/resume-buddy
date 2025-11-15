@@ -667,6 +667,60 @@ public class AdminController {
     }
 
     /**
+     * Clean up old Redis vectors (older than N days)
+     * POST /api/job-search/admin/cleanup-vectors
+     */
+    @Operation(
+            summary = "Clean up old Redis vectors (memory optimization)",
+            description = "Removes Redis vector embeddings for job listings older than N days. " +
+                    "Useful for reducing Redis memory usage in production. " +
+                    "Only deletes vectors - job listings and lines remain in PostgreSQL. " +
+                    "If vectors are needed later, use re-vectorization endpoints."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Cleanup completed successfully",
+                    content = @Content(schema = @Schema(implementation = VectorCleanupResponse.class))),
+            @ApiResponse(responseCode = "500", description = "Cleanup failed")
+    })
+    @PostMapping("/cleanup-vectors")
+    public ResponseEntity<VectorCleanupResponse> cleanupOldVectors(
+            @Parameter(description = "Keep only vectors from last N days (default: 14)")
+            @RequestParam(defaultValue = "14") int daysToKeep) {
+
+        log.info("=== Manual vector cleanup triggered (daysToKeep: {}) ===", daysToKeep);
+        long startTime = System.currentTimeMillis();
+
+        try {
+            int deletedCount = redisVectorService.cleanupOldJobVectors(daysToKeep);
+
+            long processingTime = System.currentTimeMillis() - startTime;
+            VectorCleanupResponse response = new VectorCleanupResponse(
+                    deletedCount,
+                    daysToKeep,
+                    processingTime,
+                    "success",
+                    String.format("Deleted %d old vectors (older than %d days)", deletedCount, daysToKeep)
+            );
+
+            log.info("=== Vector cleanup completed - Deleted {} vectors in {}ms ===", deletedCount, processingTime);
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            long processingTime = System.currentTimeMillis() - startTime;
+            log.error("Vector cleanup failed after {}ms: {}", processingTime, e.getMessage(), e);
+
+            VectorCleanupResponse response = new VectorCleanupResponse(
+                    0,
+                    daysToKeep,
+                    processingTime,
+                    "error",
+                    "Cleanup failed: " + e.getMessage()
+            );
+            return ResponseEntity.status(500).body(response);
+        }
+    }
+
+    /**
      * Health check endpoint
      * GET /api/job-search/admin/health
      */
@@ -872,6 +926,17 @@ public class AdminController {
         private Integer updatedLines;
         private Integer unchangedLines;
         private Long processingTimeMs;
+        private String message;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VectorCleanupResponse {
+        private Integer deletedCount;
+        private Integer daysToKeep;
+        private Long processingTimeMs;
+        private String status;
         private String message;
     }
 }

@@ -9,11 +9,12 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       maximum-pool-size: 5
-      minimum-idle: 2
-      connection-timeout: 20000
-      idle-timeout: 300000
-      max-lifetime: 600000
-      leak-detection-threshold: 60000
+      minimum-idle: 0                  # Allow pool to drain to zero for Neon scale-to-zero
+      connection-timeout: 20000        # 20 seconds
+      idle-timeout: 60000              # 60 seconds - faster release
+      max-lifetime: 300000             # 5 minutes - faster rotation
+      keepalive-time: 30000            # 30 seconds - validate without keeping alive
+      leak-detection-threshold: 60000  # 60 seconds
 
   jpa:
     hibernate:
@@ -42,11 +43,11 @@ spring:
 
   # Neo4j Configuration (for job listing indexing - shared with backend)
   neo4j:
-    uri: ${NEO4J_URI}
+    uri: ${NEO4J_URI:bolt://localhost:7687}
     authentication:
-      username: ${NEO4J_USERNAME}
-      password: ${NEO4J_PASSWORD4}
-    database: ${NEO4J_DATABASE}
+      username: ${NEO4J_USERNAME:neo4j}
+      password: ${NEO4J_PASSWORD:}
+    database: ${NEO4J_DATABASE:neo4j}
 
 server:
   port: 8085
@@ -69,20 +70,20 @@ app:
   # Security Configuration (must match resume-buddy-api JWT secret)
   security:
     jwt:
-      secret: ${JWT_SECRET}
+      secret: ${JWT_SECRET:changeme}
     # Internal API Key for service-to-service authentication
     # Used by interview-practice-service and other microservices
-    internal-api-key: ${INTERNAL_API_KEY}
+    internal-api-key: ${INTERNAL_API_KEY:changeme}
 
   # OpenAI API (for embeddings only - vector search)
   openai:
-    api-key: ${OPENAI_API_KEY}
+    api-key: ${OPENAI_API_KEY:}
     embedding-model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
     base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
 
   # Grok LLM API (for job post generation)
   grok:
-    api-key: ${GROK_API_KEY}
+    api-key: ${GROK_API_KEY:}
     model: ${GROK_MODEL:grok-4-fast-reasoning}
     base-url: ${GROK_BASE_URL:https://api.x.ai/v1}
 
@@ -94,9 +95,9 @@ app:
 
     # Adzuna API
     adzuna:
-      app-id: ${ADZUNA_APP_ID}
-      app-key: ${ADZUNA_APP_KEY}
-      base-url: ${ADZUNA_BASE_URL}
+      app-id: ${ADZUNA_APP_ID:}
+      app-key: ${ADZUNA_APP_KEY:}
+      base-url: ${ADZUNA_BASE_URL:https://api.adzuna.com/v1/api/jobs}
       default-country: ${ADZUNA_COUNTRY:gb}  # Changed default from 'us' to 'gb' for UK
       scraping:
         enabled: ${ADZUNA_SCRAPING_ENABLED:true}  # Enable web scraping for full descriptions
@@ -106,14 +107,14 @@ app:
 
     # Reed.co.uk API
     reed:
-      api-key: ${REED_API_KEY}
-      base-url: ${REED_BASE_URL}
+      api-key: ${REED_API_KEY:}
+      base-url: ${REED_BASE_URL:https://www.reed.co.uk/api/1.0}
 
     # JSearch API (RapidAPI)
     jsearch:
-      api-key: ${JSEARCH_API_KEY}
-      base-url: ${JSEARCH_BASE_URL}
-      rapidapi-host: ${JSEARCH_RAPIDAPI_HOST}
+      api-key: ${JSEARCH_API_KEY:}
+      base-url: ${JSEARCH_BASE_URL:https://jsearch.p.rapidapi.com}
+      rapidapi-host: ${JSEARCH_RAPIDAPI_HOST:jsearch.p.rapidapi.com}
 
     # DevITJobs.uk RSS Feed
     devitjobs:
@@ -121,14 +122,14 @@ app:
 
     # Fantastic Jobs LinkedIn API (RapidAPI) - uses same RapidAPI key as JSearch
     fantasticjobs:
-      api-key: ${FANTASTICJOBS_API_KEY}
-      base-url: ${FANTASTICJOBS_BASE_URL}
-      rapidapi-host: ${FANTASTICJOBS_RAPIDAPI_HOST}
+      api-key: ${FANTASTICJOBS_API_KEY:}
+      base-url: ${FANTASTICJOBS_BASE_URL:https://fantastic-jobs.p.rapidapi.com}
+      rapidapi-host: ${FANTASTICJOBS_RAPIDAPI_HOST:fantastic-jobs.p.rapidapi.com}
 
     # Theirstack API (50M+ jobs, 195 countries, 16+ job boards)
     theirstack:
-      api-key: ${THEIRSTACK_API_KEY}
-      base-url: ${THEIRSTACK_BASE_URL}
+      api-key: ${THEIRSTACK_API_KEY:}
+      base-url: ${THEIRSTACK_BASE_URL:https://api.theirstack.com}
 
   # Market Insights Configuration (Phase 1: Skill Extraction)
   market-insights:
