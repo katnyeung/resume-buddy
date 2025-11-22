@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lobby - Code Raider</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+            color: #00ff00;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px #00ff00;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #00cc00;
+            margin-bottom: 40px;
+            font-size: 18px;
+        }
+
+        .problems-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .problem-card {
+            background: #1a1a1a;
+            border: 2px solid #00ff00;
+            border-radius: 12px;
+            padding: 24px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .problem-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 255, 0, 0.3);
+            border-color: #00ffff;
+        }
+
+        .problem-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, #00ff00, #00ffff);
+        }
+
+        .difficulty-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 12px;
+        }
+
+        .difficulty-EASY {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .difficulty-MEDIUM {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .difficulty-HARD {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        .problem-card h3 {
+            color: #00ff00;
+            margin-bottom: 12px;
+            font-size: 24px;
+        }
+
+        .problem-card p {
+            color: #00cc00;
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+
+        .type-badge {
+            display: inline-block;
+            background: #0a0a0a;
+            border: 1px solid #00ff00;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin-top: 12px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #00ff00;
+            font-size: 24px;
+            margin-top: 100px;
+        }
+
+        .no-problems {
+            text-align: center;
+            color: #888;
+            font-size: 18px;
+            margin-top: 100px;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            background: #00ff00;
+            color: #0a0a0a;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            text-decoration: none;
+            display: inline-block;
+        }
+
+        .btn:hover {
+            background: #00cc00;
+        }
+
+        .user-info {
+            color: #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-actions">
+            <div class="user-info" id="userInfo">Loading...</div>
+            <a href="/static/admin.html" class="btn">Admin Panel</a>
+        </div>
+
+        <h1>⚔️ CODE RAIDER</h1>
+        <div class="subtitle">Choose Your Challenge - Code with CIPHER</div>
+
+        <div id="content">
+            <div class="loading">🔄 Loading problems...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8087/api';
+        const token = localStorage.getItem('token');
+
+        // Check authentication
+        if (!token) {
+            window.location.href = '/static/login.html';
+        }
+
+        // Load user info
+        document.getElementById('userInfo').textContent = `👤 Player: ${localStorage.getItem('username') || 'Anonymous'}`;
+
+        // Load problems
+        loadProblems();
+
+        async function loadProblems() {
+            try {
+                const response = await fetch(`${API_URL}/admin/problems`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+
+                if (response.ok) {
+                    const problems = await response.json();
+                    displayProblems(problems);
+                } else if (response.status === 401) {
+                    // Token expired - clear and redirect to login
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('username');
+                    localStorage.removeItem('userId');
+                    window.location.href = '/static/login.html';
+                } else {
+                    showError('Failed to load problems');
+                }
+            } catch (error) {
+                showError(`Network error: ${error.message}`);
+            }
+        }
+
+        function displayProblems(problems) {
+            const content = document.getElementById('content');
+
+            if (problems.length === 0) {
+                content.innerHTML = '<div class="no-problems">No problems available yet. Create one in the Admin Panel!</div>';
+                return;
+            }
+
+            const grid = document.createElement('div');
+            grid.className = 'problems-grid';
+
+            grid.innerHTML = problems.map(p => `
+                <div class="problem-card" onclick="startGame('${p.id}')">
+                    <span class="difficulty-badge difficulty-${p.difficulty}">${p.difficulty}</span>
+                    <h3>${p.title}</h3>
+                    <p>${p.description.substring(0, 150)}${p.description.length > 150 ? '...' : ''}</p>
+                    <span class="type-badge">🎯 ${p.algorithm_type.replace('_', ' ').toUpperCase()}</span>
+                    <p style="margin-top: 12px; color: #00ffff;">📖 Story: ${p.story_seed}</p>
+                </div>
+            `).join('');
+
+            content.innerHTML = '';
+            content.appendChild(grid);
+        }
+
+        async function startGame(problemId) {
+            try {
+                // Create session
+                const response = await fetch(`${API_URL}/round-robin/session/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ problem_id: problemId })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    // Redirect to game page
+                    window.location.href = `/static/play.html?session=${data.session_id}`;
+                } else {
+                    alert('❌ Failed to start game');
+                }
+            } catch (error) {
+                alert(`❌ Network error: ${error.message}`);
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('content').innerHTML = `
+                <div class="no-problems">❌ ${message}</div>
+            `;
+        }
+    </script>
+</body>
+</html>

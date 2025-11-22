@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Code Raider</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f7fa;
+            color: #1f2937;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 20px 0;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #1f2937;
+            font-size: 24px;
+            font-weight: 600;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px 40px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2 {
+            color: #1f2937;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .card p {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #374151;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        textarea, input[type="text"], select {
+            width: 100%;
+            padding: 10px 12px;
+            background: white;
+            color: #1f2937;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        textarea:focus, input:focus, select:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        .hint {
+            color: #6b7280;
+            font-size: 13px;
+            margin-top: 6px;
+            font-style: italic;
+        }
+
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 6px;
+            font-family: inherit;
+            transition: background 0.2s;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background: #4338ca;
+        }
+
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #6b7280;
+        }
+
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .btn-success {
+            background: #10b981;
+        }
+
+        .btn-success:hover {
+            background: #059669;
+        }
+
+        .loading {
+            color: #4f46e5;
+            text-align: center;
+            padding: 20px;
+            display: none;
+            font-weight: 500;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+            border-left: 4px solid #ef4444;
+        }
+
+        .story-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .story-card {
+            background: #f9fafb;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+
+        .story-card:hover {
+            border-color: #4f46e5;
+            box-shadow: 0 4px 6px rgba(79, 70, 229, 0.1);
+        }
+
+        .story-card.selected {
+            border-color: #4f46e5;
+            background: #eef2ff;
+        }
+
+        .story-card h4 {
+            color: #4f46e5;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .story-card p {
+            color: #4b5563;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 12px;
+        }
+
+        .story-card button {
+            width: 100%;
+            margin: 0;
+        }
+
+        .preview-section {
+            display: none;
+            margin-top: 24px;
+        }
+
+        .preview-field {
+            margin-bottom: 16px;
+        }
+
+        .preview-field strong {
+            display: block;
+            margin-bottom: 8px;
+            color: #374151;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .problem-list {
+            margin-top: 40px;
+        }
+
+        .problem-item {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            padding: 16px;
+            margin-bottom: 12px;
+            border-radius: 6px;
+        }
+
+        .problem-item h3 {
+            color: #1f2937;
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .problem-item p {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+
+        .problem-item button {
+            margin-top: 8px;
+        }
+
+        .button-group {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>⚙️ Admin Panel - Code Raider</h1>
+    </div>
+
+    <div class="container">
+        <div class="card">
+            <h2>🎮 Create New Problem</h2>
+            <p>Paste a LeetCode problem and optionally add story direction to generate 3 unique story themes.</p>
+
+            <div class="error" id="errorMessage"></div>
+
+            <div class="form-group">
+                <label for="leetcodeQuestion">📋 LeetCode Problem (Copy/Paste Everything)</label>
+                <textarea id="leetcodeQuestion" placeholder="Paste the entire LeetCode problem here including:
+- Title
+- Problem description
+- Examples (Example 1, Example 2, etc.)
+- Constraints
+
+Example:
+198. House Robber
+Medium
+
+You are a professional robber planning to rob houses along a street. Each house has a certain amount of money stashed...
+
+Example 1:
+Input: nums = [1,2,3,1]
+Output: 4
+..."></textarea>
+                <div class="hint">💡 Tip: Include all examples for better test case extraction!</div>
+            </div>
+
+            <div class="form-group">
+                <label for="storyDirection">💭 Story Direction (Optional)</label>
+                <input type="text" id="storyDirection" placeholder="e.g., underwater base, space heist, ancient temple, pirate adventure">
+                <div class="hint">Guide the story theme with hints. Leave empty for AI to be creative!</div>
+            </div>
+
+            <div class="button-group">
+                <button type="button" id="generateBtn" onclick="generateStoryVariations()">🤖 Generate 3 Story Variations</button>
+                <button type="button" class="btn-secondary" onclick="clearForm()">Clear</button>
+            </div>
+
+            <div class="loading" id="loadingIndicator">
+                ⏳ AI is generating 3 unique story themes... Please wait ~15 seconds...
+            </div>
+
+            <!-- Three story variations -->
+            <div class="story-grid" id="storyOptions"></div>
+
+            <!-- Preview after selection -->
+            <div class="preview-section" id="generatedPreview">
+                <h3 style="margin-bottom: 16px; color: #1f2937;">✨ Review & Edit Generated Problem</h3>
+
+                <div class="preview-field">
+                    <strong>Title</strong>
+                    <input type="text" id="previewTitle" placeholder="Problem title">
+                </div>
+
+                <div class="preview-field">
+                    <strong>Selected Story Theme</strong>
+                    <textarea id="previewStory" style="min-height: 80px;"></textarea>
+                    <div class="hint">This creates immersive narratives during gameplay</div>
+                </div>
+
+                <div class="preview-field">
+                    <strong>Algorithm Type</strong>
+                    <select id="previewAlgoType">
+                        <option value="dynamic_programming">Dynamic Programming</option>
+                        <option value="greedy">Greedy</option>
+                        <option value="graph">Graph</option>
+                        <option value="array">Array</option>
+                        <option value="string">String</option>
+                        <option value="tree">Tree</option>
+                        <option value="backtracking">Backtracking</option>
+                        <option value="two_pointers">Two Pointers</option>
+                    </select>
+                </div>
+
+                <div class="preview-field">
+                    <strong>Difficulty</strong>
+                    <select id="previewDifficulty">
+                        <option value="EASY">Easy</option>
+                        <option value="MEDIUM">Medium</option>
+                        <option value="HARD">Hard</option>
+                    </select>
+                </div>
+
+                <div class="preview-field">
+                    <strong>Problem Description</strong>
+                    <textarea id="previewDescription" style="min-height: 100px;"></textarea>
+                </div>
+
+                <div class="preview-field">
+                    <strong>Test Cases (JSON)</strong>
+                    <textarea id="previewTestCases" style="min-height: 120px; font-family: 'Monaco', 'Menlo', monospace;"></textarea>
+                    <div class="hint">Format: [{"input": [...], "expected": value}, ...]</div>
+                </div>
+
+                <div class="preview-field">
+                    <strong>Function Signature</strong>
+                    <input type="text" id="previewSignature" placeholder="def functionName(params) -> returnType:">
+                </div>
+
+                <div class="button-group">
+                    <button type="button" class="btn-success" onclick="saveProblem()">💾 Save Problem</button>
+                    <button type="button" class="btn-secondary" onclick="hidePreview()">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="card problem-list">
+            <h2>📚 Existing Problems</h2>
+            <div id="problemsList" style="margin-top: 16px;"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8087/api';
+        const token = localStorage.getItem('token');
+        let generatedData = null;
+        let selectedStoryIndex = null;
+
+        // Load problems on page load
+        loadProblems();
+
+        async function generateStoryVariations() {
+            const questionText = document.getElementById('leetcodeQuestion').value.trim();
+            const storyDirection = document.getElementById('storyDirection').value.trim();
+
+            if (!questionText) {
+                showError('Please paste a LeetCode problem first!');
+                return;
+            }
+
+            // Show loading
+            document.getElementById('loadingIndicator').style.display = 'block';
+            document.getElementById('generateBtn').disabled = true;
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('storyOptions').style.display = 'none';
+            document.getElementById('generatedPreview').style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_URL}/admin/problems/generate`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        leetcode_question: questionText,
+                        story_direction: storyDirection || null
+                    })
+                });
+
+                if (response.ok) {
+                    generatedData = await response.json();
+                    displayStoryVariations();
+                } else {
+                    const error = await response.json();
+                    showError(`AI generation failed: ${error.detail}`);
+                }
+            } catch (error) {
+                showError(`Network error: ${error.message}`);
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+                document.getElementById('generateBtn').disabled = false;
+            }
+        }
+
+        function displayStoryVariations() {
+            const container = document.getElementById('storyOptions');
+
+            if (!generatedData.story_variations || generatedData.story_variations.length === 0) {
+                showError('No story variations generated');
+                return;
+            }
+
+            container.innerHTML = generatedData.story_variations.map((story, index) => `
+                <div class="story-card" onclick="selectStory(${index})">
+                    <h4>Variation ${index + 1}</h4>
+                    <p>${story}</p>
+                    <button class="btn-success" onclick="event.stopPropagation(); selectStory(${index})">Pick This</button>
+                </div>
+            `).join('');
+
+            container.style.display = 'grid';
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function selectStory(index) {
+            selectedStoryIndex = index;
+
+            // Highlight selected card
+            document.querySelectorAll('.story-card').forEach((card, i) => {
+                card.classList.toggle('selected', i === index);
+            });
+
+            // Populate preview with selected story
+            document.getElementById('previewTitle').value = generatedData.title || '';
+            document.getElementById('previewStory').value = generatedData.story_variations[index] || '';
+            document.getElementById('previewAlgoType').value = generatedData.algorithm_type || 'dynamic_programming';
+            document.getElementById('previewDifficulty').value = generatedData.difficulty || 'MEDIUM';
+            document.getElementById('previewDescription').value = generatedData.description || '';
+            document.getElementById('previewTestCases').value = JSON.stringify(generatedData.test_cases, null, 2) || '';
+            document.getElementById('previewSignature').value = generatedData.function_signature || '';
+
+            // Show preview
+            document.getElementById('generatedPreview').style.display = 'block';
+            document.getElementById('generatedPreview').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function saveProblem() {
+            if (selectedStoryIndex === null) {
+                showError('Please select a story variation first!');
+                return;
+            }
+
+            try {
+                const testCasesText = document.getElementById('previewTestCases').value;
+
+                const problemData = {
+                    title: document.getElementById('previewTitle').value,
+                    description: document.getElementById('previewDescription').value,
+                    algorithm_type: document.getElementById('previewAlgoType').value,
+                    difficulty: document.getElementById('previewDifficulty').value,
+                    test_cases: testCasesText,
+                    story_seed: document.getElementById('previewStory').value,
+                    function_signature: document.getElementById('previewSignature').value
+                };
+
+                const response = await fetch(`${API_URL}/admin/problems`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify(problemData)
+                });
+
+                if (response.ok) {
+                    alert('✅ Problem saved successfully!');
+                    clearForm();
+                    loadProblems();
+                } else {
+                    const error = await response.json();
+                    showError(`Save failed: ${error.detail}`);
+                }
+            } catch (error) {
+                showError(`Network error: ${error.message}`);
+            }
+        }
+
+        function clearForm() {
+            document.getElementById('leetcodeQuestion').value = '';
+            document.getElementById('storyDirection').value = '';
+            document.getElementById('storyOptions').style.display = 'none';
+            document.getElementById('generatedPreview').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
+            generatedData = null;
+            selectedStoryIndex = null;
+        }
+
+        function hidePreview() {
+            document.getElementById('generatedPreview').style.display = 'none';
+            selectedStoryIndex = null;
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            errorDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        async function loadProblems() {
+            try {
+                const response = await fetch(`${API_URL}/admin/problems`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    const problems = await response.json();
+                    displayProblems(problems);
+                }
+            } catch (error) {
+                console.error('Failed to load problems:', error);
+            }
+        }
+
+        function displayProblems(problems) {
+            const container = document.getElementById('problemsList');
+
+            if (problems.length === 0) {
+                container.innerHTML = '<p style="color: #6b7280;">No problems yet. Create one above!</p>';
+                return;
+            }
+
+            container.innerHTML = problems.map(p => `
+                <div class="problem-item">
+                    <h3>${p.title}</h3>
+                    <p><strong>Type:</strong> ${p.algorithm_type} | <strong>Difficulty:</strong> ${p.difficulty}</p>
+                    <p><strong>Story:</strong> ${p.story_seed}</p>
+                    <button class="btn-danger" onclick="deleteProblem('${p.id}')">Delete</button>
+                </div>
+            `).join('');
+        }
+
+        async function deleteProblem(problemId) {
+            if (!confirm('Are you sure you want to delete this problem?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/admin/problems/${problemId}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (response.ok) {
+                    alert('✅ Problem deleted!');
+                    loadProblems();
+                }
+            } catch (error) {
+                alert(`❌ Delete failed: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

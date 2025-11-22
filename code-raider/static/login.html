@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Code Raider</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 100%);
+            color: #00ff00;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .login-container {
+            background: #1a1a1a;
+            border: 2px solid #00ff00;
+            border-radius: 12px;
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+            box-shadow: 0 10px 40px rgba(0, 255, 0, 0.2);
+        }
+
+        h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px #00ff00;
+        }
+
+        .subtitle {
+            color: #00cc00;
+            margin-bottom: 30px;
+        }
+
+        .info {
+            background: #0a0a0a;
+            border: 1px solid #00ff00;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: left;
+            line-height: 1.8;
+        }
+
+        .btn {
+            background: #00ff00;
+            color: #0a0a0a;
+            border: none;
+            padding: 15px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.3s;
+        }
+
+        .btn:hover {
+            background: #00cc00;
+            transform: scale(1.05);
+        }
+
+        .manual-login {
+            margin-top: 30px;
+            padding-top: 30px;
+            border-top: 1px solid #00ff00;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            color: #00ff00;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            background: #0a0a0a;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+
+        .error {
+            background: #ff0000;
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>⚔️ CODE RAIDER</h1>
+        <div class="subtitle">Story-Based Coding Education with CIPHER AI</div>
+
+        <div class="info">
+            <strong>🔐 Login with Resume Buddy</strong><br><br>
+            Enter your credentials to access Code Raider.
+        </div>
+
+        <div class="error" id="errorMessage"></div>
+
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" placeholder="your@email.com" required>
+            </div>
+
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" placeholder="Your password" required>
+            </div>
+
+            <button type="submit" class="btn">🚀 Login & Enter Code Raider</button>
+        </form>
+
+        <div class="manual-login">
+            <strong>Or use existing token:</strong>
+
+            <form id="manualLoginForm">
+                <div class="form-group">
+                    <label for="token">JWT Token</label>
+                    <input type="text" id="token" placeholder="Paste your JWT token here...">
+                </div>
+
+                <button type="submit" class="btn">Enter with Token</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const RESUME_API_URL = 'http://localhost:8080/api';
+
+        // Check if already logged in
+        const existingToken = localStorage.getItem('token');
+        if (existingToken) {
+            window.location.href = '/static/lobby.html';
+        }
+
+        // Main login form (email/password)
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value.trim();
+            const password = document.getElementById('password').value.trim();
+
+            try {
+                const response = await fetch(`${RESUME_API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+
+                    // Save token and user info
+                    localStorage.setItem('token', data.token);
+                    localStorage.setItem('username', data.user?.name || email);
+                    localStorage.setItem('userId', data.user?.id);
+
+                    // Redirect to lobby
+                    window.location.href = '/static/lobby.html';
+                } else {
+                    const error = await response.json();
+                    showError(error.message || 'Login failed. Check your credentials.');
+                }
+            } catch (error) {
+                showError(`Network error: ${error.message}`);
+            }
+        });
+
+        // Manual token login form
+        document.getElementById('manualLoginForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+
+            const token = document.getElementById('token').value.trim();
+
+            if (!token) {
+                showError('Please enter a token');
+                return;
+            }
+
+            // Save to localStorage
+            localStorage.setItem('token', token);
+            localStorage.setItem('username', 'Token User');
+
+            // Redirect to lobby
+            window.location.href = '/static/lobby.html';
+        });
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        // Check if redirected from Resume Buddy with token in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlToken = urlParams.get('token');
+        if (urlToken) {
+            localStorage.setItem('token', urlToken);
+            window.location.href = '/static/lobby.html';
+        }
+    </script>
+</body>
+</html>
