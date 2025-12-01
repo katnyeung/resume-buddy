@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lobby - Chaos Monkey</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', monospace;
+            background: linear-gradient(135deg, #1a0000 0%, #330000 100%);
+            color: #ff4444;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px #ff4444;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { text-shadow: 0 0 20px #ff4444; }
+            50% { text-shadow: 0 0 30px #ff6666; }
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #ff6666;
+            margin-bottom: 40px;
+            font-size: 18px;
+        }
+
+        .scenarios-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .scenario-card {
+            background: #1a1a1a;
+            border: 2px solid #ff4444;
+            border-radius: 12px;
+            padding: 24px;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .scenario-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(255, 68, 68, 0.3);
+            border-color: #ff6666;
+        }
+
+        .scenario-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: linear-gradient(90deg, #ff4444, #ff6666);
+        }
+
+        .difficulty-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 12px;
+        }
+
+        .difficulty-EASY {
+            background: #28a745;
+            color: #fff;
+        }
+
+        .difficulty-MEDIUM {
+            background: #ffc107;
+            color: #000;
+        }
+
+        .difficulty-HARD {
+            background: #dc3545;
+            color: #fff;
+        }
+
+        .scenario-card h3 {
+            color: #ff4444;
+            margin-bottom: 12px;
+            font-size: 24px;
+        }
+
+        .scenario-card p {
+            color: #ff6666;
+            line-height: 1.6;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        .theme-badge {
+            display: inline-block;
+            background: #0a0a0a;
+            border: 1px solid #ff4444;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin-top: 8px;
+            margin-right: 8px;
+        }
+
+        .stakes {
+            color: #ffaa00;
+            font-size: 13px;
+            margin-top: 12px;
+            font-weight: bold;
+        }
+
+        .lesson-tag {
+            display: inline-block;
+            background: #330000;
+            color: #ff8888;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            margin-top: 8px;
+        }
+
+        .loading {
+            text-align: center;
+            color: #ff4444;
+            font-size: 24px;
+            margin-top: 100px;
+        }
+
+        .no-scenarios {
+            text-align: center;
+            color: #888;
+            font-size: 18px;
+            margin-top: 100px;
+        }
+
+        .header-actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            background: #ff4444;
+            color: #0a0a0a;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            text-decoration: none;
+            display: inline-block;
+            transition: background 0.2s;
+        }
+
+        .btn:hover {
+            background: #ff6666;
+        }
+
+        .user-info {
+            color: #ff4444;
+        }
+
+        .description {
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            color: #999;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-actions">
+            <div class="user-info" id="userInfo">🔥 Chaos Engineer</div>
+            <a href="/static/admin.html" class="btn">Admin Panel</a>
+        </div>
+
+        <h1>🔥 CHAOS MONKEY</h1>
+        <div class="subtitle">Break Production Systems - Learn Architecture Patterns</div>
+
+        <div id="content">
+            <div class="loading">🔄 Loading scenarios...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8088/api';
+
+        // Load scenarios on page load
+        loadScenarios();
+
+        async function loadScenarios() {
+            try {
+                const response = await fetch(`${API_URL}/admin/scenarios`);
+
+                if (!response.ok) {
+                    throw new Error('Failed to load scenarios');
+                }
+
+                const scenarios = await response.json();
+
+                if (scenarios.length === 0) {
+                    document.getElementById('content').innerHTML = `
+                        <div class="no-scenarios">
+                            <p>No scenarios available yet.</p>
+                            <p style="margin-top: 20px;">
+                                <a href="/static/admin.html" class="btn">Create Your First Scenario</a>
+                            </p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                renderScenarios(scenarios);
+
+            } catch (error) {
+                console.error('Error loading scenarios:', error);
+                document.getElementById('content').innerHTML = `
+                    <div class="no-scenarios">
+                        <p style="color: #ff4444;">❌ Error loading scenarios</p>
+                        <p style="margin-top: 10px; color: #888;">${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderScenarios(scenarios) {
+            const grid = document.createElement('div');
+            grid.className = 'scenarios-grid';
+
+            scenarios.forEach(scenario => {
+                const card = document.createElement('div');
+                card.className = 'scenario-card';
+                card.onclick = () => startSession(scenario.id);
+
+                const themeIcon = getThemeIcon(scenario.story_theme);
+
+                card.innerHTML = `
+                    <div class="difficulty-badge difficulty-${scenario.difficulty}">${scenario.difficulty}</div>
+                    <h3>${scenario.story_title}</h3>
+                    <div class="description">${scenario.story_intro}</div>
+                    <div class="theme-badge">${themeIcon} ${formatTheme(scenario.story_theme)}</div>
+                    <div class="lesson-tag">${formatLesson(scenario.target_lesson)}</div>
+                    <div class="stakes">⚡ ${scenario.story_stakes}</div>
+                `;
+
+                grid.appendChild(card);
+            });
+
+            document.getElementById('content').innerHTML = '';
+            document.getElementById('content').appendChild(grid);
+        }
+
+        function getThemeIcon(theme) {
+            const icons = {
+                'e-commerce': '🛒',
+                'streaming': '📺',
+                'gaming': '🎮',
+                'fintech': '💰',
+                'social': '📱'
+            };
+            return icons[theme] || '🔥';
+        }
+
+        function formatTheme(theme) {
+            return theme.split('-').map(word =>
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+        }
+
+        function formatLesson(lesson) {
+            return lesson.replace(/_/g, ' ').split(' ').map(word =>
+                word.charAt(0).toUpperCase() + word.slice(1)
+            ).join(' ');
+        }
+
+        async function startSession(scenarioId) {
+            try {
+                const response = await fetch(`${API_URL}/sessions/start`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        scenario_id: scenarioId
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to start session');
+                }
+
+                const data = await response.json();
+
+                // Redirect to gameplay
+                window.location.href = `/static/chaos.html?session=${data.session_id}`;
+
+            } catch (error) {
+                console.error('Error starting session:', error);
+                alert('❌ Failed to start session: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

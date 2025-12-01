@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel - Chaos Monkey</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #1f2937;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: white;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 20px 0;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #1f2937;
+            font-size: 24px;
+            font-weight: 600;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px 40px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .card h2 {
+            color: #1f2937;
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .card p {
+            color: #6b7280;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #374151;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        textarea, input[type="text"], select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: Monaco, monospace;
+        }
+
+        textarea:focus, input:focus, select:focus {
+            outline: none;
+            border-color: #4f46e5;
+            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
+        }
+
+        .hint {
+            color: #6b7280;
+            font-size: 13px;
+            margin-top: 6px;
+            font-style: italic;
+        }
+
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: background 0.2s;
+            margin-right: 10px;
+        }
+
+        button:hover {
+            background: #4338ca;
+        }
+
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        #loading, #error {
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        #loading {
+            background: #dbeafe;
+            color: #1e40af;
+            text-align: center;
+        }
+
+        #error {
+            background: #fee2e2;
+            color: #991b1b;
+            border-left: 4px solid #dc2626;
+        }
+
+        #variations {
+            display: none;
+        }
+
+        .story-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .story-card {
+            background: white;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .story-card:hover {
+            border-color: #4f46e5;
+            box-shadow: 0 4px 6px rgba(79, 70, 229, 0.1);
+        }
+
+        .story-card.selected {
+            border-color: #4f46e5;
+            background: #eef2ff;
+        }
+
+        .story-card h4 {
+            color: #1f2937;
+            font-size: 16px;
+            margin-bottom: 8px;
+        }
+
+        .story-card .theme {
+            display: inline-block;
+            padding: 2px 8px;
+            background: #dbeafe;
+            color: #1e40af;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .story-card .preview {
+            color: #6b7280;
+            font-size: 13px;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        .story-card .stakes {
+            color: #dc2626;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        #editForm {
+            display: none;
+        }
+
+        .scenarios-list {
+            margin-top: 40px;
+        }
+
+        .scenario-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .scenario-item:last-child {
+            border-bottom: none;
+        }
+
+        .scenario-item .title {
+            font-weight: 500;
+            color: #1f2937;
+        }
+
+        .scenario-item .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 0 8px;
+        }
+
+        .badge-easy {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-medium {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .badge-hard {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .scenario-item .lesson {
+            color: #6b7280;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔥 Chaos Monkey - Admin Panel</h1>
+    </div>
+
+    <div class="container">
+        <!-- Step 1: Input Form -->
+        <div class="card" id="inputCard">
+            <h2>Generate Chaos Scenario</h2>
+            <p>Paste a real-world incident (AWS postmortem, Netflix blog, etc.) and AI will generate 3 story variations</p>
+
+            <div class="form-group">
+                <label for="incidentText">Real-World Incident</label>
+                <textarea id="incidentText" placeholder="Paste incident description (e.g., AWS S3 outage 2017, Netflix cascading failures, GitHub database locks)"></textarea>
+                <div class="hint">Example: "In 2017, AWS S3 went down for 4 hours in us-east-1 due to a typo in a command..."</div>
+            </div>
+
+            <div class="form-group">
+                <label for="storyTheme">Story Theme (Optional)</label>
+                <input type="text" id="storyTheme" placeholder="e.g., 'e-commerce Black Friday', 'streaming Friday night', 'gaming platform'">
+                <div class="hint">All 3 variations will incorporate this theme. Leave blank for AI to decide.</div>
+            </div>
+
+            <button onclick="generateScenario()">Generate with AI 🤖</button>
+        </div>
+
+        <!-- Loading Indicator -->
+        <div id="loading">
+            <p>🤖 AI is analyzing the incident and generating scenarios...</p>
+            <p style="font-size: 12px; margin-top: 8px;">This may take 15-30 seconds</p>
+        </div>
+
+        <!-- Error Message -->
+        <div id="error"></div>
+
+        <!-- Step 2: Story Variations -->
+        <div class="card" id="variations">
+            <h2>Select Story Theme</h2>
+            <p>AI generated 3 variations - choose the one you like best</p>
+            <div class="story-cards" id="storyCards"></div>
+            <button onclick="continueToEdit()">Continue to Edit Form →</button>
+        </div>
+
+        <!-- Step 3: Edit Form -->
+        <div class="card" id="editForm">
+            <h2>Review & Edit Scenario</h2>
+            <p>Customize the details before saving</p>
+
+            <div class="form-group">
+                <label for="storyTitle">Story Title</label>
+                <input type="text" id="storyTitle">
+            </div>
+
+            <div class="form-group">
+                <label for="storyThemeSelect">Story Theme</label>
+                <select id="storyThemeSelect">
+                    <option value="e-commerce">🛒 E-Commerce</option>
+                    <option value="streaming">📺 Video Streaming</option>
+                    <option value="gaming">🎮 Gaming Platform</option>
+                    <option value="fintech">💰 Fintech/Banking</option>
+                    <option value="social">📱 Social Media</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="difficulty">Difficulty</label>
+                <select id="difficulty">
+                    <option value="EASY">EASY - Single pattern (circuit breaker)</option>
+                    <option value="MEDIUM">MEDIUM - 2-3 patterns (DB split + queue)</option>
+                    <option value="HARD">HARD - Complex trade-offs (CAP theorem)</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="storyIntro">Story Introduction</label>
+                <textarea id="storyIntro" rows="8"></textarea>
+                <div class="hint">4 paragraphs: Set scene → Introduce characters → Describe system → Foreshadow vulnerability</div>
+            </div>
+
+            <div class="form-group">
+                <label for="storyStakes">Stakes</label>
+                <input type="text" id="storyStakes" placeholder="e.g., $500k/hour revenue loss, brand reputation">
+            </div>
+
+            <div class="form-group">
+                <label for="targetLesson">Target Lesson</label>
+                <select id="targetLesson">
+                    <option value="database_per_service">Database per Service</option>
+                    <option value="circuit_breaker">Circuit Breaker Pattern</option>
+                    <option value="rate_limiting">Rate Limiting</option>
+                    <option value="async_messaging">Async Messaging (Kafka/RabbitMQ)</option>
+                    <option value="cqrs">CQRS Pattern</option>
+                    <option value="saga_pattern">Saga Pattern</option>
+                    <option value="bulkhead_pattern">Bulkhead Pattern</option>
+                    <option value="redundancy">Redundancy / Failover</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="antiPattern">Anti-Pattern (Initial Flaw)</label>
+                <select id="antiPattern">
+                    <option value="shared_database">Shared Database</option>
+                    <option value="no_circuit_breaker">No Circuit Breaker</option>
+                    <option value="no_rate_limiting">No Rate Limiting</option>
+                    <option value="sync_microservices">Synchronous Microservices</option>
+                    <option value="single_point_failure">Single Point of Failure</option>
+                    <option value="no_retry_logic">No Retry Logic</option>
+                    <option value="tight_coupling">Tight Coupling</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="architecture">Initial Architecture (JSON)</label>
+                <textarea id="architecture" rows="16" style="font-family: Monaco, monospace; font-size: 12px;"></textarea>
+                <div class="hint">Services, connections, and SLA baseline. Keep JSON format valid.</div>
+            </div>
+
+            <button onclick="saveScenario()">💾 Save Scenario</button>
+            <button class="btn-danger" onclick="cancelEdit()">Cancel</button>
+        </div>
+
+        <!-- Existing Scenarios List -->
+        <div class="card scenarios-list">
+            <h2>Existing Scenarios</h2>
+            <div id="scenariosList"></div>
+        </div>
+    </div>
+
+    <script>
+        let selectedVariation = null;
+        let variations = [];
+
+        async function generateScenario() {
+            const incidentText = document.getElementById('incidentText').value.trim();
+            const storyTheme = document.getElementById('storyTheme').value.trim();
+
+            if (!incidentText) {
+                showError('Please enter a real-world incident description');
+                return;
+            }
+
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('error').style.display = 'none';
+            document.getElementById('variations').style.display = 'none';
+
+            try {
+                const response = await fetch('/api/admin/scenarios/generate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        incident_text: incidentText,
+                        story_theme: storyTheme
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Generation failed');
+                }
+
+                const data = await response.json();
+                variations = data.variations;
+
+                document.getElementById('loading').style.display = 'none';
+                displayVariations(variations);
+
+            } catch (err) {
+                document.getElementById('loading').style.display = 'none';
+                showError('Error: ' + err.message);
+            }
+        }
+
+        function displayVariations(variations) {
+            const container = document.getElementById('storyCards');
+            container.innerHTML = '';
+
+            variations.forEach((v, index) => {
+                const card = document.createElement('div');
+                card.className = 'story-card';
+                card.onclick = () => selectVariation(index);
+
+                card.innerHTML = `
+                    <h4>Variation ${index + 1}: ${v.story_title}</h4>
+                    <span class="theme">${v.story_theme.toUpperCase()}</span>
+                    <p class="preview">${v.story_intro.substring(0, 150)}...</p>
+                    <p class="stakes">⚡ ${v.story_stakes}</p>
+                `;
+
+                container.appendChild(card);
+            });
+
+            document.getElementById('variations').style.display = 'block';
+        }
+
+        function selectVariation(index) {
+            selectedVariation = index;
+
+            // Update UI
+            document.querySelectorAll('.story-card').forEach((card, i) => {
+                if (i === index) {
+                    card.classList.add('selected');
+                } else {
+                    card.classList.remove('selected');
+                }
+            });
+        }
+
+        function continueToEdit() {
+            if (selectedVariation === null) {
+                showError('Please select a variation first');
+                return;
+            }
+
+            const v = variations[selectedVariation];
+
+            // Populate edit form
+            document.getElementById('storyTitle').value = v.story_title;
+            document.getElementById('storyThemeSelect').value = v.story_theme;
+            document.getElementById('difficulty').value = v.difficulty;
+            document.getElementById('storyIntro').value = v.story_intro;
+            document.getElementById('storyStakes').value = v.story_stakes;
+            document.getElementById('targetLesson').value = v.target_lesson;
+            document.getElementById('antiPattern').value = v.anti_pattern;
+            document.getElementById('architecture').value = JSON.stringify(v.initial_architecture, null, 2);
+
+            // Show edit form, hide variations
+            document.getElementById('variations').style.display = 'none';
+            document.getElementById('editForm').style.display = 'block';
+        }
+
+        async function saveScenario() {
+            try {
+                const architecture = JSON.parse(document.getElementById('architecture').value);
+
+                const scenario = {
+                    story_title: document.getElementById('storyTitle').value,
+                    story_theme: document.getElementById('storyThemeSelect').value,
+                    story_intro: document.getElementById('storyIntro').value,
+                    story_stakes: document.getElementById('storyStakes').value,
+                    target_lesson: document.getElementById('targetLesson').value,
+                    anti_pattern: document.getElementById('antiPattern').value,
+                    difficulty: document.getElementById('difficulty').value,
+                    initial_architecture: architecture
+                };
+
+                const response = await fetch('/api/admin/scenarios', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(scenario)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Save failed');
+                }
+
+                alert('✅ Scenario saved successfully!');
+                resetForm();
+                loadScenarios();
+
+            } catch (err) {
+                showError('Error: ' + err.message);
+            }
+        }
+
+        function cancelEdit() {
+            resetForm();
+        }
+
+        function resetForm() {
+            document.getElementById('inputCard').style.display = 'block';
+            document.getElementById('variations').style.display = 'none';
+            document.getElementById('editForm').style.display = 'none';
+            document.getElementById('incidentText').value = '';
+            document.getElementById('storyTheme').value = '';
+            selectedVariation = null;
+            variations = [];
+        }
+
+        async function loadScenarios() {
+            try {
+                const response = await fetch('/api/admin/scenarios');
+                const scenarios = await response.json();
+
+                const container = document.getElementById('scenariosList');
+                container.innerHTML = scenarios.length === 0
+                    ? '<p style="color: #6b7280;">No scenarios yet. Create one above!</p>'
+                    : '';
+
+                scenarios.forEach(s => {
+                    const item = document.createElement('div');
+                    item.className = 'scenario-item';
+
+                    item.innerHTML = `
+                        <div>
+                            <span class="title">${s.story_title}</span>
+                            <span class="badge badge-${s.difficulty.toLowerCase()}">${s.difficulty}</span>
+                            <span class="lesson">${s.target_lesson.replace(/_/g, ' ')}</span>
+                        </div>
+                        <button class="btn-danger" onclick="deleteScenario('${s.id}')">Delete</button>
+                    `;
+
+                    container.appendChild(item);
+                });
+
+            } catch (err) {
+                console.error('Error loading scenarios:', err);
+            }
+        }
+
+        async function deleteScenario(id) {
+            if (!confirm('Are you sure you want to delete this scenario?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/admin/scenarios/${id}`, {method: 'DELETE'});
+
+                if (!response.ok) {
+                    throw new Error('Delete failed');
+                }
+
+                alert('✅ Scenario deleted');
+                loadScenarios();
+
+            } catch (err) {
+                showError('Error: ' + err.message);
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        // Load scenarios on page load
+        loadScenarios();
+    </script>
+</body>
+</html>

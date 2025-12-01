@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chaos Monkey - Gameplay</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a0000 0%, #330000 100%);
+            color: #e0e0e0;
+            min-height: 100vh;
+            overflow-x: hidden;
+            font-size: 15px;
+            line-height: 1.6;
+        }
+
+        .header {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 1rem;
+            border-bottom: 2px solid #ff0000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            color: #ff0000;
+            font-size: 1.5rem;
+            text-shadow: 0 0 10px #ff0000;
+        }
+
+        .round-counter {
+            background: rgba(255, 0, 0, 0.2);
+            padding: 0.5rem 1rem;
+            border: 1px solid #ff0000;
+            border-radius: 5px;
+            font-size: 1.2rem;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            padding: 1rem;
+            height: calc(100vh - 80px);
+        }
+
+        .panel {
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px solid #ff0000;
+            border-radius: 10px;
+            padding: 1.5rem;
+            overflow-y: auto;
+        }
+
+        .panel h2 {
+            color: #ff0000;
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+            border-bottom: 1px solid #ff0000;
+            padding-bottom: 0.5rem;
+        }
+
+        /* Story Panel */
+        .story-section {
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: rgba(255, 0, 0, 0.1);
+            border-left: 3px solid #ff0000;
+        }
+
+        .story-section h3 {
+            color: #ffaa00;
+            margin-bottom: 0.5rem;
+        }
+
+        .story-section p {
+            line-height: 1.7;
+            color: #e8e8e8;
+            font-size: 15px;
+        }
+
+        .sla-metrics {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .metric {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 0.5rem;
+            border: 1px solid #ff0000;
+            text-align: center;
+        }
+
+        .metric-label {
+            color: #888;
+            font-size: 0.8rem;
+        }
+
+        .metric-value {
+            color: #ffaa00;
+            font-size: 1.2rem;
+            font-weight: bold;
+        }
+
+        /* System Diagram Panel - keep monospace for ASCII art */
+        .ascii-art {
+            background: rgba(0, 0, 0, 0.8);
+            padding: 1rem;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.85rem;
+            line-height: 1.3;
+            white-space: pre;
+            overflow-x: auto;
+            border: 1px solid #00ff00;
+            color: #00ff00;
+        }
+
+        /* Attack Controls */
+        .attack-controls {
+            margin-top: 2rem;
+            padding: 1rem;
+            background: rgba(0, 0, 0, 0.4);
+            border: 2px solid #ffaa00;
+            border-radius: 5px;
+        }
+
+        .attack-controls h3 {
+            color: #ffaa00;
+            margin-bottom: 1rem;
+        }
+
+        .attack-options {
+            display: grid;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .attack-option {
+            background: rgba(255, 170, 0, 0.1);
+            padding: 0.8rem;
+            border: 1px solid #ffaa00;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+
+        .attack-option .chaos-observation {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.95);
+            border: 2px solid #ff0000;
+            padding: 0.8rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.85rem;
+            color: #ff6666;
+            font-style: italic;
+            z-index: 100;
+            border-radius: 5px;
+        }
+
+        .attack-option:hover .chaos-observation {
+            display: block;
+        }
+
+        .attack-option.escalated {
+            background: rgba(255, 0, 0, 0.2);
+            border: 2px solid #ff0000;
+            box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+        }
+
+        .attack-option:hover {
+            background: rgba(255, 170, 0, 0.3);
+            border-color: #ff0000;
+            transform: translateX(5px);
+        }
+
+        .attack-option.escalated:hover {
+            background: rgba(255, 0, 0, 0.4);
+            box-shadow: 0 0 15px rgba(255, 0, 0, 0.8);
+        }
+
+        .attack-option.selected {
+            background: rgba(255, 0, 0, 0.3);
+            border: 2px solid #ff0000;
+        }
+
+        .attack-option-title {
+            color: #ffaa00;
+            font-weight: bold;
+            margin-bottom: 0.3rem;
+        }
+
+        .attack-option-desc {
+            color: #888;
+            font-size: 0.9rem;
+        }
+
+        .manual-input {
+            margin-top: 1rem;
+        }
+
+        .manual-input input {
+            width: 100%;
+            padding: 0.8rem;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid #ffaa00;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 1rem;
+            background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%);
+            border: none;
+            color: white;
+            font-size: 1.2rem;
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 5px;
+            margin-top: 1rem;
+            transition: all 0.3s;
+        }
+
+        .submit-btn:hover {
+            background: linear-gradient(135deg, #cc0000 0%, #990000 100%);
+            transform: scale(1.05);
+        }
+
+        .submit-btn:disabled {
+            background: #555;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+
+        /* Processing indicator */
+        .processing {
+            text-align: center;
+            padding: 2rem;
+            color: #ffaa00;
+            font-size: 1.2rem;
+        }
+
+        .processing::after {
+            content: '...';
+            animation: dots 1.5s infinite;
+        }
+
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+
+        /* Game complete */
+        .game-complete {
+            text-align: center;
+            padding: 2rem;
+            background: rgba(0, 255, 0, 0.1);
+            border: 2px solid #00ff00;
+            border-radius: 10px;
+        }
+
+        .game-complete h2 {
+            color: #00ff00;
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .back-btn {
+            display: inline-block;
+            padding: 1rem 2rem;
+            background: rgba(255, 0, 0, 0.2);
+            border: 2px solid #ff0000;
+            color: #ff0000;
+            text-decoration: none;
+            border-radius: 5px;
+            margin-top: 1rem;
+            transition: all 0.3s;
+        }
+
+        .back-btn:hover {
+            background: rgba(255, 0, 0, 0.4);
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔥 CHAOS MONKEY</h1>
+        <div class="round-counter">
+            Round <span id="currentRound">0</span>/<span id="maxRounds">5</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Story Panel -->
+        <div class="panel" id="storyPanel">
+            <h2>📖 Story & Status</h2>
+            <div id="storyContent"></div>
+        </div>
+
+        <!-- System Diagram Panel -->
+        <div class="panel" id="diagramPanel">
+            <h2>🖥️ System Architecture</h2>
+            <div class="ascii-art" id="asciiAnimation">
+Waiting for first round...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8088/api';
+        const WS_URL = 'ws://localhost:8088';
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const sessionId = urlParams.get('session');
+
+        let ws = null;
+        let currentAttackVector = '';
+        let isProcessing = false;
+        let currentAttackOptions = [];  // LLM-generated attack options
+        let currentAudio = null;  // Current playing audio
+        let audioQueue = [];  // Queue for sequential playback
+        let isPlayingAudio = false;
+
+        // Add audio to queue and start playing if not already
+        function queueAudio(audioUrl) {
+            if (!audioUrl) return;
+            audioQueue.push(audioUrl);
+            console.log(`🔊 Audio queued (${audioQueue.length} in queue)`);
+            playNextInQueue();
+        }
+
+        // Play next audio in queue
+        function playNextInQueue() {
+            if (isPlayingAudio || audioQueue.length === 0) return;
+
+            isPlayingAudio = true;
+            const audioUrl = audioQueue.shift();
+            console.log(`🔊 Playing audio (${audioQueue.length} remaining)`);
+
+            currentAudio = new Audio(audioUrl);
+
+            currentAudio.onended = () => {
+                console.log('🔊 Audio finished');
+                isPlayingAudio = false;
+                currentAudio = null;
+                playNextInQueue();  // Play next in queue
+            };
+
+            currentAudio.onerror = (err) => {
+                console.log('🔊 Audio error:', err);
+                isPlayingAudio = false;
+                currentAudio = null;
+                playNextInQueue();  // Skip to next
+            };
+
+            currentAudio.play().catch(err => {
+                console.log('Audio autoplay blocked, user interaction required');
+                isPlayingAudio = false;
+                playNextInQueue();
+            });
+        }
+
+        // Stop all audio and clear queue
+        function stopAllAudio() {
+            audioQueue = [];
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio = null;
+            }
+            isPlayingAudio = false;
+        }
+
+        async function init() {
+            if (!sessionId) {
+                alert('No session ID provided');
+                window.location.href = '/static/lobby.html';
+                return;
+            }
+
+            console.log('Connecting to WebSocket:', `${WS_URL}/ws/chaos/${sessionId}`);
+
+            // Connect WebSocket
+            ws = new WebSocket(`${WS_URL}/ws/chaos/${sessionId}`);
+
+            ws.onopen = () => {
+                console.log('✅ WebSocket connected successfully');
+            };
+
+            ws.onmessage = (event) => {
+                console.log('📨 Raw message received:', event.data);
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            };
+
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+                addStorySection('❌ Error', 'Connection error. Please refresh the page.');
+            };
+
+            ws.onclose = (event) => {
+                console.log('🔌 WebSocket closed:', event.code, event.reason);
+            };
+        }
+
+        function handleMessage(message) {
+            console.log('Received message:', message.type, message);
+
+            switch (message.type) {
+                case 'scenario_intro':
+                    showScenarioIntro(message);
+                    break;
+                case 'round_start':
+                    showRoundStart(message);
+                    break;
+                case 'processing':
+                    showProcessing(message.message);
+                    break;
+                case 'chaos_story':
+                    showChaosStory(message);
+                    break;
+                case 'round_complete':
+                    showRoundComplete(message);
+                    break;
+                case 'game_complete':
+                    showGameComplete(message);
+                    break;
+                case 'error':
+                    alert(message.message);
+                    isProcessing = false;
+                    break;
+                default:
+                    console.warn('Unknown message type:', message.type);
+            }
+        }
+
+        function showScenarioIntro(data) {
+            addStorySection('🎬 Scenario', `
+                <h3 style="color: #ff0000; font-size: 1.5rem;">${data.title}</h3>
+                <p style="margin-top: 1rem;">${data.intro}</p>
+                <p style="margin-top: 1rem; color: #ffaa00; font-weight: bold;">Stakes: ${data.stakes}</p>
+                <div style="margin-top: 1rem; color: #888;">
+                    Theme: ${data.theme} | Difficulty: ${data.difficulty}
+                </div>
+            `);
+
+            // Show initial system diagram
+            if (data.initial_system) {
+                document.getElementById('asciiAnimation').textContent = data.initial_system;
+            }
+
+            // Play scenario intro audio (🎬 Scenario)
+            if (data.audio_url) {
+                queueAudio(data.audio_url);
+            }
+        }
+
+        function showRoundStart(data) {
+            document.getElementById('currentRound').textContent = data.round;
+            document.getElementById('maxRounds').textContent = data.max_rounds;
+
+            // Store LLM-generated attack options
+            currentAttackOptions = data.attack_options || [];
+            const attack_history = data.attack_history || {};
+
+            // Calculate escalated values for each attack
+            function getEscalatedDesc(attack, count) {
+                const escalation = Math.pow(2, count);  // 2x, 4x, 8x, 16x
+
+                if (count === 0) {
+                    // First time - use base description
+                    return attack.description;
+                } else {
+                    // Escalated - extract and multiply base number
+                    const baseDesc = attack.description;
+                    const baseSeverity = attack.base_severity || '';
+
+                    // Extract numeric value from base_severity (e.g., "50,000 req/s" → 50000)
+                    const numMatch = baseSeverity.match(/[\d,]+/);
+                    if (numMatch) {
+                        const baseNum = parseInt(numMatch[0].replace(/,/g, ''));
+                        const escalatedNum = baseNum * escalation;
+                        const unit = baseSeverity.replace(/[\d,]+/, '').trim();
+
+                        return `${escalatedNum.toLocaleString()} ${unit} (${escalation}x ESCALATED!)`;
+                    } else {
+                        return `${baseDesc} (${escalation}x ESCALATED!)`;
+                    }
+                }
+            }
+
+            if (currentAttackOptions.length === 0) {
+                addStorySection('⚠️ Error', 'No attack options available');
+                return;
+            }
+
+            // Display Chaos Monkey's analysis (if provided)
+            const chaosAnalysis = data.chaos_monkey_analysis || '';
+            const discoveredPatterns = data.discovered_anti_patterns || [];
+
+            const analysisSection = chaosAnalysis ? `
+                <div style="background: rgba(255, 0, 0, 0.1); border-left: 3px solid #ff0000; padding: 1rem; margin-bottom: 1rem;">
+                    <div style="color: #ff6666; font-weight: bold; margin-bottom: 0.5rem;">😈 Chaos Monkey's Analysis:</div>
+                    <div style="color: #ffcccc; font-style: italic;">${chaosAnalysis}</div>
+                    ${discoveredPatterns.length > 0 ? `
+                        <div style="margin-top: 0.5rem; color: #888; font-size: 0.9rem;">
+                            Discovered: ${discoveredPatterns.join(', ')}
+                        </div>
+                    ` : ''}
+                </div>
+            ` : '';
+
+            const attackHtml = `
+                <h3>😈 What misfortune awaits?</h3>
+                ${analysisSection}
+                <div class="attack-options">
+                    ${currentAttackOptions.map(attack => {
+                        const count = attack_history[attack.key] || 0;
+                        const escalatedDesc = getEscalatedDesc(attack, count);
+                        const isEscalated = count > 0;
+                        const observation = attack.chaos_monkey_observation || '';
+                        return `
+                        <div class="attack-option ${isEscalated ? 'escalated' : ''}" onclick="selectAttack('${attack.key}')">
+                            ${observation ? `<div class="chaos-observation">😈 ${observation}</div>` : ''}
+                            <div class="attack-option-title">${attack.title} ${isEscalated ? '⚡' : ''}</div>
+                            <div class="attack-option-desc">${escalatedDesc}</div>
+                        </div>
+                    `}).join('')}
+                </div>
+                <div class="manual-input">
+                    <input type="text" id="manualParams" placeholder="Add extra drama to the event..." />
+                </div>
+                <button class="submit-btn" onclick="submitAttack()">🎲 LET FATE DECIDE</button>
+            `;
+
+            addStorySection('', `<div class="attack-controls">${attackHtml}</div>`);
+        }
+
+        function selectAttack(vector) {
+            currentAttackVector = vector;
+
+            // Visual feedback
+            document.querySelectorAll('.attack-option').forEach(el => {
+                el.classList.remove('selected');
+            });
+            event.target.closest('.attack-option').classList.add('selected');
+        }
+
+        function submitAttack() {
+            if (!currentAttackVector) {
+                alert('Please select an attack vector');
+                return;
+            }
+
+            if (isProcessing) return;
+            isProcessing = true;
+
+            // Stop any playing audio when starting new attack
+            stopAllAudio();
+
+            const manualParams = document.getElementById('manualParams')?.value || '';
+
+            // Find selected attack from LLM-generated options
+            const selectedAttack = currentAttackOptions.find(a => a.key === currentAttackVector);
+            const params = manualParams || (selectedAttack ? selectedAttack.base_severity : '');
+
+            ws.send(JSON.stringify({
+                type: 'attack_submit',
+                attack_vector: currentAttackVector,
+                attack_params: params
+            }));
+        }
+
+        function showProcessing(message) {
+            addStorySection('⏳ Processing', `<div class="processing">${message}</div>`);
+        }
+
+        function showChaosStory(data) {
+            const metricsHtml = `
+                <div class="sla-metrics">
+                    <div class="metric">
+                        <div class="metric-label">Uptime</div>
+                        <div class="metric-value">${data.sla_metrics.uptime.toFixed(1)}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Latency</div>
+                        <div class="metric-value">${data.sla_metrics.latency.toFixed(0)}ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Error Rate</div>
+                        <div class="metric-value">${data.sla_metrics.error_rate.toFixed(1)}%</div>
+                    </div>
+                </div>
+            `;
+
+            addStorySection('💥 THE INCIDENT', data.story + metricsHtml);
+
+            // Queue chaos story audio (plays first)
+            if (data.audio_url) {
+                queueAudio(data.audio_url);
+            }
+        }
+
+        function showRoundComplete(data) {
+            // Show architect's response
+            const metricsHtml = `
+                <div class="sla-metrics">
+                    <div class="metric">
+                        <div class="metric-label">Uptime</div>
+                        <div class="metric-value">${data.sla_after.uptime.toFixed(1)}%</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Latency</div>
+                        <div class="metric-value">${data.sla_after.latency.toFixed(0)}ms</div>
+                    </div>
+                    <div class="metric">
+                        <div class="metric-label">Error Rate</div>
+                        <div class="metric-value">${data.sla_after.error_rate.toFixed(1)}%</div>
+                    </div>
+                </div>
+            `;
+
+            addStorySection('⚡ EMERGENCY RESPONSE', `
+                <p>${data.architect_story}</p>
+                <div style="margin-top: 1rem; padding: 1rem; background: rgba(0, 255, 0, 0.1); border-left: 3px solid #00ff00;">
+                    <strong style="color: #00ff00;">Fix Deployed:</strong> ${data.fix_name}<br>
+                    <strong style="color: #00ff00;">Why It Works:</strong> ${data.fix_why}<br>
+                    <strong style="color: #00ff00;">Used By:</strong> ${data.fix_real_world}
+                </div>
+                ${metricsHtml}
+            `);
+
+            // Show ASCII animation
+            document.getElementById('asciiAnimation').textContent = data.ascii_animation;
+
+            // Queue architect story audio (plays after chaos story)
+            if (data.audio_url) {
+                queueAudio(data.audio_url);
+            }
+
+            isProcessing = false;
+        }
+
+        function showGameComplete(data) {
+            addStorySection('🎉 Game Complete', `
+                <div class="game-complete">
+                    <h2>Congratulations!</h2>
+                    <p>You've completed all 5 rounds of chaos testing.</p>
+                    <p>The system has been hardened against failures!</p>
+                    <a href="/static/lobby.html" class="back-btn">Back to Lobby</a>
+                </div>
+            `);
+        }
+
+        function addStorySection(title, content) {
+            const storyContent = document.getElementById('storyContent');
+            const section = document.createElement('div');
+            section.className = 'story-section';
+            section.innerHTML = title ? `<h3>${title}</h3>${content}` : content;
+            storyContent.appendChild(section);
+            storyContent.scrollTop = storyContent.scrollHeight;
+        }
+
+        // Initialize on page load
+        init();
+    </script>
+</body>
+</html>
