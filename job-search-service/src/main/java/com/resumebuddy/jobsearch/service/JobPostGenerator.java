@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.resumebuddy.jobsearch.dto.ExperienceDto;
 import com.resumebuddy.jobsearch.dto.GeneratedJobProfileDto;
 import com.resumebuddy.jobsearch.dto.SkillDto;
+import com.resumebuddy.jobsearch.domain.JobListing;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
@@ -169,5 +170,91 @@ public class JobPostGenerator {
     private String loadPromptTemplate() throws IOException {
         ClassPathResource resource = new ClassPathResource("prompts/job-search-profile-generation-prompt.txt");
         return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Generate mock job requirements from applied jobs
+     * Synthesizes common requirements across multiple job listings
+     * @param appliedJobs List of job listings the user has applied to
+     * @return Bulleted list of synthesized requirements
+     */
+    public String generateFromAppliedJobs(List<JobListing> appliedJobs) {
+        try {
+            log.info("Generating profile from {} applied jobs", appliedJobs.size());
+
+            // Load prompt template
+            String promptTemplate = loadAppliedJobsPromptTemplate();
+
+            // Format applied jobs for the prompt
+            String formattedJobs = formatAppliedJobs(appliedJobs);
+
+            // Replace placeholders
+            String prompt = promptTemplate
+                    .replace("{jobCount}", String.valueOf(appliedJobs.size()))
+                    .replace("{appliedJobs}", formattedJobs);
+
+            // Call LLM
+            String llmResponse = grokLLMClient.callLLM(prompt);
+
+            // Clean up the response (remove markdown code blocks if present)
+            String requirements = cleanLLMResponse(llmResponse);
+
+            log.info("Successfully generated requirements from applied jobs, length: {}", requirements.length());
+            return requirements;
+
+        } catch (Exception e) {
+            log.error("Failed to generate from applied jobs", e);
+            throw new RuntimeException("Failed to generate from applied jobs", e);
+        }
+    }
+
+    /**
+     * Format applied jobs for the prompt
+     */
+    private String formatAppliedJobs(List<JobListing> jobs) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < jobs.size(); i++) {
+            JobListing job = jobs.get(i);
+            sb.append(String.format("\n### Job %d:\n", i + 1));
+            sb.append(String.format("**Title**: %s\n", job.getTitle()));
+            sb.append(String.format("**Company**: %s\n", job.getCompany()));
+            if (job.getLocation() != null) {
+                sb.append(String.format("**Location**: %s\n", job.getLocation()));
+            }
+            if (job.getSalaryRange() != null) {
+                sb.append(String.format("**Salary**: %s\n", job.getSalaryRange()));
+            }
+            sb.append(String.format("**Description**:\n%s\n", job.getDescription()));
+            sb.append("\n---\n");
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Load applied jobs prompt template from resources
+     */
+    private String loadAppliedJobsPromptTemplate() throws IOException {
+        ClassPathResource resource = new ClassPathResource("prompts/applied-jobs-profile-generation-prompt.txt");
+        return new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Clean LLM response - remove markdown formatting if present
+     */
+    private String cleanLLMResponse(String response) {
+        String cleaned = response.trim();
+
+        // Remove markdown code blocks
+        if (cleaned.startsWith("```")) {
+            int endIndex = cleaned.indexOf("\n");
+            if (endIndex > 0) {
+                cleaned = cleaned.substring(endIndex + 1);
+            }
+        }
+        if (cleaned.endsWith("```")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 3);
+        }
+
+        return cleaned.trim();
     }
 }

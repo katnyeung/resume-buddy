@@ -10,11 +10,13 @@ spring:
     hikari:
       maximum-pool-size: 5
       minimum-idle: 0                  # Allow pool to drain to zero for Neon scale-to-zero
-      connection-timeout: 20000        # 20 seconds
-      idle-timeout: 60000              # 60 seconds - faster release
-      max-lifetime: 300000             # 5 minutes - faster rotation
-      keepalive-time: 30000            # 30 seconds - validate without keeping alive
+      connection-timeout: 30000        # 30 seconds (increased for cold start)
+      idle-timeout: 600000             # 10 minutes - allow longer idle periods
+      max-lifetime: 1800000            # 30 minutes - prevent stale connections
+      keepalive-time: 0                # DISABLED - prevents DNS lookups during scale-to-zero
       leak-detection-threshold: 60000  # 60 seconds
+      connection-test-query: SELECT 1  # Explicit validation query
+      validation-timeout: 5000         # 5 seconds validation timeout
 
   # OAuth2 Configuration
   security:

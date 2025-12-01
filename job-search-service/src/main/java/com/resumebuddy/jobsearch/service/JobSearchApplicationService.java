@@ -3,13 +3,20 @@ package com.resumebuddy.jobsearch.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.resumebuddy.jobsearch.dto.ExperienceDto;
 import com.resumebuddy.jobsearch.dto.GeneratedJobProfileDto;
+import com.resumebuddy.jobsearch.dto.ProfileVersionDto;
 import com.resumebuddy.jobsearch.dto.SkillDto;
+import com.resumebuddy.jobsearch.domain.JobListing;
+import com.resumebuddy.jobsearch.domain.JobMatch;
 import com.resumebuddy.jobsearch.domain.JobSearchProfile;
 import com.resumebuddy.jobsearch.domain.JobSearchProfileLine;
 import com.resumebuddy.jobsearch.domain.JobSearchProfileSkill;
+import com.resumebuddy.jobsearch.domain.JobSearchProfileVersion;
+import com.resumebuddy.jobsearch.repository.JobListingRepository;
+import com.resumebuddy.jobsearch.repository.JobMatchRepository;
 import com.resumebuddy.jobsearch.repository.JobSearchProfileRepository;
 import com.resumebuddy.jobsearch.repository.JobSearchProfileLineRepository;
 import com.resumebuddy.jobsearch.repository.JobSearchProfileSkillRepository;
+import com.resumebuddy.jobsearch.repository.JobSearchProfileVersionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -33,6 +40,9 @@ public class JobSearchApplicationService {
     private final JobSearchProfileRepository profileRepository;
     private final JobSearchProfileLineRepository profileLineRepository;
     private final JobSearchProfileSkillRepository profileSkillRepository;
+    private final JobSearchProfileVersionRepository versionRepository;
+    private final JobMatchRepository matchRepository;
+    private final JobListingRepository listingRepository;
     private final ResumeApiClient resumeApiClient;
     private final JobPostGenerator jobPostGenerator;
     private final VectorEmbeddingService vectorEmbeddingService;
@@ -141,6 +151,9 @@ public class JobSearchApplicationService {
 
             // 4. Re-vectorize edited job post lines
             vectorizeJobPostLines(profileId, editedJobPost);
+
+            // 5. Update the active version if versioning is in use
+            updateActiveVersion(profileId, editedJobPost);
 
             log.info("Successfully updated profile and re-vectorized lines: {}", profileId);
             return profile;
@@ -304,7 +317,230 @@ public class JobSearchApplicationService {
         log.info("Deleted profile: {}", profileId);
     }
 
-    // Helper methods
+    // ==================== VERSION MANAGEMENT ====================
+
+    /**
+     * Get all versions for a profile
+     * If no versions exist, creates version 1 from current profile (lazy migration)
+     */
+    @Transactional
+    public List<ProfileVersionDto> getVersions(String profileId) {
+        JobSearchProfile profile = profileRepository.findById(profileId)
+                .orElseThrow(() -> new RuntimeException("Profile not found: " + profileId));
+
+        List<JobSearchProfileVersion> versions = versionRepository.findByProfileIdOrderByVersionNumberAsc(profileId);
+
+        // Lazy migration: if no versions exist, create version 1 from current profile
+        if (versions.isEmpty()) {
+            log.info("No versions found for profile {}, creating version 1 from current profile", profileId);
+            JobSearchProfileVersion version1 = new JobSearchProfileVersion();
+            version1.setProfileId(profileId);
+            version1.setVersionNumber(1);
+            version1.setVersionName("Original");
+            version1.setGeneratedJobPost(profile.getGeneratedJobPost());
+            version1.setSourceType("RESUME");
+            version1.setIsActive(true);
+            version1 = versionRepository.save(version1);
+            versions = List.of(version1);
+        }
+
+        return versions.stream()
+                .map(this::toVersionDto)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get the count of applied jobs for a profile
+     */
+    public int getAppliedJobCount(String profileId) {
+        return matchRepository.findByProfileIdAndIsAppliedTrue(profileId).size();
+    }
+
+    /**
+     * Generate new version from applied jobs
+     * Requires minimum 3 applied jobs
+     */
+    @Transactional
+    public ProfileVersionDto generateFromAppliedJobs(String profileId, String versionName) {
+        try {
+            log.info("Generating new version from applied jobs for profile: {}", profileId);
+
+            // 1. Fetch applied jobs for this profile
+            List<JobMatch> appliedMatches = matchRepository.findByProfileIdAndIsAppliedTrue(profileId);
+
+            // 2. Validate minimum 3 applied jobs
+            if (appliedMatches.size() < 3) {
+                throw new IllegalStateException("Minimum 3 applied jobs required. Currently have: " + appliedMatches.size());
+            }
+
+            // 3. Fetch full job listing data
+            List<String> listingIds = appliedMatches.stream()
+                    .map(JobMatch::getListingId)
+                    .collect(Collectors.toList());
+            List<JobListing> listings = listingRepository.findByIdIn(listingIds);
+
+            // Filter out listings with empty descriptions
+            listings = listings.stream()
+                    .filter(l -> l.getDescription() != null && !l.getDescription().trim().isEmpty())
+                    .collect(Collectors.toList());
+
+            if (listings.size() < 3) {
+                throw new IllegalStateException("Not enough applied jobs with descriptions. Need 3+, have: " + listings.size());
+            }
+
+            log.info("Found {} applied jobs with descriptions", listings.size());
+
+            // 4. Call LLM to generate aggregated requirements
+            String generatedPost = jobPostGenerator.generateFromAppliedJobs(listings);
+
+            // 5. Handle version limit (max 3)
+            ensureVersionLimit(profileId);
+
+            // 6. Get next version number
+            int nextVersionNumber = versionRepository.getMaxVersionNumber(profileId) + 1;
+            if (nextVersionNumber > 3) {
+                nextVersionNumber = findAvailableVersionNumber(profileId);
+            }
+
+            // 7. Create new version (not active until user saves)
+            JobSearchProfileVersion version = new JobSearchProfileVersion();
+            version.setProfileId(profileId);
+            version.setVersionNumber(nextVersionNumber);
+            version.setVersionName(versionName != null ? versionName : "From " + listings.size() + " Applied Jobs");
+            version.setGeneratedJobPost(generatedPost);
+            version.setSourceType("APPLIED_JOBS");
+            version.setSourceJobIds(serializeJobIds(listings.stream().map(JobListing::getId).collect(Collectors.toList())));
+            version.setIsActive(false);
+
+            version = versionRepository.save(version);
+            log.info("Created new version {} for profile {}", version.getVersionNumber(), profileId);
+
+            return toVersionDto(version);
+
+        } catch (IllegalStateException e) {
+            throw e; // Re-throw validation errors
+        } catch (Exception e) {
+            log.error("Failed to generate version from applied jobs", e);
+            throw new RuntimeException("Failed to generate version from applied jobs", e);
+        }
+    }
+
+    /**
+     * Switch to a specific version (loads text into editor, does NOT vectorize)
+     * The user must click "Save All Changes" to activate and vectorize
+     */
+    @Transactional
+    public ProfileVersionDto switchVersion(String profileId, Integer versionNumber) {
+        JobSearchProfileVersion version = versionRepository.findByProfileIdAndVersionNumber(profileId, versionNumber)
+                .orElseThrow(() -> new RuntimeException("Version not found: " + versionNumber));
+
+        // Deactivate all versions first
+        versionRepository.deactivateAllVersions(profileId);
+
+        // Activate the selected version
+        version.setIsActive(true);
+        version = versionRepository.save(version);
+
+        // Update profile's generated job post with this version's content
+        JobSearchProfile profile = profileRepository.findById(profileId)
+                .orElseThrow(() -> new RuntimeException("Profile not found: " + profileId));
+        profile.setGeneratedJobPost(version.getGeneratedJobPost());
+        profileRepository.save(profile);
+
+        log.info("Switched to version {} for profile {}", versionNumber, profileId);
+
+        // Return with generatedJobPost included for editor
+        ProfileVersionDto dto = toVersionDto(version);
+        dto.setGeneratedJobPost(version.getGeneratedJobPost());
+        return dto;
+    }
+
+    /**
+     * Delete a version
+     * Cannot delete the active version
+     */
+    @Transactional
+    public void deleteVersion(String profileId, Integer versionNumber) {
+        JobSearchProfileVersion version = versionRepository.findByProfileIdAndVersionNumber(profileId, versionNumber)
+                .orElseThrow(() -> new RuntimeException("Version not found: " + versionNumber));
+
+        if (version.getIsActive()) {
+            throw new IllegalStateException("Cannot delete the active version. Switch to another version first.");
+        }
+
+        // Check if this is the only version
+        int count = versionRepository.countByProfileId(profileId);
+        if (count <= 1) {
+            throw new IllegalStateException("Cannot delete the only version.");
+        }
+
+        versionRepository.delete(version);
+        log.info("Deleted version {} for profile {}", versionNumber, profileId);
+    }
+
+    /**
+     * Update the active version when user saves (called from updateJobPost)
+     */
+    private void updateActiveVersion(String profileId, String newJobPost) {
+        versionRepository.findByProfileIdAndIsActiveTrue(profileId).ifPresent(version -> {
+            version.setGeneratedJobPost(newJobPost);
+            versionRepository.save(version);
+            log.info("Updated active version {} for profile {}", version.getVersionNumber(), profileId);
+        });
+    }
+
+    // Version helper methods
+
+    private ProfileVersionDto toVersionDto(JobSearchProfileVersion version) {
+        return ProfileVersionDto.builder()
+                .id(version.getId())
+                .profileId(version.getProfileId())
+                .versionNumber(version.getVersionNumber())
+                .versionName(version.getVersionName())
+                .sourceType(version.getSourceType())
+                .isActive(version.getIsActive())
+                .createdAt(version.getCreatedAt())
+                .build();
+    }
+
+    private void ensureVersionLimit(String profileId) {
+        int count = versionRepository.countByProfileId(profileId);
+        if (count >= 3) {
+            // Delete oldest non-active version
+            List<JobSearchProfileVersion> oldestVersions = versionRepository.findOldestNonActiveVersions(profileId);
+            if (!oldestVersions.isEmpty()) {
+                JobSearchProfileVersion toDelete = oldestVersions.get(0);
+                versionRepository.delete(toDelete);
+                log.info("Deleted oldest non-active version {} to make room for new version", toDelete.getVersionNumber());
+            } else {
+                throw new IllegalStateException("Cannot create new version: all 3 versions are active or protected");
+            }
+        }
+    }
+
+    private int findAvailableVersionNumber(String profileId) {
+        List<JobSearchProfileVersion> versions = versionRepository.findByProfileIdOrderByVersionNumberAsc(profileId);
+        Set<Integer> usedNumbers = versions.stream()
+                .map(JobSearchProfileVersion::getVersionNumber)
+                .collect(Collectors.toSet());
+
+        for (int i = 1; i <= 3; i++) {
+            if (!usedNumbers.contains(i)) {
+                return i;
+            }
+        }
+        return 1; // Fallback
+    }
+
+    private String serializeJobIds(List<String> jobIds) {
+        try {
+            return objectMapper.writeValueAsString(jobIds);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to serialize job IDs", e);
+        }
+    }
+
+    // ==================== HELPER METHODS ====================
 
     private String serializeExperienceIds(List<String> experienceIds) {
         try {

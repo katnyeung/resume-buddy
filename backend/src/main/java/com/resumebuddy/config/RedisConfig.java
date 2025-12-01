@@ -28,13 +28,19 @@ public class RedisConfig {
         Config config = new Config();
         config.useSingleServer()
             .setAddress("redis://" + redisHost + ":" + redisPort)
-            .setConnectionPoolSize(10)
-            .setConnectionMinimumIdleSize(2)
-            .setIdleConnectionTimeout(10000)
+            .setConnectionPoolSize(20)              // Increased from 10 for concurrent jobs
+            .setConnectionMinimumIdleSize(5)        // Increased from 2
+            .setIdleConnectionTimeout(30000)        // Increased to 30s
             .setConnectTimeout(10000)
-            .setTimeout(3000)
+            .setTimeout(30000)                      // CRITICAL: Increased from 3s to 30s for job operations
             .setRetryAttempts(3)
-            .setRetryInterval(1500);
+            .setRetryInterval(1500)
+            .setPingConnectionInterval(60000)       // Health check every 60s
+            .setKeepAlive(true);                    // TCP keepalive
+
+        // Increase Netty threads to prevent "Unable to write command" errors
+        config.setNettyThreads(16);                 // More I/O threads (default: 2 × CPU cores)
+        config.setThreads(8);                       // More executor threads for callbacks
 
         return Redisson.create(config);
     }

@@ -105,8 +105,11 @@ async def send_round_reminder_email(round: SessionRound, db: Session):
 
     # Fetch user info
     try:
-        user_info = await resume_api_client.get_user_info(session.user_id)
-        user_name = user_info.get("fullName", "there")
+        user_info = await resume_api_client.get_user_info(str(session.user_id))
+        if user_info:
+            user_name = user_info.get("fullName", "there") or "there"
+        else:
+            user_name = "there"
     except Exception as e:
         logger.warning(f"Could not fetch user info for user {session.user_id}: {e}")
         user_name = "there"
@@ -116,7 +119,7 @@ async def send_round_reminder_email(round: SessionRound, db: Session):
     company_name = ""
     if session.job_listing_id:
         try:
-            job_data = await jobsearch_api_client.get_job_listing(session.job_listing_id)
+            job_data = await jobsearch_api_client.get_job_listing(str(session.job_listing_id))
             if job_data:
                 job_title = job_data.get("jobTitle", "General Interview Practice")
                 company_name = job_data.get("companyName", "")
@@ -171,7 +174,7 @@ Resume Buddy Team
     # Send email via Resume API
     try:
         await resume_api_client.send_email(
-            user_id=session.user_id,
+            user_id=str(session.user_id),
             subject=email_subject,
             body=email_body
         )
