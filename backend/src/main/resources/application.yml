@@ -3,17 +3,20 @@ spring:
     name: resume-buddy-api
 
   datasource:
-    url: ${DB_URL:jdbc:postgresql}
+    url: ${DB_URL:}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     hikari:
-      connection-timeout: 60000        # 60 seconds (up from default 30s)
-      validation-timeout: 10000        # 10 seconds
-      max-lifetime: 1800000            # 30 minutes
-      idle-timeout: 600000             # 10 minutes
-      maximum-pool-size: 5             # Limit pool size
-      minimum-idle: 2
+      maximum-pool-size: 5
+      minimum-idle: 0                  # Allow pool to drain to zero for Neon scale-to-zero
+      connection-timeout: 30000        # 30 seconds (increased for cold start)
+      idle-timeout: 600000             # 10 minutes - allow longer idle periods
+      max-lifetime: 1800000            # 30 minutes - prevent stale connections
+      keepalive-time: 0                # DISABLED - prevents DNS lookups during scale-to-zero
+      leak-detection-threshold: 60000  # 60 seconds
+      connection-test-query: SELECT 1  # Explicit validation query
+      validation-timeout: 5000         # 5 seconds validation timeout
 
   # OAuth2 Configuration
   security:
@@ -87,7 +90,14 @@ spring:
       password: ${NEO4J_PASSWORD}
     database: ${NEO4J_DATABASE}
 
+  # Spring Data Configuration
   data:
+    # Redis (for job queue)
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+    # Neo4j
     neo4j:
       database: ${NEO4J_DATABASE}
 
@@ -150,11 +160,11 @@ app:
   # Security Configuration
   security:
     jwt:
-      secret: ${JWT_SECRET}
+      secret: ${JWT_SECRET:}
       expiration: ${JWT_EXPIRATION:86400000} # 24 hours in milliseconds
     # Internal API Key for service-to-service authentication
     # Used by interview-practice-service and other microservices
-    internal-api-key: ${INTERNAL_API_KEY}
+    internal-api-key: ${INTERNAL_API_KEY:}
 
   # Frontend URL for OAuth redirect
   frontend:
@@ -170,8 +180,9 @@ app:
   # Job Queue Configuration
   job-queue:
     enabled: ${JOB_QUEUE_ENABLED:true}
+    storage: ${JOB_QUEUE_STORAGE:redis}  # "postgres" or "redis" - redis recommended for internal apps
     max-concurrent-workers: ${JOB_QUEUE_MAX_WORKERS:3}  # Max 3 jobs processing simultaneously
-    poll-interval-ms: ${JOB_QUEUE_POLL_INTERVAL:60000}   # Poll every 2 seconds
+    poll-interval-ms: ${JOB_QUEUE_POLL_INTERVAL:10000}  # Poll every 10s with Redis (300000 for Postgres)
     user-rate-limit: ${JOB_QUEUE_USER_LIMIT:2}          # Max 2 jobs per user simultaneously
 
 # Stripe Payment Configuration

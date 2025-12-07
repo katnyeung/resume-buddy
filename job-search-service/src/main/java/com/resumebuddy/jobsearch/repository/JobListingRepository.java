@@ -48,4 +48,7 @@ public interface JobListingRepository extends JpaRepository<JobListing, String> 
 
     // Skill Drilldown: Fetch jobs by list of IDs (from Neo4j queries)
     List<JobListing> findByIdIn(List<String> ids);
+
+    // Cleanup: Find old jobs (for vector cleanup)
+    List<JobListing> findByFetchedAtBefore(LocalDateTime cutoff);
 }

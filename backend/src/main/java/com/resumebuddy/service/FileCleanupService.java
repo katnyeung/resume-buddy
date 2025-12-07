@@ -82,6 +82,18 @@ public class FileCleanupService {
             }
 
             try {
+                // Check if file exists before attempting to get size
+                if (!java.nio.file.Files.exists(java.nio.file.Paths.get(resume.getFilePath()))) {
+                    log.warn("File already deleted or doesn't exist for resume {}: {}",
+                        resume.getId(),
+                        resume.getFilePath()
+                    );
+                    // Clear file path in database since file doesn't exist
+                    resume.setFilePath(null);
+                    resumeRepository.save(resume);
+                    continue;
+                }
+
                 // Get file size before deletion
                 long fileSize = fileStorageService.getFileSize(resume.getFilePath());
 
@@ -157,6 +169,18 @@ public class FileCleanupService {
         }
 
         try {
+            // Check if file exists before attempting cleanup
+            if (!java.nio.file.Files.exists(java.nio.file.Paths.get(resume.getFilePath()))) {
+                log.warn("File already deleted or doesn't exist for resume {}: {}",
+                    resumeId,
+                    resume.getFilePath()
+                );
+                // Clear file path in database since file doesn't exist
+                resume.setFilePath(null);
+                resumeRepository.save(resume);
+                return true; // Consider this a successful cleanup
+            }
+
             long fileSize = fileStorageService.getFileSize(resume.getFilePath());
             boolean deleted = fileStorageService.deleteFile(resume.getFilePath());
 

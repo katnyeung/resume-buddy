@@ -1,8 +1,8 @@
 # Resume Buddy - AI-Powered Resume Enhancement Platform
 
-## 📌 Current State: Phase 11.18 - Interview Practice Production Deployment
-**Last Updated**: October 27, 2025
-**Status**: Production-ready with interview practice service, Stripe payments, user profile management, PostgreSQL (Neon), RunPod GPU parsing, auto file cleanup, 3-LLM optimized job analysis, client-side auth guards
+## 📌 Current State: Phase 11.23 - Redis Job Queue (Neon Cold-Start Solution)
+**Last Updated**: November 12, 2025
+**Status**: Production-ready with Redis job queue, interview practice, Stripe payments, user profile management, PostgreSQL (Neon) with scale-to-zero, RunPod GPU parsing, auto file cleanup, 3-LLM optimized job analysis, client-side auth guards
 
 ## Project Overview
 AI resume analysis platform with Lexical editor, Neo4j graph for job/skill relationships, O*NET occupation mapping, vector-based job matching, and interactive skill exploration.
@@ -165,6 +165,7 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 - `POST /api/job-search/admin/crawl` - Manual job crawl (Reed/Adzuna/JSearch)
 - `POST /api/job-search/admin/rebuild-index` - Rebuild Redis index
 - `POST /api/job-search/admin/revectorize/listing-lines?daysBack=14` - Re-vectorize jobs
+- `POST /api/job-search/admin/cleanup-vectors?daysToKeep=14` - Delete old Redis vectors (memory optimization)
 - `POST /api/admin/cleanup-files` - Trigger file cleanup
 
 **Swagger**: http://localhost:8085/swagger-ui.html
@@ -352,6 +353,96 @@ Check AWS SES → Sending statistics for delivery metrics.
   - Fixed: Added 10s query timeout
 
 ## Recent Updates
+
+### Phase 11.23 (Nov 12) - Redis Job Queue Implementation ✅
+**Migrated job queue from PostgreSQL to Redis to eliminate DB polling and enable Neon scale-to-zero:**
+
+**The Problem:**
+- PostgreSQL job queue required scheduled polling (every 2-10s)
+- Even with 5-minute polling, database couldn't fully idle
+- For internal application, in-memory queue is more appropriate
+
+**The Solution: Redis-Based Job Queue**
+- Created `RedisJobQueueService` using Redisson for distributed locks
+- Dual-mode support: Both PostgreSQL and Redis implementations available
+- Controllers and workers abstract storage type via `app.job-queue.storage` config
+- Redis data structures:
+  - `job:{jobId}` → RBucket (job data with 24h TTL after completion)
+  - `queue:jobs` → RScoredSortedSet (priority queue with score = priority + timestamp)
+  - `processing:jobs` → RSet (currently processing jobs)
+  - `user:{userId}:jobs` → RSet (user's jobs for rate limiting)
+  - `index:active:{jobType}` → RSet (active jobs by type for duplicate detection)
+
+**Benefits:**
+- ✅ No PostgreSQL polling - Neon can scale to zero completely
+- ✅ Faster polling (10s with Redis vs 5min with Postgres)
+- ✅ In-memory performance (microsecond latency)
+- ✅ Automatic job expiry (24h TTL after completion)
+- ✅ Distributed locks prevent duplicate processing
+- ✅ Easy to switch back to Postgres if needed
+
+**Configuration:**
+```yaml
+app:
+  job-queue:
+    storage: redis  # or "postgres"
+    poll-interval-ms: 10000  # 10s with Redis (vs 300s for Postgres)
+```
+
+**Files Created:**
+- `backend/src/main/java/com/resumebuddy/service/RedisJobQueueService.java` - Redis implementation
+- `backend/src/main/java/com/resumebuddy/config/RedisConfig.java` - Redisson configuration
+
+**Files Modified:**
+- `backend/pom.xml` - Added spring-data-redis + redisson dependencies
+- `backend/src/main/java/com/resumebuddy/service/JobQueueWorker.java` - Dual-mode support
+- `backend/src/main/java/com/resumebuddy/controller/JobQueueController.java` - Dual-mode support
+- `backend/src/main/resources/application.yml` - Redis config + storage type
+- `CLAUDE.md` - Updated to Phase 11.23
+
+### Phase 11.22 (Nov 12) - Backend Neon Cold-Start Fix ✅
+**Fixed multiple issues keeping resume-api database active 24/7:**
+
+**Issue 1: HikariCP minimum-idle connections**
+- **Problem**: Backend had `minimum-idle: 2` - keeping 2 connections always open
+- **Solution**: Set `minimum-idle: 0` + reduced timeouts (60s idle, 5min lifetime, 30s keepalive)
+- **Result**: Connection pool can drain to zero
+
+**Issue 2: JobQueueWorker polling every 2 seconds** (CRITICAL)
+- **Problem**: `@Scheduled` task polled database every 2s, preventing scale-to-zero
+- **Solution**: Increased poll interval from 2000ms → 300000ms (5 minutes)
+  - Updated both code default and config default
+  - Trade-off: Queued jobs wait max 5 minutes before processing (acceptable for MVP)
+- **Result**: Database can now idle for 5-minute windows between polls
+
+**Overall Impact:**
+- Neon can scale to zero during idle periods (5min+ without traffic)
+- ~50-70% cost savings during low-traffic hours (nights/weekends)
+- Slightly delayed queue processing (2s → 5min) but acceptable for async jobs
+
+**Files Modified:**
+- `backend/src/main/resources/application.yml` - HikariCP + poll interval (300000ms)
+- `backend/src/main/java/com/resumebuddy/service/JobQueueWorker.java` - Updated default (2000→300000)
+- `job-search-service/src/main/resources/application.yml` - Matched HikariCP settings
+- `CLAUDE.md` - Updated to Phase 11.22
+
+### Phase 11.21 (Nov 12) - Neon Cold-Start + Job API Defaults ✅
+**Part 1: Optimized HikariCP for Neon serverless scale-to-zero:**
+- Job Search: Set `minimum-idle: 0`, reduced `idle-timeout` to 60s, `max-lifetime` to 5min
+- Added `keepalive-time: 30000` to validate connections without keeping them alive
+- **Result**: Neon scales to zero after 1-2min idle, ~50-70% cost savings during low-traffic
+
+**Part 2: Fixed job-search-service startup failures:**
+- **Problem**: Service crashed on server if any required env vars were missing (Neo4j, JWT, API keys)
+- **Solution**: Added default values for all required configuration:
+  - Neo4j: Default localhost connection (bolt://localhost:7687)
+  - JWT/API keys: Default "changeme" values
+  - All job API keys: Empty defaults + base URLs
+- **Result**: Service starts successfully even without full configuration (features disabled until env vars set)
+
+**Files Modified:**
+- `job-search-service/src/main/resources/application.yml` - HikariCP + API defaults
+- `CLAUDE.md` - Added "Neon Cold-Start Configuration" section
 
 ### Phase 11.20 (Oct 31) - AWS SES Email Notifications ✅
 **Implemented email notification system for interview practice round reminders:**

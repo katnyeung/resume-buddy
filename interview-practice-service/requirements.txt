@@ -12,6 +12,7 @@ python-multipart>=0.0.9
 httpx>=0.26.0
 python-dotenv>=1.0.0
 apscheduler>=3.10.4
+pytz>=2024.1
 websockets>=12.0
 pydub>=0.25.1
 webrtcvad>=2.0.10  # Now on WSL Ubuntu - can use proper VAD

@@ -30,6 +30,7 @@ public class RedisVectorService {
     private final JedisPooled jedis;
     private final JobListingLineRepository jobListingLineRepository;
     private final JobSearchProfileLineRepository jobSearchProfileLineRepository;
+    private final com.resumebuddy.jobsearch.repository.JobListingRepository jobListingRepository;
 
     private static final String VECTOR_INDEX = "idx:vectors";
     private static final int VECTOR_DIM = 1536; // OpenAI embedding dimension
@@ -252,6 +253,129 @@ public class RedisVectorService {
         } catch (Exception e) {
             log.error("Failed to delete vector for key: {}", key, e);
             throw new RuntimeException("Failed to delete vector", e);
+        }
+    }
+
+    /**
+     * Delete vectors in batch (for cleanup operations)
+     * Uses batching to avoid Redis timeout on large deletions
+     */
+    public void deleteVectors(List<String> keys) {
+        if (keys == null || keys.isEmpty()) {
+            log.debug("No keys to delete");
+            return;
+        }
+
+        final int BATCH_SIZE = 100; // Delete 100 keys at a time to avoid timeout
+        int totalDeleted = 0;
+        int batchCount = (keys.size() + BATCH_SIZE - 1) / BATCH_SIZE;
+
+        log.info("Deleting {} keys in {} batches of {}", keys.size(), batchCount, BATCH_SIZE);
+
+        try {
+            for (int i = 0; i < keys.size(); i += BATCH_SIZE) {
+                int end = Math.min(i + BATCH_SIZE, keys.size());
+                List<String> batch = keys.subList(i, end);
+                String[] keyArray = batch.toArray(new String[0]);
+
+                long deleted = jedis.del(keyArray);
+                totalDeleted += deleted;
+
+                if ((i / BATCH_SIZE + 1) % 10 == 0) {
+                    log.info("Progress: Deleted {}/{} keys ({} batches)", totalDeleted, keys.size(), (i / BATCH_SIZE + 1));
+                }
+            }
+
+            log.info("Successfully deleted {} vectors from Redis in {} batches", totalDeleted, batchCount);
+        } catch (Exception e) {
+            log.error("Failed to delete batch of {} vectors (deleted {} before error)", keys.size(), totalDeleted, e);
+            throw new RuntimeException("Failed to delete vectors (partial deletion: " + totalDeleted + " keys)", e);
+        }
+    }
+
+    /**
+     * Clean up old job listing vectors (older than N days)
+     * Removes vectors from Redis for jobs fetched before the cutoff date
+     * Useful for saving Redis memory and keeping only recent job matches
+     *
+     * @param daysToKeep Keep only jobs from last N days (default: 14)
+     * @return Number of vectors deleted
+     */
+    public int cleanupOldJobVectors(int daysToKeep) {
+        log.info("=== Starting cleanup of job vectors older than {} days ===", daysToKeep);
+        long startTime = System.currentTimeMillis();
+
+        try {
+            // Calculate cutoff date
+            java.time.LocalDateTime cutoffDate = java.time.LocalDateTime.now().minusDays(daysToKeep);
+            log.info("Cutoff date: {} (deleting vectors for jobs older than this)", cutoffDate);
+
+            // Step 1: Find all old jobs using repository
+            List<com.resumebuddy.jobsearch.domain.JobListing> oldJobs =
+                    jobListingRepository.findByFetchedAtBefore(cutoffDate);
+            log.info("Found {} old job listings (fetched before {})", oldJobs.size(), cutoffDate);
+
+            if (oldJobs.isEmpty()) {
+                log.info("No old jobs to clean up");
+                return 0;
+            }
+
+            // Step 2: Collect listing IDs
+            Set<String> oldJobIds = oldJobs.stream()
+                    .map(com.resumebuddy.jobsearch.domain.JobListing::getId)
+                    .collect(java.util.stream.Collectors.toSet());
+
+            log.info("Collected {} old job IDs", oldJobIds.size());
+
+            // Step 3: Find all lines belonging to old jobs
+            List<JobListingLine> oldLines = jobListingLineRepository.findAll().stream()
+                    .filter(line -> oldJobIds.contains(line.getListingId()))
+                    .toList();
+
+            log.info("Found {} lines belonging to old jobs", oldLines.size());
+
+            // Step 4: Collect Redis keys to delete
+            List<String> keysToDelete = oldLines.stream()
+                    .filter(line -> line.getRedisVectorKey() != null && !line.getRedisVectorKey().isEmpty())
+                    .map(JobListingLine::getRedisVectorKey)
+                    .toList();
+
+            if (keysToDelete.isEmpty()) {
+                log.info("No old vectors to delete (lines have no vector keys)");
+                return 0;
+            }
+
+            log.info("Found {} Redis keys to delete", keysToDelete.size());
+
+            // Step 5: Delete vectors from Redis in batch
+            deleteVectors(keysToDelete);
+
+            // Step 6: Clear Redis vector keys from database (batch update)
+            Set<String> keysDeletedSet = new HashSet<>(keysToDelete);
+            List<JobListingLine> linesToUpdate = new ArrayList<>();
+
+            for (JobListingLine line : oldLines) {
+                if (keysDeletedSet.contains(line.getRedisVectorKey())) {
+                    line.setRedisVectorKey(null);
+                    linesToUpdate.add(line);
+                }
+            }
+
+            if (!linesToUpdate.isEmpty()) {
+                log.info("Updating {} database records to clear vector keys", linesToUpdate.size());
+                jobListingLineRepository.saveAll(linesToUpdate);
+                log.info("Database update complete");
+            }
+
+            long processingTime = System.currentTimeMillis() - startTime;
+            log.info("=== Cleanup completed - Deleted {} vectors in {}ms ===", keysToDelete.size(), processingTime);
+
+            return keysToDelete.size();
+
+        } catch (Exception e) {
+            long processingTime = System.currentTimeMillis() - startTime;
+            log.error("Failed to cleanup old vectors after {}ms: {}", processingTime, e.getMessage(), e);
+            throw new RuntimeException("Failed to cleanup old vectors", e);
         }
     }
 

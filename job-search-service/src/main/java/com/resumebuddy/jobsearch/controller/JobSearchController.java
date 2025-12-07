@@ -326,6 +326,131 @@ public class JobSearchController {
         return ResponseEntity.ok(profile);
     }
 
+    // ==================== VERSION MANAGEMENT ENDPOINTS ====================
+
+    /**
+     * Get all versions for a profile
+     * GET /api/job-search/profiles/{id}/versions
+     */
+    @Operation(
+            summary = "Get profile versions",
+            description = "Retrieves all versions (up to 3) for a job search profile. " +
+                    "If no versions exist, creates version 1 from current profile (lazy migration)."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Versions retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "Profile not found")
+    })
+    @GetMapping("/profiles/{id}/versions")
+    public ResponseEntity<List<ProfileVersionDto>> getVersions(
+            @Parameter(description = "Profile ID") @PathVariable String id) {
+        log.info("Getting versions for profile: {}", id);
+        List<ProfileVersionDto> versions = jobSearchService.getVersions(id);
+        return ResponseEntity.ok(versions);
+    }
+
+    /**
+     * Get applied job count for a profile
+     * GET /api/job-search/profiles/{id}/applied-count
+     */
+    @Operation(
+            summary = "Get applied job count",
+            description = "Returns the count of jobs marked as 'applied' for this profile. " +
+                    "Used to enable/disable the 'Update from Applied Jobs' button (requires 3+)."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Count retrieved successfully"),
+            @ApiResponse(responseCode = "404", description = "Profile not found")
+    })
+    @GetMapping("/profiles/{id}/applied-count")
+    public ResponseEntity<Map<String, Integer>> getAppliedCount(
+            @Parameter(description = "Profile ID") @PathVariable String id) {
+        log.info("Getting applied job count for profile: {}", id);
+        int count = jobSearchService.getAppliedJobCount(id);
+        return ResponseEntity.ok(Map.of("count", count));
+    }
+
+    /**
+     * Generate new version from applied jobs
+     * POST /api/job-search/profiles/{id}/versions/from-applied-jobs
+     */
+    @Operation(
+            summary = "Generate version from applied jobs",
+            description = "Analyzes all applied jobs for this profile and uses LLM to synthesize common requirements. " +
+                    "Creates a new version (not active until user saves). Requires minimum 3 applied jobs."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "201", description = "Version generated successfully",
+                    content = @Content(schema = @Schema(implementation = ProfileVersionDto.class))),
+            @ApiResponse(responseCode = "400", description = "Less than 3 applied jobs or all versions in use"),
+            @ApiResponse(responseCode = "404", description = "Profile not found")
+    })
+    @PostMapping("/profiles/{id}/versions/from-applied-jobs")
+    public ResponseEntity<ProfileVersionDto> generateFromAppliedJobs(
+            @Parameter(description = "Profile ID") @PathVariable String id,
+            @RequestBody(required = false) GenerateFromAppliedJobsRequest request) {
+        log.info("Generating version from applied jobs for profile: {}", id);
+        try {
+            String versionName = (request != null) ? request.getVersionName() : null;
+            ProfileVersionDto version = jobSearchService.generateFromAppliedJobs(id, versionName);
+            return ResponseEntity.status(HttpStatus.CREATED).body(version);
+        } catch (IllegalStateException e) {
+            log.warn("Cannot generate version: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
+    /**
+     * Switch to a specific version
+     * PUT /api/job-search/profiles/{id}/versions/{versionNumber}/activate
+     */
+    @Operation(
+            summary = "Switch to version",
+            description = "Switches the active version for a profile. Loads the version's text into the profile's generatedJobPost field. " +
+                    "Note: This does NOT vectorize - user must click 'Save All Changes' to re-vectorize."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Version switched successfully",
+                    content = @Content(schema = @Schema(implementation = ProfileVersionDto.class))),
+            @ApiResponse(responseCode = "404", description = "Version not found")
+    })
+    @PutMapping("/profiles/{id}/versions/{versionNumber}/activate")
+    public ResponseEntity<ProfileVersionDto> switchVersion(
+            @Parameter(description = "Profile ID") @PathVariable String id,
+            @Parameter(description = "Version number (1-3)") @PathVariable Integer versionNumber) {
+        log.info("Switching to version {} for profile: {}", versionNumber, id);
+        ProfileVersionDto version = jobSearchService.switchVersion(id, versionNumber);
+        return ResponseEntity.ok(version);
+    }
+
+    /**
+     * Delete a version
+     * DELETE /api/job-search/profiles/{id}/versions/{versionNumber}
+     */
+    @Operation(
+            summary = "Delete version",
+            description = "Deletes a version from the profile. Cannot delete the active version - switch first. " +
+                    "Cannot delete the only remaining version."
+    )
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "204", description = "Version deleted successfully"),
+            @ApiResponse(responseCode = "400", description = "Cannot delete active or only version"),
+            @ApiResponse(responseCode = "404", description = "Version not found")
+    })
+    @DeleteMapping("/profiles/{id}/versions/{versionNumber}")
+    public ResponseEntity<Void> deleteVersion(
+            @Parameter(description = "Profile ID") @PathVariable String id,
+            @Parameter(description = "Version number (1-3)") @PathVariable Integer versionNumber) {
+        log.info("Deleting version {} for profile: {}", versionNumber, id);
+        try {
+            jobSearchService.deleteVersion(id, versionNumber);
+            return ResponseEntity.noContent().build();
+        } catch (IllegalStateException e) {
+            log.warn("Cannot delete version: {}", e.getMessage());
+            return ResponseEntity.badRequest().build();
+        }
+    }
+
     // Inner DTO classes
     public static class AddSkillRequest {
         private String skillName;

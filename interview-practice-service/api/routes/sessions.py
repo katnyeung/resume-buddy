@@ -19,6 +19,7 @@ from infrastructure.clients.redis_client import get_redis_store
 # from infrastructure.redis_client import get_async_redis_checkpointer  # REMOVED - No LangGraph
 from infrastructure.clients.openai_client import transcribe_audio, text_to_speech
 from infrastructure.clients import resume_api_client, jobsearch_api_client
+from domain.services.email_scheduler import send_round_reminders
 # from graph.interview_graph import build_interview_graph  # REMOVED - No LangGraph
 
 
@@ -850,4 +851,45 @@ async def get_conversation_history(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to load conversation history: {str(e)}"
+        )
+
+
+# ==================== ADMIN/TEST ENDPOINTS ====================
+
+@router.post("/admin/trigger-email-scheduler")
+async def trigger_email_scheduler_manually():
+    """
+    **ADMIN ONLY**: Manually trigger the email scheduler to send round reminders.
+
+    This endpoint:
+    1. Runs the email scheduler job immediately (bypasses cron schedule)
+    2. Checks for all rounds scheduled for today
+    3. Sends reminder emails to users
+
+    Use cases:
+    - Testing email scheduler functionality
+    - Debugging why scheduled emails aren't being sent
+    - Manual email sending if cron job failed
+
+    Returns:
+    - Number of emails sent
+    - List of session IDs that received emails
+    """
+    from datetime import date
+
+    try:
+        # Run the scheduler job manually
+        await send_round_reminders()
+
+        return {
+            "status": "success",
+            "message": "Email scheduler triggered successfully",
+            "timestamp": datetime.utcnow().isoformat(),
+            "note": "Check logs for details on emails sent"
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to trigger email scheduler: {str(e)}"
         )

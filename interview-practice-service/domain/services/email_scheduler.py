@@ -7,6 +7,8 @@ scheduled for today and sends reminder emails to users.
 from datetime import datetime, date, timedelta
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from pytz import UTC
 from domain.models import InterviewSession, SessionRound
 from infrastructure.database import SessionLocal
 from infrastructure.clients import resume_api_client, jobsearch_api_client
@@ -14,8 +16,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Create scheduler
-scheduler = AsyncIOScheduler()
+# Create scheduler with explicit UTC timezone
+scheduler = AsyncIOScheduler(timezone=UTC)
 
 
 async def send_round_reminders():
@@ -103,8 +105,11 @@ async def send_round_reminder_email(round: SessionRound, db: Session):
 
     # Fetch user info
     try:
-        user_info = await resume_api_client.get_user_info(session.user_id)
-        user_name = user_info.get("fullName", "there")
+        user_info = await resume_api_client.get_user_info(str(session.user_id))
+        if user_info:
+            user_name = user_info.get("fullName", "there") or "there"
+        else:
+            user_name = "there"
     except Exception as e:
         logger.warning(f"Could not fetch user info for user {session.user_id}: {e}")
         user_name = "there"
@@ -114,7 +119,7 @@ async def send_round_reminder_email(round: SessionRound, db: Session):
     company_name = ""
     if session.job_listing_id:
         try:
-            job_data = await jobsearch_api_client.get_job_listing(session.job_listing_id)
+            job_data = await jobsearch_api_client.get_job_listing(str(session.job_listing_id))
             if job_data:
                 job_title = job_data.get("jobTitle", "General Interview Practice")
                 company_name = job_data.get("companyName", "")
@@ -169,7 +174,7 @@ Resume Buddy Team
     # Send email via Resume API
     try:
         await resume_api_client.send_email(
-            user_id=session.user_id,
+            user_id=str(session.user_id),
             subject=email_subject,
             body=email_body
         )
@@ -189,20 +194,31 @@ def start_scheduler():
     """
     Start the round reminder scheduler.
 
-    Runs daily at 9:00 AM to check for rounds scheduled for today.
+    Runs daily at 9:00 AM UTC to check for rounds scheduled for today.
     """
-    # Schedule job to run daily at 9 AM
+    # Schedule job to run daily at 9 AM UTC
     scheduler.add_job(
         send_round_reminders,
         'cron',
-        hour=9,  # Run at 9 AM
+        hour=9,  # Run at 9 AM UTC
         minute=0,
+        timezone=UTC,
         id='round_reminder_job',
         replace_existing=True
     )
 
     scheduler.start()
-    logger.info("Round reminder scheduler started. Will check for rounds daily at 9:00 AM.")
+
+    # Log all scheduled jobs
+    jobs = scheduler.get_jobs()
+    logger.info(f"Round reminder scheduler started with timezone: {scheduler.timezone}")
+    logger.info(f"Scheduler has {len(jobs)} jobs:")
+    for job in jobs:
+        logger.info(f"  - Job '{job.id}': next run at {job.next_run_time}")
+
+    # Log current time for verification
+    logger.info(f"Current UTC time: {datetime.now(UTC)}")
+    logger.info("Will check for rounds daily at 9:00 AM UTC")
 
 
 def stop_scheduler():

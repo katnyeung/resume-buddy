@@ -519,3 +519,74 @@ export const getSkillPathMatrix = async (userSkills: string[], topMarketSkills: 
   });
   return response.data;
 };
+
+// ==================== Profile Version Management ====================
+
+export interface ProfileVersionDto {
+  id: string;
+  profileId: string;
+  versionNumber: number;
+  versionName: string;
+  sourceType: 'RESUME' | 'APPLIED_JOBS';
+  isActive: boolean;
+  createdAt: string;
+  generatedJobPost?: string; // Only included when fetching specific version
+}
+
+/**
+ * Get all versions for a profile
+ * If no versions exist, creates version 1 from current profile (lazy migration)
+ */
+export const getProfileVersions = async (profileId: string): Promise<ProfileVersionDto[]> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/versions`);
+  return response.data;
+};
+
+/**
+ * Get applied job count for a profile
+ * Used to enable/disable the 'Update from Applied Jobs' button (requires 3+)
+ */
+export const getAppliedJobCount = async (profileId: string): Promise<number> => {
+  const response = await jobSearchClient.get(`/job-search/profiles/${profileId}/applied-count`);
+  return response.data.count;
+};
+
+/**
+ * Generate new version from applied jobs
+ * Analyzes all applied jobs and uses LLM to synthesize common requirements
+ * Requires minimum 3 applied jobs
+ */
+export const generateFromAppliedJobs = async (
+  profileId: string,
+  versionName?: string
+): Promise<ProfileVersionDto> => {
+  const response = await jobSearchClient.post(`/job-search/profiles/${profileId}/versions/from-applied-jobs`, {
+    versionName
+  });
+  return response.data;
+};
+
+/**
+ * Switch to a specific version
+ * Loads the version's text into the profile's generatedJobPost field
+ * Note: This does NOT vectorize - user must click 'Save All Changes' to re-vectorize
+ */
+export const switchProfileVersion = async (
+  profileId: string,
+  versionNumber: number
+): Promise<ProfileVersionDto> => {
+  const response = await jobSearchClient.put(`/job-search/profiles/${profileId}/versions/${versionNumber}/activate`);
+  return response.data;
+};
+
+/**
+ * Delete a version
+ * Cannot delete the active version - switch first
+ * Cannot delete the only remaining version
+ */
+export const deleteProfileVersion = async (
+  profileId: string,
+  versionNumber: number
+): Promise<void> => {
+  await jobSearchClient.delete(`/job-search/profiles/${profileId}/versions/${versionNumber}`);
+};

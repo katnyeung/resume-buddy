@@ -6,9 +6,11 @@ import com.resumebuddy.model.JobQueueEntry.JobType;
 import com.resumebuddy.model.dto.EnqueueJobResponseDto;
 import com.resumebuddy.model.dto.JobQueueStatusDto;
 import com.resumebuddy.service.JobQueueService;
+import com.resumebuddy.service.RedisJobQueueService;
 import com.resumebuddy.service.UserCreditService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,11 +20,55 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/jobs")
 @Slf4j
-@RequiredArgsConstructor
 public class JobQueueController {
 
-    private final JobQueueService jobQueueService;
+    private final JobQueueService postgresQueueService;
+    private final RedisJobQueueService redisQueueService;
     private final ObjectMapper objectMapper;
+
+    @Value("${app.job-queue.storage:postgres}")
+    private String storageType;
+
+    public JobQueueController(
+        JobQueueService postgresQueueService,
+        @Autowired(required = false) RedisJobQueueService redisQueueService,
+        ObjectMapper objectMapper
+    ) {
+        this.postgresQueueService = postgresQueueService;
+        this.redisQueueService = redisQueueService;
+        this.objectMapper = objectMapper;
+    }
+
+    // Helper methods to abstract storage type
+    private JobQueueEntry enqueueJob(String userId, JobType jobType, Map<String, Object> params, Integer priority) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.enqueueJob(userId, jobType, params, priority)
+            : postgresQueueService.enqueueJob(userId, jobType, params, priority);
+    }
+
+    private java.util.Optional<JobQueueEntry> getJob(String jobId) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.getJob(jobId)
+            : postgresQueueService.getJob(jobId);
+    }
+
+    private int getQueuePosition(String jobId) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.getQueuePosition(jobId)
+            : postgresQueueService.getQueuePosition(jobId);
+    }
+
+    private java.util.Optional<JobQueueEntry> findActiveJobForExperience(String resumeId, String experienceId) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.findActiveJobForExperience(resumeId, experienceId)
+            : postgresQueueService.findActiveJobForExperience(resumeId, experienceId);
+    }
+
+    private java.util.Optional<JobQueueEntry> findActiveJobForResume(String resumeId) {
+        return "redis".equalsIgnoreCase(storageType) && redisQueueService != null
+            ? redisQueueService.findActiveJobForResume(resumeId)
+            : postgresQueueService.findActiveJobForResume(resumeId);
+    }
 
     /**
      * Enqueue resume analysis job
@@ -36,14 +82,14 @@ public class JobQueueController {
         try {
             Map<String, Object> params = Map.of("resumeId", resumeId);
 
-            JobQueueEntry job = jobQueueService.enqueueJob(userId, JobType.RESUME_ANALYSIS, params, priority);
+            JobQueueEntry job = enqueueJob(userId, JobType.RESUME_ANALYSIS, params, priority);
 
             EnqueueJobResponseDto response = new EnqueueJobResponseDto();
             response.setJobId(job.getId());
             response.setJobType(job.getJobType());
             response.setStatus(job.getStatus().name());
             response.setEstimatedCredits(job.getEstimatedCredits());
-            response.setQueuePosition(jobQueueService.getQueuePosition(job.getId()));
+            response.setQueuePosition(getQueuePosition(job.getId()));
             response.setMessage("Resume analysis queued successfully");
 
             return ResponseEntity.ok(response);
@@ -77,14 +123,14 @@ public class JobQueueController {
                 "experienceId", experienceId
             );
 
-            JobQueueEntry job = jobQueueService.enqueueJob(userId, JobType.JOB_EXPERIENCE_ANALYSIS, params, priority);
+            JobQueueEntry job = enqueueJob(userId, JobType.JOB_EXPERIENCE_ANALYSIS, params, priority);
 
             EnqueueJobResponseDto response = new EnqueueJobResponseDto();
             response.setJobId(job.getId());
             response.setJobType(job.getJobType());
             response.setStatus(job.getStatus().name());
             response.setEstimatedCredits(job.getEstimatedCredits());
-            response.setQueuePosition(jobQueueService.getQueuePosition(job.getId()));
+            response.setQueuePosition(getQueuePosition(job.getId()));
             response.setMessage("Job experience analysis queued successfully");
 
             return ResponseEntity.ok(response);
@@ -108,14 +154,14 @@ public class JobQueueController {
     @GetMapping("/{jobId}/status")
     public ResponseEntity<JobQueueStatusDto> getJobStatus(@PathVariable String jobId) {
         try {
-            JobQueueEntry job = jobQueueService.getJob(jobId)
+            JobQueueEntry job = getJob(jobId)
                 .orElseThrow(() -> new RuntimeException("Job not found: " + jobId));
 
             JobQueueStatusDto status = new JobQueueStatusDto();
             status.setJobId(job.getId());
             status.setJobType(job.getJobType());
             status.setStatus(job.getStatus());
-            status.setQueuePosition(jobQueueService.getQueuePosition(jobId));
+            status.setQueuePosition(getQueuePosition(jobId));
             status.setEstimatedCredits(job.getEstimatedCredits());
             status.setActualCreditsUsed(job.getActualCreditsUsed());
             status.setQueuedAt(job.getQueuedAt());
@@ -151,7 +197,7 @@ public class JobQueueController {
             @RequestParam String resumeId,
             @RequestParam String experienceId) {
         try {
-            return jobQueueService.findActiveJobForExperience(resumeId, experienceId)
+            return findActiveJobForExperience(resumeId, experienceId)
                 .map(job -> ResponseEntity.ok(Map.of("jobId", job.getId())))
                 .orElse(ResponseEntity.ok(Map.of()));
         } catch (Exception e) {
@@ -167,7 +213,7 @@ public class JobQueueController {
     public ResponseEntity<Map<String, String>> checkActiveResumeAnalysisJob(
             @PathVariable String resumeId) {
         try {
-            return jobQueueService.findActiveJobForResume(resumeId)
+            return findActiveJobForResume(resumeId)
                 .map(job -> ResponseEntity.ok(Map.of("jobId", job.getId())))
                 .orElse(ResponseEntity.ok(Map.of()));
         } catch (Exception e) {

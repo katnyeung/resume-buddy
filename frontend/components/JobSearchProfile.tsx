@@ -9,7 +9,13 @@ import {
   removeProfileSkill,
   updateProfileMetadata,
   updateJobPost,
-  updateSkillProficiency
+  updateSkillProficiency,
+  getProfileVersions,
+  getAppliedJobCount,
+  generateFromAppliedJobs,
+  switchProfileVersion,
+  deleteProfileVersion,
+  ProfileVersionDto
 } from '@/lib/api';
 
 interface JobSearchProfileProps {
@@ -22,6 +28,14 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
   const [editedJobPost, setEditedJobPost] = useState<string>('');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+
+  // Version management state
+  const [versions, setVersions] = useState<ProfileVersionDto[]>([]);
+  const [activeVersionNumber, setActiveVersionNumber] = useState<number>(1);
+  const [appliedCount, setAppliedCount] = useState<number>(0);
+  const [isGeneratingFromApplied, setIsGeneratingFromApplied] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [originalJobPost, setOriginalJobPost] = useState<string>('');
 
   // Collapse state with localStorage persistence
   const [isExpanded, setIsExpanded] = useState(() => {
@@ -73,6 +87,7 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
           .map((line: any) => line.lineContent)
           .join('\n');
         setEditedJobPost(reconstructedJobPost || '');
+        setOriginalJobPost(reconstructedJobPost || '');
 
         // Fetch skills
         const profileSkills = await getProfileSkills(profileId);
@@ -83,12 +98,29 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
           const keywords = profile.excludedKeywords.split(',').map((k: string) => k.trim()).filter((k: string) => k);
           setExcludedKeywords(keywords);
         }
+
+        // Load versions (lazy migration will create version 1 if none exist)
+        const profileVersions = await getProfileVersions(profileId);
+        setVersions(profileVersions);
+        const active = profileVersions.find(v => v.isActive);
+        if (active) {
+          setActiveVersionNumber(active.versionNumber);
+        }
+
+        // Load applied job count
+        const count = await getAppliedJobCount(profileId);
+        setAppliedCount(count);
       } catch (error) {
         console.error('Failed to load job search profile:', error);
       }
     };
     loadProfile();
   }, [profileId]);
+
+  // Track unsaved changes
+  useEffect(() => {
+    setHasUnsavedChanges(editedJobPost !== originalJobPost);
+  }, [editedJobPost, originalJobPost]);
 
 
   const handleAddSkill = async () => {
@@ -134,6 +166,82 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
     setExcludedKeywords(excludedKeywords.filter((_, i) => i !== index));
   };
 
+  // Version management handlers
+  const handleGenerateFromAppliedJobs = async () => {
+    if (appliedCount < 3) {
+      alert('You need at least 3 applied jobs to generate from applied jobs.');
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      const confirm = window.confirm('You have unsaved changes. They will be lost. Continue?');
+      if (!confirm) return;
+    }
+
+    setIsGeneratingFromApplied(true);
+    try {
+      const newVersion = await generateFromAppliedJobs(profileId);
+      // Refresh versions
+      const updatedVersions = await getProfileVersions(profileId);
+      setVersions(updatedVersions);
+      // Switch to the new version
+      await handleSwitchVersion(newVersion.versionNumber);
+    } catch (error) {
+      console.error('Failed to generate from applied jobs:', error);
+      alert('Failed to generate from applied jobs. Please try again.');
+    } finally {
+      setIsGeneratingFromApplied(false);
+    }
+  };
+
+  const handleSwitchVersion = async (versionNumber: number) => {
+    if (versionNumber === activeVersionNumber) return;
+
+    if (hasUnsavedChanges) {
+      const confirm = window.confirm('You have unsaved changes. They will be lost. Switch anyway?');
+      if (!confirm) return;
+    }
+
+    try {
+      const version = await switchProfileVersion(profileId, versionNumber);
+      setActiveVersionNumber(versionNumber);
+      setEditedJobPost(version.generatedJobPost || '');
+      setOriginalJobPost(version.generatedJobPost || '');
+      setHasUnsavedChanges(false);
+      // Update versions state
+      setVersions(versions.map(v => ({
+        ...v,
+        isActive: v.versionNumber === versionNumber
+      })));
+    } catch (error) {
+      console.error('Failed to switch version:', error);
+      alert('Failed to switch version. Please try again.');
+    }
+  };
+
+  const handleDeleteVersion = async (versionNumber: number) => {
+    if (versionNumber === activeVersionNumber) {
+      alert('Cannot delete the active version. Switch to another version first.');
+      return;
+    }
+
+    if (versions.length <= 1) {
+      alert('Cannot delete the only version.');
+      return;
+    }
+
+    const confirm = window.confirm(`Delete version ${versionNumber}? This cannot be undone.`);
+    if (!confirm) return;
+
+    try {
+      await deleteProfileVersion(profileId, versionNumber);
+      setVersions(versions.filter(v => v.versionNumber !== versionNumber));
+    } catch (error) {
+      console.error('Failed to delete version:', error);
+      alert('Failed to delete version. Please try again.');
+    }
+  };
+
   const handleSaveJobPost = async () => {
     if (!currentProfile || !editedJobPost.trim()) {
       return;
@@ -148,6 +256,8 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
       // 2. Update job post and regenerate vectors (includes excluded keywords)
       const updatedProfile = await updateJobPost(currentProfile.id, editedJobPost, excludedKeywords);
       setCurrentProfile(updatedProfile);
+      setOriginalJobPost(editedJobPost); // Reset unsaved changes tracking
+      setHasUnsavedChanges(false);
 
       // Show success indicator
       setSaveSuccess(true);
@@ -468,9 +578,56 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
           </svg>
           Mock Job Requirements (will split by line and vectorize on save)
         </label>
-        <p className="text-xs text-gray-500 mb-3">
+        <p className="text-xs text-gray-500 mb-2">
           Edit text freely. Each line (separated by newline) will be vectorized when you click "Save All Changes".
         </p>
+
+        {/* Version Tabs */}
+        {versions.length > 0 && (
+          <div className="flex items-center gap-1 mb-3 flex-wrap">
+            {versions.map((version) => (
+              <button
+                key={version.id}
+                onClick={() => handleSwitchVersion(version.versionNumber)}
+                disabled={isSaving || isGeneratingFromApplied}
+                className={`relative group px-3 py-1.5 text-xs font-medium rounded-t-lg border-t border-l border-r transition-colors ${
+                  version.versionNumber === activeVersionNumber
+                    ? 'bg-white text-green-700 border-gray-300 border-b-white -mb-px z-10'
+                    : 'bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-200'
+                }`}
+              >
+                <span className="flex items-center gap-1">
+                  {version.sourceType === 'APPLIED_JOBS' && (
+                    <svg className="w-3 h-3 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  )}
+                  {version.versionName}
+                  {version.versionNumber === activeVersionNumber && hasUnsavedChanges && (
+                    <span className="text-orange-500 ml-0.5">*</span>
+                  )}
+                </span>
+                {/* Delete button for non-active versions */}
+                {version.versionNumber !== activeVersionNumber && versions.length > 1 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteVersion(version.versionNumber);
+                    }}
+                    className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-4 h-4 bg-red-500 text-white rounded-full text-[10px] font-bold hover:bg-red-600"
+                    title="Delete this version"
+                  >
+                    ×
+                  </button>
+                )}
+              </button>
+            ))}
+            {/* Version count indicator */}
+            <span className="text-xs text-gray-400 ml-2">
+              {versions.length}/3 versions
+            </span>
+          </div>
+        )}
         <textarea
           value={editedJobPost}
           onChange={(e) => setEditedJobPost(e.target.value)}
@@ -544,6 +701,41 @@ export default function JobSearchProfile({ profileId, resumeId }: JobSearchProfi
               Saved
             </span>
           )}
+          {hasUnsavedChanges && (
+            <span className="text-orange-500 text-xs font-medium">
+              Unsaved changes
+            </span>
+          )}
+          {/* Update from Applied Jobs button */}
+          <button
+            onClick={handleGenerateFromAppliedJobs}
+            disabled={isSaving || isGeneratingFromApplied || appliedCount < 3 || versions.length >= 3}
+            title={
+              appliedCount < 3
+                ? `Requires at least 3 applied jobs (you have ${appliedCount})`
+                : versions.length >= 3
+                ? 'Maximum 3 versions reached. Delete one to add a new version.'
+                : `Generate requirements from ${appliedCount} applied jobs`
+            }
+            className="px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2 shadow-md"
+          >
+            {isGeneratingFromApplied ? (
+              <>
+                <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Generating...
+              </>
+            ) : (
+              <>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Update from Applied Jobs ({appliedCount})
+              </>
+            )}
+          </button>
           <button
             onClick={handleSaveJobPost}
             disabled={isSaving || !editedJobPost.trim()}
