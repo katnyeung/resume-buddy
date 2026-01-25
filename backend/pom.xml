@@ -120,6 +120,13 @@
             <version>25.13.0</version>
         </dependency>
 
+        <!-- Apache POI for DOCX generation -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+
         <!-- Redis for job queue -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

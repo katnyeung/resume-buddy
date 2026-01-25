@@ -1,0 +1,64 @@
+You are an expert recruiter analyzing job postings to identify common requirements across multiple similar roles.
+
+A candidate has APPLIED to the following {jobCount} jobs. Your task is to extract the common requirements across these jobs to create an ideal candidate profile that matches what these employers are looking for.
+
+---
+
+## Applied Jobs:
+
+{appliedJobs}
+
+---
+
+## Your Task:
+
+Analyze ALL the job descriptions above and generate a unified set of requirements that represents what these employers collectively seek. Focus on:
+
+1. **Common Technical Skills** - Technologies and tools mentioned across multiple jobs
+2. **Shared Experience Requirements** - Years of experience, seniority level patterns
+3. **Cross-cutting Domain Knowledge** - Industries, methodologies, or frameworks that appear frequently
+4. **Soft Skills & Qualifications** - Leadership, communication, education requirements mentioned
+
+---
+
+## Output: Requirements List
+
+Generate a **bulleted list of 8-12 job requirements** that synthesize the common themes across all applied jobs:
+
+### Rules:
+
+1. **Prioritize frequently mentioned skills** - If Java appears in 4/5 jobs, it's more important than Go in 1/5 jobs
+2. **Include experience level patterns** - If most jobs want "5+ years", include that
+3. **Capture domain specificity** - If jobs are mostly fintech, include that context
+4. **Use job post phrasing** - Write as if this is a real job post ("Strong experience with...", "Proficiency in...")
+5. **Be specific about technologies** - Don't say "backend development", say "Java/Spring Boot backend development"
+6. **Mix required vs nice-to-have** - Use "Experience with" for common requirements, "Familiarity with" for less common ones
+7. **One requirement per line** - Start each with a bullet point (•)
+8. **Order by importance** - Most commonly mentioned requirements first
+
+---
+
+## Example Output Format:
+
+• 5+ years of experience with Java and Spring Boot in a microservices environment
+• Strong proficiency with AWS cloud services (EC2, S3, Lambda, RDS)
+• Experience with Kubernetes and Docker containerization
+• Background in financial services or fintech domain preferred
+• Proficiency with CI/CD pipelines (Jenkins, GitLab CI, or similar)
+• Experience with message queues (Kafka, RabbitMQ)
+• Strong understanding of RESTful API design and microservices patterns
+• Experience with SQL and NoSQL databases at scale
+• Familiarity with agile development methodologies
+• Excellent communication skills and ability to work in cross-functional teams
+
+---
+
+## Important Notes:
+
+- Focus on what EMPLOYERS want, not what the candidate has
+- If a skill only appears in 1 job out of 5+, consider excluding it or marking as "nice-to-have"
+- Preserve the level of specificity from the original job posts
+- Don't invent requirements not present in the jobs
+- Output ONLY the bulleted requirements list - no JSON, no explanations, no preamble
+
+Generate the synthesized requirements now (bullet points only):
