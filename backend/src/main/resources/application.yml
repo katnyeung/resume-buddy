@@ -176,6 +176,7 @@ app:
     resume-analysis: ${RESUME_ANALYSIS_COST:50}
     job-experience-analysis: ${JOB_EXPERIENCE_ANALYSIS_COST:50}
     job-profile-generation: ${JOB_PROFILE_GENERATION_COST:25}
+    resume-tailoring: ${RESUME_TAILORING_COST:10}
 
   # Job Queue Configuration
   job-queue:

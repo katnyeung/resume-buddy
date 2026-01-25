@@ -590,3 +590,91 @@ export const deleteProfileVersion = async (
 ): Promise<void> => {
   await jobSearchClient.delete(`/job-search/profiles/${profileId}/versions/${versionNumber}`);
 };
+
+// ==================== Resume Tailoring ====================
+
+/**
+ * Get the cost for resume tailoring
+ */
+export const getTailoringCost = async (): Promise<{ cost: number }> => {
+  const response = await apiClient.get('/resumes/tailor/cost');
+  return response.data;
+};
+
+/**
+ * Tailor a resume for a specific job description
+ */
+export const tailorResume = async (
+  resumeId: string,
+  jobDescription: string,
+  guidelines?: string
+): Promise<any> => {
+  const response = await apiClient.post(`/resumes/${resumeId}/tailor`, {
+    jobDescription,
+    guidelines
+  });
+  return response.data;
+};
+
+/**
+ * Download a tailored resume as .docx
+ * Takes the already-generated tailored result (no LLM call, no credits)
+ */
+export const downloadTailoredResume = async (
+  resumeId: string,
+  tailoredResult: any
+): Promise<void> => {
+  const response = await apiClient.post(
+    `/resumes/${resumeId}/tailor/download`,
+    tailoredResult,
+    { responseType: 'blob' }
+  );
+
+  // Use LLM-suggested filename or fallback
+  let filename = tailoredResult.suggestedFilename;
+  if (!filename) {
+    filename = `tailored_resume_${resumeId.substring(0, 8)}`;
+  }
+  // Sanitize and add extension
+  filename = filename.replace(/[^a-zA-Z0-9_-]/g, '_') + '.docx';
+
+  // Create download link
+  const blob = new Blob([response.data], {
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+  });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
+/**
+ * Get tailored resume history for a specific resume
+ */
+export const getTailoredHistory = async (resumeId: string): Promise<any[]> => {
+  const response = await apiClient.get(`/resumes/${resumeId}/tailored`);
+  return response.data;
+};
+
+/**
+ * Get a specific saved tailored resume (no credits)
+ */
+export const getSavedTailoredResume = async (
+  resumeId: string,
+  tailoredId: string
+): Promise<any> => {
+  const response = await apiClient.get(`/resumes/${resumeId}/tailored/${tailoredId}`);
+  return response.data;
+};
+
+/**
+ * Get all tailored resumes for the current user
+ */
+export const getAllTailoredResumes = async (): Promise<any[]> => {
+  const response = await apiClient.get('/resumes/tailored/all');
+  return response.data;
+};
